@@ -65,26 +65,271 @@ Before any phase can be marked complete:
 
 ## Current State Summary
 
-**What EXISTS and WORKS:**
+**Overall Completion: ~60-70%**
+
+**What EXISTS and WORKS (✅):**
 - Go module initialized with all dependencies
 - SQLite database with 7 migrations (users, projects, tasks, dependencies, sessions, checkpoints, approvals)
-- BIP39 + Ed25519 + JWT authentication system
+- BIP39 + Ed25519 + JWT authentication system (core logic)
 - All 11 toolbelt clients (GitHub, Fly, Cloudflare, Neon, Upstash, Resend, BetterStack, Doppler, MoneyDevKit, Anthropic, fal.ai)
 - Task CRUD with state machine and dependency graph
 - Git worktree management (create, remove, list, status)
 - Priority queue scheduler (heap-based, max 25 parallel)
 - Echo API server with 13 endpoints
-- Session manager structure with budget tracking
+- Session manager with budget tracking
+- Ralph loop core logic (budget enforcement, completion detection, hat transitions)
 - 9 hat prompt templates
+- WebSocket hub infrastructure (`internal/api/websocket/`)
+- Hat transition validation (`internal/orchestrator/transitions.go`)
+- Frontend login page with BIP39 crypto
 
-**What is MISSING:**
-- Auth API endpoints (challenge/verify/refresh flow)
-- Project CRUD endpoints
-- Ralph loop (Claude SDK integration for actual task execution)
-- Hat transitions (logic to move between hats)
-- WebSocket server for real-time updates
-- GitHub bi-directional sync (task ↔ issue)
-- Frontend UI (only placeholder exists)
+**What is PARTIALLY DONE (⚠️):**
+- Auth API endpoints (exist but need verification)
+- Ralph loop execution (logic ready, never tested with real Anthropic API)
+- Session manager (structure exists, real execution untested)
+- Git PR creation (code exists, untested)
+
+**What is MISSING (❌):**
+- Project CRUD endpoints (DB ready, no API)
+- Approval endpoints (DB ready, no API)
+- Session control endpoints (pause/resume/cancel/logs)
+- GitHub bi-directional sync (`internal/github/sync.go`)
+- GitHub webhooks (`internal/github/webhooks.go`)
+- Natural language task parsing (`internal/task/parser.go`)
+- Frontend UI beyond login (dashboard, tasks, approvals, WebSocket client)
+- Integration tests
+- Real API testing with Anthropic
+
+---
+
+## E2E Gaps — PRIORITIZED ACTION LIST
+
+> **Ralph: Work through these in order. Each gap blocks end-to-end functionality.**
+
+### GAP 1: Frontend UI (CRITICAL — Blocks User Interaction)
+**Status:** 5% complete
+**Impact:** Users cannot interact with the system beyond login
+
+**What exists:**
+- Login page with passphrase input/generation
+- BIP39 crypto functions in `frontend/src/lib/crypto.ts`
+- Auth flow (challenge → sign → verify)
+- Zustand auth store in `frontend/src/stores/auth.ts`
+
+**What's missing:**
+```
+frontend/src/pages/Dashboard.tsx       — System status, active tasks, quick create
+frontend/src/pages/Tasks.tsx           — Task list with filters, real-time status
+frontend/src/pages/TaskDetail.tsx      — Full task info, logs, actions
+frontend/src/pages/Approvals.tsx       — Pending approvals, approve/reject
+frontend/src/pages/Projects.tsx        — Project management
+frontend/src/hooks/useWebSocket.ts     — Connect to /api/v1/ws, handle events
+frontend/src/components/TaskCard.tsx   — Task display component
+frontend/src/components/LogViewer.tsx  — Streaming session logs
+```
+
+**Done when:**
+- [ ] Dashboard shows running sessions and queue depth
+- [ ] Can create, view, and manage tasks
+- [ ] Real-time updates via WebSocket work
+- [ ] Can approve/reject from UI
+- [ ] `bun run build` succeeds
+
+---
+
+### GAP 2: Project CRUD Endpoints (HIGH — Blocks Project Setup)
+**Status:** 0% API, 100% DB
+**Impact:** No way to create/manage projects via API
+
+**What exists:**
+- `internal/db/projects.go` — Full CRUD operations
+- `internal/db/models.go` — Project struct defined
+
+**What's missing:**
+```
+internal/api/server.go — Add routes:
+  GET    /api/v1/projects              — List projects
+  POST   /api/v1/projects              — Create project
+  GET    /api/v1/projects/:id          — Get project
+  PUT    /api/v1/projects/:id          — Update project
+  DELETE /api/v1/projects/:id          — Delete project
+  POST   /api/v1/projects/:id/provision — Provision toolbelt services
+```
+
+**Done when:**
+- [ ] All 6 endpoints implemented
+- [ ] Can create project and see it in list
+- [ ] `go test ./internal/api/...` passes
+
+---
+
+### GAP 3: Approval Endpoints (HIGH — Blocks User Decision Points)
+**Status:** 0% API, 100% DB
+**Impact:** Users cannot act on approval requests
+
+**What exists:**
+- `internal/db/approvals.go` — Full CRUD operations
+- `internal/db/models.go` — Approval struct defined
+
+**What's missing:**
+```
+internal/api/server.go — Add routes:
+  GET    /api/v1/approvals             — List pending approvals
+  GET    /api/v1/approvals/:id         — Get approval details
+  POST   /api/v1/approvals/:id/approve — Approve request
+  POST   /api/v1/approvals/:id/reject  — Reject request
+```
+
+**Done when:**
+- [ ] All 4 endpoints implemented
+- [ ] Approval status updates in DB
+- [ ] WebSocket broadcasts approval events
+
+---
+
+### GAP 4: Session Control Endpoints (HIGH — Blocks Task Management)
+**Status:** 0%
+**Impact:** Cannot pause, resume, cancel tasks or view logs
+
+**What's missing:**
+```
+internal/api/server.go — Add routes:
+  POST   /api/v1/tasks/:id/pause       — Pause running session
+  POST   /api/v1/tasks/:id/resume      — Resume paused session
+  POST   /api/v1/tasks/:id/cancel      — Cancel task entirely
+  GET    /api/v1/tasks/:id/logs        — Stream session output (SSE or WS)
+
+  GET    /api/v1/sessions              — List all sessions
+  GET    /api/v1/sessions/:id          — Get session details
+  POST   /api/v1/sessions/:id/kill     — Force kill session
+```
+
+**Done when:**
+- [ ] Can pause/resume running tasks
+- [ ] Can view streaming logs
+- [ ] Session state persists across pause/resume
+
+---
+
+### GAP 5: GitHub Bi-directional Sync (MEDIUM — Blocks Issue Tracking)
+**Status:** 0%
+**Impact:** Tasks don't sync with GitHub issues
+
+**What exists:**
+- `internal/toolbelt/github.go` — GitHub API client with issue/PR operations
+
+**What's missing:**
+```
+internal/github/sync.go — Implement:
+  - SyncTaskToIssue(task) — Create/update GitHub issue from task
+  - SyncIssueToTask(issue) — Create/update task from GitHub issue
+  - OnTaskCreate → CreateIssue with label "dex:task"
+  - OnTaskStart → AddLabel "dex:in-progress"
+  - OnTaskComplete → CreatePR, CloseIssue
+  - OnIssueCreate → CreateTask with label "dex:external"
+  - OnIssueClose → MarkTaskComplete
+```
+
+**Done when:**
+- [ ] Creating task creates GitHub issue
+- [ ] Completing task creates PR
+- [ ] Task status reflected in issue labels
+
+---
+
+### GAP 6: GitHub Webhooks (MEDIUM — Blocks External Triggers)
+**Status:** 0%
+**Impact:** GitHub events don't trigger Dex actions
+
+**What's missing:**
+```
+internal/github/webhooks.go — Implement:
+  - WebhookHandler(c echo.Context) — Main handler
+  - VerifySignature(payload, sig) — HMAC verification
+  - HandleIssueEvent(event) — issues.opened, closed, edited
+  - HandlePREvent(event) — pull_request.opened, merged, closed
+  - HandleCheckEvent(event) — check_suite.completed
+
+internal/api/server.go — Add route:
+  POST   /api/v1/webhooks/github
+```
+
+**Done when:**
+- [ ] Webhook endpoint accepts GitHub events
+- [ ] Signature verification works
+- [ ] Issue events update task status
+- [ ] PR merge updates task status
+
+---
+
+### GAP 7: Natural Language Task Parsing (LOW — Nice to Have)
+**Status:** 0%
+**Impact:** Can only create structured tasks, not via conversation
+
+**What's missing:**
+```
+internal/task/parser.go — Implement:
+  - ParseNaturalLanguage(input string) (*TaskProposal, error)
+  - Use Anthropic API to extract:
+    - Title, description
+    - Type (epic, feature, bug, task, chore)
+    - Priority (1-5)
+    - Suggested autonomy level
+    - Required toolbelt services
+  - Return proposal for user confirmation
+```
+
+**Done when:**
+- [ ] Can POST natural language to `/api/v1/tasks/parse`
+- [ ] Returns structured proposal
+- [ ] User can confirm/modify before creation
+
+---
+
+### GAP 8: Real Anthropic API Testing (CRITICAL — Blocks Core Functionality)
+**Status:** 0%
+**Impact:** Ralph loop logic untested with real API
+
+**What exists:**
+- `internal/session/ralph.go` — Full loop logic (323 lines)
+- `internal/session/ralph_test.go` — Unit tests for budget/completion/transitions
+- `internal/toolbelt/anthropic.go` — API client
+
+**What's missing:**
+- Integration test with real API key
+- Verify response parsing works
+- Test hat transition detection in real responses
+- Test completion signal detection
+- Test budget enforcement with real token counts
+
+**Done when:**
+- [ ] Run one real session end-to-end
+- [ ] Session completes or transitions correctly
+- [ ] Logs captured and stored
+- [ ] Tokens/cost tracked accurately
+
+---
+
+### GAP 9: Test Coverage (LOW — Quality Improvement)
+**Status:** ~5% coverage
+**Impact:** Regressions possible, confidence low
+
+**What exists:**
+- `internal/session/ralph_test.go` — Only test file (385 lines, ~20 tests)
+
+**What's missing:**
+```
+internal/api/server_test.go      — API endpoint tests
+internal/db/sqlite_test.go       — Database operation tests
+internal/auth/auth_test.go       — Auth system tests
+internal/git/git_test.go         — Git operation tests
+internal/task/task_test.go       — Task service tests
+frontend/src/**/*.test.tsx       — Frontend component tests
+```
+
+**Done when:**
+- [ ] `go test ./...` covers major paths
+- [ ] Critical paths have tests (auth, task state, session lifecycle)
 
 ---
 
@@ -238,98 +483,59 @@ Before any phase can be marked complete:
 
 ---
 
-## Phase 5: Session Management [~40% COMPLETE — CRITICAL GAP]
+## Phase 5: Session Management [~80% COMPLETE — NEEDS REAL TESTING]
 
 This is the **core orchestration layer** that makes Poindexter actually work.
 
 ### Checkpoint 5.1: Claude SDK Integration
-- [ ] **MISSING: `internal/session/sdk.go`** — Need to implement:
-  - Wrapper around Claude Agent SDK (TypeScript) or direct API
-  - StartSession(worktreePath, hatPrompt) → sessionHandle
-  - SendMessage(sessionHandle, message) → response
-  - StopSession(sessionHandle)
-  - GetSessionState(sessionHandle) → (running/stopped/error)
+- [x] `internal/toolbelt/anthropic.go`: Chat() method implemented
+- [x] Direct API integration (no SDK wrapper needed)
+- [ ] **NEEDS: Real API testing** — Logic exists, never tested with live API
 
 ### Checkpoint 5.2: Hat Prompt Loading
 - [x] `internal/session/prompts.go`: LoadAll(), GetPrompt(hat)
 - [x] 9 hat templates exist in `prompts/hats/`
-- [ ] **MISSING: Template variable injection** — Need to inject:
-  - Task context (title, description, dependencies)
-  - Worktree path
-  - Toolbelt available services
-  - Completion criteria
+- [x] Template variable injection via buildPrompt() in ralph.go
 
 ### Checkpoint 5.3: Ralph Loop — THE CORE
-- [ ] **MISSING: `internal/session/ralph.go`** — This is the heart of Poindexter:
+- [x] **IMPLEMENTED: `internal/session/ralph.go`** (323 lines) — Contains:
 
 ```go
-// The Ralph loop: iterate until complete or budget exceeded
-func (m *Manager) RunRalphLoop(ctx context.Context, session *Session) error {
-    for {
-        // 1. Check budget (tokens, time, dollars)
-        if session.ExceedsBudget() {
-            return m.PauseForApproval(session, "budget_exceeded")
-        }
-
-        // 2. Load fresh context (disk is state)
-        prompt := m.buildPrompt(session)
-
-        // 3. Send to Claude
-        response, err := m.sdk.SendMessage(session.Handle, prompt)
-        if err != nil {
-            return m.handleError(session, err)
-        }
-
-        // 4. Check for completion signal
-        if m.detectCompletion(response) {
-            return m.completeSession(session)
-        }
-
-        // 5. Check for hat transition
-        if nextHat := m.detectHatTransition(response); nextHat != "" {
-            return m.transitionHat(session, nextHat)
-        }
-
-        // 6. Increment iteration, checkpoint if needed
-        session.IterationCount++
-        if session.IterationCount % 5 == 0 {
-            m.checkpoint(session)
-        }
-
-        // 7. Check iteration limit
-        if session.IterationCount >= session.MaxIterations {
-            return m.PauseForApproval(session, "iteration_limit")
-        }
-    }
-}
+// ALREADY IMPLEMENTED in internal/session/ralph.go
+// - Budget checking (tokens, time, dollars, iterations)
+// - Prompt building with task context
+// - Completion detection (TASK_COMPLETE, HAT_COMPLETE)
+// - Hat transition detection (HAT_TRANSITION:next_hat)
+// - Checkpointing every 5 iterations
+// - WebSocket event broadcasting
 ```
 
-**Completion Detection:**
-- Look for `TASK_COMPLETE` or `HAT_COMPLETE` in response
-- Verify backpressure gates pass (tests, lint, build)
-- Only then transition or complete
+**Completion Detection (IMPLEMENTED):**
+- [x] Detects `TASK_COMPLETE` or `HAT_COMPLETE` in response
+- [x] Detects `HAT_TRANSITION:hat_name` format
+- [x] Budget enforcement (tokens, dollars, iterations, time)
 
 ### Checkpoint 5.4: Checkpointing
 - [x] Database table exists (session_checkpoints)
-- [ ] **MISSING: Checkpoint creation/restore logic**
-  - Save: iteration count, Claude session ID, last response
-  - Restore: Resume from checkpoint on restart
+- [x] Checkpoint creation in ralph.go (every 5 iterations)
+- [x] Manager loads checkpoints on restart
 
 ### Checkpoint 5.5: Hat Transitions
-- [ ] **MISSING: `internal/orchestrator/transitions.go`** — Need to implement:
-  - Planner → spawns child tasks with appropriate hats
-  - Architect → Implementer (when design complete)
-  - Implementer → Reviewer (when code + tests written)
-  - Reviewer → Implementer (if changes requested) OR Complete
-  - Respect autonomy levels for approvals
+- [x] **IMPLEMENTED: `internal/orchestrator/transitions.go`** — Contains:
+  - HatTransitions map with valid transitions
+  - ValidateTransition() function
+  - All 9 hats defined with allowed transitions
+  - Terminal hats identified (documenter, devops, conflict_manager)
 
-**Phase 5 DONE when:**
+**Phase 5 Status:**
 ```
-[ ] Can start a session and watch it iterate
-[ ] Session detects completion and stops
-[ ] Hat transitions work (Implementer → Reviewer → Complete)
-[ ] Budget limits pause and ask for approval
-[ ] go test ./internal/session/... passes
+[x] Ralph loop core logic implemented
+[x] Budget enforcement works
+[x] Completion detection works
+[x] Hat transition validation works
+[x] Checkpointing infrastructure exists
+[ ] NEEDS: Real API testing with Anthropic
+[ ] NEEDS: Integration test end-to-end
 ```
 
 ---
@@ -377,31 +583,31 @@ func (m *Manager) RunRalphLoop(ctx context.Context, session *Session) error {
 
 ---
 
-## Phase 7: Mobile-First Frontend [~5% COMPLETE — NEEDS REBUILD]
+## Phase 7: Mobile-First Frontend [~15% COMPLETE — NEEDS UI PAGES]
 
-The frontend is currently just a placeholder. Needs complete implementation.
+Login flow works. Dashboard and task management pages needed.
 
 ### Checkpoint 7.1: Core Setup
 - [x] Vite + React + TypeScript scaffold
 - [x] Tailwind configured
-- [ ] **MISSING: State management** — Add Zustand
-- [ ] **MISSING: API client** — Add TanStack Query
-- [ ] **MISSING: WebSocket client** — Add Socket.io or native WS
+- [x] Zustand installed and used for auth store
+- [x] API client in `frontend/src/lib/api.ts`
+- [ ] **NEEDS: WebSocket client hook** — `useWebSocket.ts` exists but incomplete
 
 ### Checkpoint 7.2: WebSocket Server (Backend)
-- [ ] **MISSING: `internal/api/websocket/hub.go`** — Need to implement:
-  - WebSocket endpoint: `WS /api/v1/ws`
-  - Broadcast events: task.created, task.updated, task.completed
-  - Broadcast events: session.started, session.iteration, session.completed
-  - Broadcast events: approval.required
-  - Client subscription by task/project
+- [x] **IMPLEMENTED: `internal/api/websocket/`** — Contains:
+  - `hub.go` — Client management, broadcasting
+  - `handler.go` — WebSocket upgrade, message handling
+  - Endpoint: `WS /api/v1/ws`
+  - Events: task.*, session.*, approval.*
+  - Client subscription support
 
 ### Checkpoint 7.3: Auth Flow (Frontend)
-- [ ] **MISSING: Login page**
-  - Display passphrase (first time) or input passphrase (returning)
-  - Sign challenge with Ed25519
-  - Store JWT in localStorage
-  - Auto-refresh before expiry
+- [x] **IMPLEMENTED: Login page**
+  - Generate or input passphrase
+  - BIP39 validation in `frontend/src/lib/crypto.ts`
+  - Ed25519 signing
+  - JWT stored in localStorage via Zustand
 
 ### Checkpoint 7.4: Dashboard
 - [ ] **MISSING: Dashboard page**
@@ -573,20 +779,48 @@ internal/task/parser.go             — NL parsing
 
 ## Priority Order for Remaining Work
 
-**Critical Path (enables core functionality):**
+> **Ralph: This is your work queue. Complete in order.**
 
-1. **Auth endpoints** — Can't use the app without login
-2. **WebSocket server** — Can't have real-time updates without it
-3. **Ralph loop + SDK** — Can't execute tasks without this
-4. **Hat transitions** — Can't complete multi-step workflows without this
-5. **Frontend rebuild** — Can't interact without UI
+### TIER 1: Critical Path (Must complete for MVP)
 
-**Important but not blocking:**
+| # | Gap | Effort | Why Critical |
+|---|-----|--------|--------------|
+| 1 | **Frontend UI** | Large | Users can't interact without it |
+| 2 | **Project CRUD endpoints** | Small | Can't set up projects |
+| 3 | **Approval endpoints** | Small | Can't respond to system requests |
+| 4 | **Session control endpoints** | Medium | Can't manage running tasks |
+| 5 | **Real Anthropic API test** | Small | Must verify Ralph loop works |
 
-6. GitHub sync — Nice for issue tracking
-7. Project CRUD — Can work with tasks directly for now
-8. NL parsing — Can create structured tasks manually
-9. Conflict detection — Manual merge for now
+### TIER 2: Important (Needed for full functionality)
+
+| # | Gap | Effort | Why Important |
+|---|-----|--------|---------------|
+| 6 | **GitHub sync** | Medium | Enables issue tracking integration |
+| 7 | **GitHub webhooks** | Medium | Enables external triggers |
+
+### TIER 3: Nice to Have (Polish)
+
+| # | Gap | Effort | Why Nice |
+|---|-----|--------|----------|
+| 8 | **NL task parsing** | Medium | Convenience, can create structured tasks manually |
+| 9 | **Test coverage** | Large | Quality, can ship without |
+
+### Recommended Attack Order
+
+```
+1. Project CRUD endpoints      (2 hours) → Unlocks project management
+2. Approval endpoints          (2 hours) → Unlocks user decisions
+3. Session control endpoints   (3 hours) → Unlocks task control
+4. Real Anthropic API test     (1 hour)  → Validates core works
+5. Frontend Dashboard          (4 hours) → Basic visibility
+6. Frontend Task Management    (4 hours) → Full task control
+7. Frontend WebSocket client   (2 hours) → Real-time updates
+8. Frontend Approvals page     (2 hours) → Complete user flow
+9. GitHub sync                 (4 hours) → Issue integration
+10. GitHub webhooks            (3 hours) → External triggers
+```
+
+**Total estimated: ~27 hours of focused work**
 
 ---
 
@@ -622,7 +856,7 @@ fal:
 
 ---
 
-## Notes for Claude
+## Notes for Ralph
 
 **Fresh context each iteration:** Re-read this file. Don't rely on conversation memory.
 
@@ -634,4 +868,70 @@ fal:
 
 **Evidence required:** Before marking anything complete, show that `go test` and `go build` pass.
 
-**Priority:** Phase 5 (Session Management / Ralph Loop) is the critical missing piece. The infrastructure exists; the orchestration doesn't.
+---
+
+## Ralph Quick Reference
+
+### What's Actually Working (Don't Rebuild)
+```
+✅ Auth system (internal/auth/) — BIP39, Ed25519, JWT all working
+✅ Database (internal/db/) — All tables, migrations, CRUD working
+✅ Toolbelt (internal/toolbelt/) — All 11 clients implemented
+✅ Task system (internal/task/) — State machine, graph, service working
+✅ Git (internal/git/) — Worktrees, operations working
+✅ Scheduler (internal/orchestrator/scheduler.go) — Priority queue working
+✅ Ralph loop (internal/session/ralph.go) — Core logic done, needs real testing
+✅ WebSocket hub (internal/api/websocket/) — Infrastructure exists
+✅ Hat transitions (internal/orchestrator/transitions.go) — Validation exists
+```
+
+### What Needs API Wiring (DB Ready, Just Add Routes)
+```
+⚠️ Projects — internal/db/projects.go exists, add routes to server.go
+⚠️ Approvals — internal/db/approvals.go exists, add routes to server.go
+⚠️ Sessions — internal/db/sessions.go exists, add routes to server.go
+```
+
+### What Needs Implementation
+```
+❌ internal/github/sync.go — Task ↔ Issue sync
+❌ internal/github/webhooks.go — GitHub webhook handler
+❌ internal/task/parser.go — Natural language parsing
+❌ frontend/src/pages/*.tsx — All UI pages beyond login
+❌ frontend/src/hooks/useWebSocket.ts — WebSocket client
+```
+
+### Quick Validation Commands
+```bash
+go build ./cmd/dex                    # Must pass
+go test ./...                         # Must pass
+cd frontend && bun run build          # Must pass
+```
+
+### Starting the Server
+```bash
+go run ./cmd/dex -db dex.db -addr :8080 -static ./frontend/dist -toolbelt toolbelt.yaml
+```
+
+### Current API That Works
+```
+GET  /api/v1/system/status
+GET  /api/v1/toolbelt/status
+POST /api/v1/toolbelt/test
+GET  /api/v1/tasks
+POST /api/v1/tasks
+GET  /api/v1/tasks/:id
+PUT  /api/v1/tasks/:id
+DELETE /api/v1/tasks/:id
+POST /api/v1/tasks/:id/start
+GET  /api/v1/tasks/:id/worktree/status
+GET  /api/v1/worktrees
+DELETE /api/v1/worktrees/:task_id
+POST /api/v1/auth/challenge
+POST /api/v1/auth/verify
+WS   /api/v1/ws
+```
+
+---
+
+**Priority Update (January 2025):** The Ralph loop core is implemented but untested with real API. Frontend is the biggest gap — without it, users cannot interact with the system. Focus on: (1) wiring up missing endpoints, (2) building frontend UI, (3) testing with real Anthropic API.

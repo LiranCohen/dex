@@ -59,6 +59,24 @@ export interface Session {
 
 export type SessionStatus = 'pending' | 'running' | 'paused' | 'completed' | 'failed';
 
+export interface Approval {
+  id: string;
+  task_id?: string;
+  session_id?: string;
+  type: string;  // 'commit' | 'hat_transition' | 'pr' | 'merge' | 'conflict_resolution'
+  title: string;
+  description?: string;
+  data?: unknown;
+  status: 'pending' | 'approved' | 'rejected';
+  created_at: string;
+  resolved_at?: string;
+}
+
+export interface ApprovalsResponse {
+  approvals: Approval[];
+  count: number;
+}
+
 export interface SystemStatus {
   status: 'healthy' | 'unhealthy';
   timestamp: string;

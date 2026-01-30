@@ -4,8 +4,10 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -159,6 +161,30 @@ func (s *Server) registerRoutes() {
 	// Worktree endpoints (public for now)
 	v1.GET("/worktrees", s.handleListWorktrees)
 	v1.DELETE("/worktrees/:task_id", s.handleDeleteWorktree)
+
+	// Project endpoints (public for now, will add auth later)
+	v1.GET("/projects", s.handleListProjects)
+	v1.POST("/projects", s.handleCreateProject)
+	v1.GET("/projects/:id", s.handleGetProject)
+	v1.PUT("/projects/:id", s.handleUpdateProject)
+	v1.DELETE("/projects/:id", s.handleDeleteProject)
+
+	// Approval endpoints (public for now, will add auth later)
+	v1.GET("/approvals", s.handleListApprovals)
+	v1.GET("/approvals/:id", s.handleGetApproval)
+	v1.POST("/approvals/:id/approve", s.handleApproveApproval)
+	v1.POST("/approvals/:id/reject", s.handleRejectApproval)
+
+	// Session control endpoints
+	v1.POST("/tasks/:id/pause", s.handlePauseTask)
+	v1.POST("/tasks/:id/resume", s.handleResumeTask)
+	v1.POST("/tasks/:id/cancel", s.handleCancelTask)
+	v1.GET("/tasks/:id/logs", s.handleTaskLogs)
+
+	// Session management endpoints
+	v1.GET("/sessions", s.handleListSessions)
+	v1.GET("/sessions/:id", s.handleGetSession)
+	v1.POST("/sessions/:id/kill", s.handleKillSession)
 
 	// WebSocket endpoint for real-time updates
 	v1.GET("/ws", func(c echo.Context) error {
@@ -596,6 +622,514 @@ func (s *Server) handleDeleteWorktree(c echo.Context) error {
 	}
 
 	return c.NoContent(http.StatusNoContent)
+}
+
+// handleListProjects returns all projects
+func (s *Server) handleListProjects(c echo.Context) error {
+	projects, err := s.db.ListProjects()
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+
+	return c.JSON(http.StatusOK, map[string]any{
+		"projects": projects,
+		"count":    len(projects),
+	})
+}
+
+// handleCreateProject creates a new project
+func (s *Server) handleCreateProject(c echo.Context) error {
+	var req struct {
+		Name     string `json:"name"`
+		RepoPath string `json:"repo_path"`
+	}
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
+	}
+
+	if req.Name == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "name is required")
+	}
+	if req.RepoPath == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "repo_path is required")
+	}
+
+	project, err := s.db.CreateProject(req.Name, req.RepoPath)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+
+	return c.JSON(http.StatusCreated, project)
+}
+
+// handleGetProject returns a single project by ID
+func (s *Server) handleGetProject(c echo.Context) error {
+	id := c.Param("id")
+
+	project, err := s.db.GetProjectByID(id)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	if project == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "project not found")
+	}
+
+	return c.JSON(http.StatusOK, project)
+}
+
+// handleUpdateProject updates a project
+func (s *Server) handleUpdateProject(c echo.Context) error {
+	id := c.Param("id")
+
+	// First fetch the existing project to get current values
+	existing, err := s.db.GetProjectByID(id)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	if existing == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "project not found")
+	}
+
+	var req struct {
+		Name          *string             `json:"name"`
+		RepoPath      *string             `json:"repo_path"`
+		DefaultBranch *string             `json:"default_branch"`
+		GitHubOwner   *string             `json:"github_owner"`
+		GitHubRepo    *string             `json:"github_repo"`
+		Services      *db.ProjectServices `json:"services"`
+	}
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
+	}
+
+	// Update basic fields (use existing values if not provided)
+	name := existing.Name
+	if req.Name != nil {
+		name = *req.Name
+	}
+	repoPath := existing.RepoPath
+	if req.RepoPath != nil {
+		repoPath = *req.RepoPath
+	}
+	defaultBranch := existing.DefaultBranch
+	if req.DefaultBranch != nil {
+		defaultBranch = *req.DefaultBranch
+	}
+
+	if err := s.db.UpdateProject(id, name, repoPath, defaultBranch); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+
+	// Update GitHub info if provided
+	if req.GitHubOwner != nil || req.GitHubRepo != nil {
+		owner := ""
+		repo := ""
+		if existing.GitHubOwner.Valid {
+			owner = existing.GitHubOwner.String
+		}
+		if existing.GitHubRepo.Valid {
+			repo = existing.GitHubRepo.String
+		}
+		if req.GitHubOwner != nil {
+			owner = *req.GitHubOwner
+		}
+		if req.GitHubRepo != nil {
+			repo = *req.GitHubRepo
+		}
+		if err := s.db.UpdateProjectGitHub(id, owner, repo); err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		}
+	}
+
+	// Update services if provided
+	if req.Services != nil {
+		if err := s.db.UpdateProjectServices(id, *req.Services); err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		}
+	}
+
+	// Return updated project
+	updated, err := s.db.GetProjectByID(id)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+
+	return c.JSON(http.StatusOK, updated)
+}
+
+// handleDeleteProject removes a project
+func (s *Server) handleDeleteProject(c echo.Context) error {
+	id := c.Param("id")
+
+	if err := s.db.DeleteProject(id); err != nil {
+		return echo.NewHTTPError(http.StatusNotFound, err.Error())
+	}
+
+	return c.NoContent(http.StatusNoContent)
+}
+
+// ApprovalResponse is the JSON response format for approvals
+type ApprovalResponse struct {
+	ID          string          `json:"id"`
+	TaskID      *string         `json:"task_id,omitempty"`
+	SessionID   *string         `json:"session_id,omitempty"`
+	Type        string          `json:"type"`
+	Title       string          `json:"title"`
+	Description *string         `json:"description,omitempty"`
+	Data        json.RawMessage `json:"data,omitempty"`
+	Status      string          `json:"status"`
+	CreatedAt   time.Time       `json:"created_at"`
+	ResolvedAt  *time.Time      `json:"resolved_at,omitempty"`
+}
+
+// toApprovalResponse converts a db.Approval to ApprovalResponse for clean JSON
+func toApprovalResponse(a *db.Approval) ApprovalResponse {
+	resp := ApprovalResponse{
+		ID:        a.ID,
+		Type:      a.Type,
+		Title:     a.Title,
+		Data:      a.Data,
+		Status:    a.Status,
+		CreatedAt: a.CreatedAt,
+	}
+	if a.TaskID.Valid {
+		resp.TaskID = &a.TaskID.String
+	}
+	if a.SessionID.Valid {
+		resp.SessionID = &a.SessionID.String
+	}
+	if a.Description.Valid {
+		resp.Description = &a.Description.String
+	}
+	if a.ResolvedAt.Valid {
+		resp.ResolvedAt = &a.ResolvedAt.Time
+	}
+	return resp
+}
+
+// SessionResponse is the JSON response format for sessions
+type SessionResponse struct {
+	ID             string   `json:"id"`
+	TaskID         string   `json:"task_id"`
+	Hat            string   `json:"hat"`
+	State          string   `json:"state"`
+	WorktreePath   string   `json:"worktree_path"`
+	IterationCount int      `json:"iteration_count"`
+	MaxIterations  int      `json:"max_iterations"`
+	TokensUsed     int64    `json:"tokens_used"`
+	TokensBudget   *int64   `json:"tokens_budget,omitempty"`
+	DollarsUsed    float64  `json:"dollars_used"`
+	DollarsBudget  *float64 `json:"dollars_budget,omitempty"`
+	StartedAt      string   `json:"started_at,omitempty"`
+	LastActivity   string   `json:"last_activity,omitempty"`
+}
+
+// toSessionResponse converts an ActiveSession to SessionResponse for clean JSON
+func toSessionResponse(s *session.ActiveSession) SessionResponse {
+	resp := SessionResponse{
+		ID:             s.ID,
+		TaskID:         s.TaskID,
+		Hat:            s.Hat,
+		State:          string(s.State),
+		WorktreePath:   s.WorktreePath,
+		IterationCount: s.IterationCount,
+		MaxIterations:  s.MaxIterations,
+		TokensUsed:     s.TokensUsed,
+		TokensBudget:   s.TokensBudget,
+		DollarsUsed:    s.DollarsUsed,
+		DollarsBudget:  s.DollarsBudget,
+	}
+	if !s.StartedAt.IsZero() {
+		resp.StartedAt = s.StartedAt.Format(time.RFC3339)
+	}
+	if !s.LastActivity.IsZero() {
+		resp.LastActivity = s.LastActivity.Format(time.RFC3339)
+	}
+	return resp
+}
+
+// handleListApprovals returns approvals with optional filters
+func (s *Server) handleListApprovals(c echo.Context) error {
+	status := c.QueryParam("status")
+	taskID := c.QueryParam("task_id")
+
+	var approvals []*db.Approval
+	var err error
+
+	switch {
+	case taskID != "":
+		approvals, err = s.db.ListApprovalsByTask(taskID)
+	case status != "":
+		approvals, err = s.db.ListApprovalsByStatus(status)
+	default:
+		approvals, err = s.db.ListPendingApprovals()
+	}
+
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+
+	// Convert to response format
+	responses := make([]ApprovalResponse, len(approvals))
+	for i, a := range approvals {
+		responses[i] = toApprovalResponse(a)
+	}
+
+	return c.JSON(http.StatusOK, map[string]any{
+		"approvals": responses,
+		"count":     len(responses),
+	})
+}
+
+// handleGetApproval returns a single approval by ID
+func (s *Server) handleGetApproval(c echo.Context) error {
+	id := c.Param("id")
+
+	approval, err := s.db.GetApprovalByID(id)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	if approval == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "approval not found")
+	}
+
+	return c.JSON(http.StatusOK, toApprovalResponse(approval))
+}
+
+// handleApproveApproval marks an approval as approved
+func (s *Server) handleApproveApproval(c echo.Context) error {
+	id := c.Param("id")
+
+	if err := s.db.ApproveApproval(id); err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			return echo.NewHTTPError(http.StatusNotFound, "approval not found")
+		}
+		if strings.Contains(err.Error(), "already resolved") {
+			return echo.NewHTTPError(http.StatusConflict, err.Error())
+		}
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+
+	// Broadcast WebSocket event
+	s.hub.Broadcast(websocket.Message{
+		Type: "approval.resolved",
+		Payload: map[string]any{
+			"id":     id,
+			"status": "approved",
+		},
+	})
+
+	return c.JSON(http.StatusOK, map[string]any{
+		"message": "approval approved",
+		"id":      id,
+	})
+}
+
+// handleRejectApproval marks an approval as rejected
+func (s *Server) handleRejectApproval(c echo.Context) error {
+	id := c.Param("id")
+
+	if err := s.db.RejectApproval(id); err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			return echo.NewHTTPError(http.StatusNotFound, "approval not found")
+		}
+		if strings.Contains(err.Error(), "already resolved") {
+			return echo.NewHTTPError(http.StatusConflict, err.Error())
+		}
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+
+	// Broadcast WebSocket event
+	s.hub.Broadcast(websocket.Message{
+		Type: "approval.resolved",
+		Payload: map[string]any{
+			"id":     id,
+			"status": "rejected",
+		},
+	})
+
+	return c.JSON(http.StatusOK, map[string]any{
+		"message": "approval rejected",
+		"id":      id,
+	})
+}
+
+// handlePauseTask pauses the running session for a task
+func (s *Server) handlePauseTask(c echo.Context) error {
+	taskID := c.Param("id")
+
+	// Find the session for this task
+	sess := s.sessionManager.GetByTask(taskID)
+	if sess == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "no active session for task")
+	}
+
+	// Pause the session
+	if err := s.sessionManager.Pause(sess.ID); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+
+	// Broadcast WebSocket event
+	s.hub.Broadcast(websocket.Message{
+		Type: "task.paused",
+		Payload: map[string]any{
+			"task_id":    taskID,
+			"session_id": sess.ID,
+		},
+	})
+
+	return c.JSON(http.StatusOK, map[string]any{
+		"message": "task paused",
+		"task_id": taskID,
+	})
+}
+
+// handleResumeTask resumes a paused session for a task
+func (s *Server) handleResumeTask(c echo.Context) error {
+	taskID := c.Param("id")
+
+	// Find the session for this task
+	sess := s.sessionManager.GetByTask(taskID)
+	if sess == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "no active session for task")
+	}
+
+	// Check that session is paused
+	if sess.State != session.StatePaused {
+		return echo.NewHTTPError(http.StatusBadRequest, "session is not paused")
+	}
+
+	// Resume by starting the session again
+	if err := s.sessionManager.Start(c.Request().Context(), sess.ID); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+
+	// Broadcast WebSocket event
+	s.hub.Broadcast(websocket.Message{
+		Type: "task.resumed",
+		Payload: map[string]any{
+			"task_id":    taskID,
+			"session_id": sess.ID,
+		},
+	})
+
+	return c.JSON(http.StatusOK, map[string]any{
+		"message": "task resumed",
+		"task_id": taskID,
+	})
+}
+
+// handleCancelTask cancels a task and its session
+func (s *Server) handleCancelTask(c echo.Context) error {
+	taskID := c.Param("id")
+
+	// Find the session for this task
+	sess := s.sessionManager.GetByTask(taskID)
+	if sess == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "no active session for task")
+	}
+
+	// Stop the session
+	if err := s.sessionManager.Stop(sess.ID); err != nil {
+		// Session might not be running, but we still want to cancel the task
+		// Log the error but continue
+		fmt.Printf("warning: failed to stop session %s: %v\n", sess.ID, err)
+	}
+
+	// Update task status to cancelled
+	if err := s.taskService.UpdateStatus(taskID, "cancelled"); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+
+	// Broadcast WebSocket event
+	s.hub.Broadcast(websocket.Message{
+		Type: "task.cancelled",
+		Payload: map[string]any{
+			"task_id":    taskID,
+			"session_id": sess.ID,
+		},
+	})
+
+	return c.JSON(http.StatusOK, map[string]any{
+		"message": "task cancelled",
+		"task_id": taskID,
+	})
+}
+
+// handleTaskLogs returns logs for a task's session (placeholder for now)
+func (s *Server) handleTaskLogs(c echo.Context) error {
+	taskID := c.Param("id")
+
+	// Verify task exists
+	_, err := s.taskService.Get(taskID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusNotFound, err.Error())
+	}
+
+	// Placeholder response - real implementation will need session log storage
+	return c.JSON(http.StatusOK, map[string]any{
+		"logs":    []any{},
+		"message": "log streaming not yet implemented",
+		"task_id": taskID,
+	})
+}
+
+// handleListSessions returns all active sessions
+func (s *Server) handleListSessions(c echo.Context) error {
+	sessions := s.sessionManager.List()
+
+	// Convert to response format
+	responses := make([]SessionResponse, len(sessions))
+	for i, sess := range sessions {
+		responses[i] = toSessionResponse(sess)
+	}
+
+	return c.JSON(http.StatusOK, map[string]any{
+		"sessions": responses,
+		"count":    len(responses),
+	})
+}
+
+// handleGetSession returns a single session by ID
+func (s *Server) handleGetSession(c echo.Context) error {
+	sessionID := c.Param("id")
+
+	sess := s.sessionManager.Get(sessionID)
+	if sess == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "session not found")
+	}
+
+	return c.JSON(http.StatusOK, toSessionResponse(sess))
+}
+
+// handleKillSession forcefully stops a session
+func (s *Server) handleKillSession(c echo.Context) error {
+	sessionID := c.Param("id")
+
+	// Verify session exists
+	sess := s.sessionManager.Get(sessionID)
+	if sess == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "session not found")
+	}
+
+	// Stop the session
+	if err := s.sessionManager.Stop(sessionID); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+
+	// Broadcast WebSocket event
+	s.hub.Broadcast(websocket.Message{
+		Type: "session.killed",
+		Payload: map[string]any{
+			"session_id": sessionID,
+			"task_id":    sess.TaskID,
+		},
+	})
+
+	return c.JSON(http.StatusOK, map[string]any{
+		"message":    "session killed",
+		"session_id": sessionID,
+	})
 }
 
 // setupStaticServing configures static file serving for the frontend SPA

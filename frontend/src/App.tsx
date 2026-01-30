@@ -1,9 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Routes, Route, Navigate, useNavigate, useParams, Link } from 'react-router-dom';
 import { useAuthStore } from './stores/auth';
-import { api } from './lib/api';
+import { api, fetchApprovals, approveApproval, rejectApproval } from './lib/api';
 import { useWebSocket } from './hooks/useWebSocket';
-import type { Task, TasksResponse, SystemStatus, TaskStatus, WebSocketEvent, SessionEvent } from './lib/types';
+import type { Task, TasksResponse, SystemStatus, TaskStatus, WebSocketEvent, SessionEvent, Approval } from './lib/types';
 import {
   validateMnemonic,
   generatePassphrase,
@@ -370,6 +370,9 @@ function DashboardPage() {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
             <h1 className="text-xl font-bold">Poindexter</h1>
+            <Link to="/approvals" className="text-gray-400 hover:text-white text-sm transition-colors">
+              Approvals
+            </Link>
             <div className="flex items-center gap-2 text-sm">
               <span
                 className={`w-2 h-2 rounded-full ${connected ? 'bg-green-500' : 'bg-red-500'}`}
@@ -452,7 +455,7 @@ function DashboardPage() {
                 <Link
                   key={task.ID}
                   to={`/tasks/${task.ID}`}
-                  className="block bg-gray-700 hover:bg-gray-650 rounded-lg p-3 transition-colors"
+                  className="block bg-gray-700 hover:bg-gray-600 rounded-lg p-3 transition-colors"
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex-1 min-w-0">
@@ -603,10 +606,191 @@ function DashboardPage() {
 }
 
 function TaskListPage() {
+  const navigate = useNavigate();
+  const { isAuthenticated } = useAuthStore();
+  const { connected, subscribe } = useWebSocket();
+
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [statusFilter, setStatusFilter] = useState<string>('all');
+
+  // Fetch tasks with optional status filter
+  const fetchTasksData = useCallback(async () => {
+    try {
+      const params = statusFilter !== 'all' ? `?status=${statusFilter}` : '';
+      const data = await api.get<TasksResponse>(`/tasks${params}`);
+      setTasks(data.tasks || []);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load tasks');
+    } finally {
+      setLoading(false);
+    }
+  }, [statusFilter]);
+
+  // Redirect if not authenticated and fetch tasks on mount
+  useEffect(() => {
+    if (!isAuthenticated) {
+      navigate('/login');
+      return;
+    }
+    setLoading(true);
+    fetchTasksData();
+  }, [isAuthenticated, navigate, fetchTasksData]);
+
+  // Subscribe to WebSocket for task events
+  const handleWebSocketEvent = useCallback((event: WebSocketEvent) => {
+    if (event.type.startsWith('task.')) {
+      // Refetch tasks on any task event
+      fetchTasksData();
+    }
+  }, [fetchTasksData]);
+
+  useEffect(() => {
+    const unsubscribe = subscribe(handleWebSocketEvent);
+    return unsubscribe;
+  }, [subscribe, handleWebSocketEvent]);
+
+  // Status filter options
+  const statusOptions: { value: string; label: string }[] = [
+    { value: 'all', label: 'All' },
+    { value: 'pending', label: 'Pending' },
+    { value: 'ready', label: 'Ready' },
+    { value: 'running', label: 'Running' },
+    { value: 'paused', label: 'Paused' },
+    { value: 'completed', label: 'Completed' },
+    { value: 'cancelled', label: 'Cancelled' },
+    { value: 'failed', label: 'Failed' },
+    { value: 'blocked', label: 'Blocked' },
+    { value: 'quarantined', label: 'Quarantined' },
+  ];
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto mb-4" />
+          <p className="text-gray-400">Loading tasks...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="min-h-screen bg-gray-900 text-white p-8">
-      <h1 className="text-3xl font-bold mb-4">Tasks</h1>
-      <p className="text-gray-400">(Task list UI coming soon)</p>
+    <div className="min-h-screen bg-gray-900 text-white">
+      {/* Header */}
+      <header className="bg-gray-800 border-b border-gray-700 px-4 py-3">
+        <div className="flex items-center justify-between max-w-4xl mx-auto">
+          <Link to="/" className="text-blue-400 hover:text-blue-300 text-sm flex items-center gap-1">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+            </svg>
+            Dashboard
+          </Link>
+          <h1 className="text-lg font-semibold">Tasks</h1>
+          <div className="flex items-center gap-2 text-sm">
+            <span className={`w-2 h-2 rounded-full ${connected ? 'bg-green-500' : 'bg-red-500'}`} />
+            <span className="text-gray-400">{connected ? 'Live' : 'Offline'}</span>
+          </div>
+        </div>
+      </header>
+
+      <main className="p-4 max-w-4xl mx-auto">
+        {error && (
+          <div className="bg-red-900/50 border border-red-500 rounded-lg p-3 mb-4">
+            <p className="text-red-400 text-sm">{error}</p>
+          </div>
+        )}
+
+        {/* Filter Controls */}
+        <div className="bg-gray-800 rounded-lg p-4 mb-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <label htmlFor="status-filter" className="text-sm text-gray-400">
+                Filter by status:
+              </label>
+              <select
+                id="status-filter"
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+                className="bg-gray-700 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                {statusOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <p className="text-sm text-gray-500">
+              {tasks.length} task{tasks.length !== 1 ? 's' : ''}
+            </p>
+          </div>
+        </div>
+
+        {/* Task List */}
+        <div className="bg-gray-800 rounded-lg p-4">
+          {tasks.length === 0 ? (
+            <div className="text-center py-8">
+              <svg
+                className="w-12 h-12 mx-auto text-gray-600 mb-4"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"
+                />
+              </svg>
+              <p className="text-gray-400 mb-2">No tasks found</p>
+              <p className="text-sm text-gray-500">
+                {statusFilter !== 'all'
+                  ? `No ${statusFilter} tasks. Try a different filter.`
+                  : 'Create a task from the dashboard to get started.'}
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {tasks.map((task) => (
+                <Link
+                  key={task.ID}
+                  to={`/tasks/${task.ID}`}
+                  className="block bg-gray-700 hover:bg-gray-600 rounded-lg p-3 transition-colors"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1">
+                        <PriorityDot priority={task.Priority} />
+                        <span className="font-medium truncate">{task.Title}</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-xs text-gray-400">
+                        <span className="uppercase">{task.Type}</span>
+                        {task.Hat && (
+                          <>
+                            <span>&middot;</span>
+                            <span>{task.Hat}</span>
+                          </>
+                        )}
+                        {task.Description && (
+                          <>
+                            <span>&middot;</span>
+                            <span className="truncate max-w-xs">{task.Description}</span>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                    <StatusBadge status={task.Status} />
+                  </div>
+                </Link>
+              ))}
+            </div>
+          )}
+        </div>
+      </main>
     </div>
   );
 }
@@ -617,6 +801,13 @@ function TaskDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isStarting, setIsStarting] = useState(false);
+  const [isPausing, setIsPausing] = useState(false);
+  const [isResuming, setIsResuming] = useState(false);
+  const [isCancelling, setIsCancelling] = useState(false);
+
+  // Guard to prevent clicking multiple action buttons simultaneously
+  const isActioning = isStarting || isPausing || isResuming || isCancelling;
+
   const [sessionInfo, setSessionInfo] = useState<{
     sessionId: string | null;
     iterationCount: number;
@@ -704,6 +895,71 @@ function TaskDetailPage() {
       setError(message);
     } finally {
       setIsStarting(false);
+    }
+  };
+
+  // Pause task handler
+  const handlePauseTask = async () => {
+    if (!id) return;
+
+    setIsPausing(true);
+    setError(null);
+
+    try {
+      await api.post(`/tasks/${id}/pause`, {});
+      // Refetch task to get updated status
+      const taskData = await api.get<Task>(`/tasks/${id}`);
+      setTask(taskData);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to pause task';
+      setError(message);
+    } finally {
+      setIsPausing(false);
+    }
+  };
+
+  // Resume task handler
+  const handleResumeTask = async () => {
+    if (!id) return;
+
+    setIsResuming(true);
+    setError(null);
+
+    try {
+      await api.post(`/tasks/${id}/resume`, {});
+      // Refetch task to get updated status
+      const taskData = await api.get<Task>(`/tasks/${id}`);
+      setTask(taskData);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to resume task';
+      setError(message);
+    } finally {
+      setIsResuming(false);
+    }
+  };
+
+  // Cancel task handler
+  const handleCancelTask = async () => {
+    if (!id) return;
+
+    // Confirm cancellation
+    if (!window.confirm('Are you sure you want to cancel this task? This cannot be undone.')) {
+      return;
+    }
+
+    setIsCancelling(true);
+    setError(null);
+
+    try {
+      await api.post(`/tasks/${id}/cancel`, {});
+      // Refetch task to get updated status
+      const taskData = await api.get<Task>(`/tasks/${id}`);
+      setTask(taskData);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to cancel task';
+      setError(message);
+    } finally {
+      setIsCancelling(false);
     }
   };
 
@@ -838,29 +1094,47 @@ function TaskDetailPage() {
             {canStart && (
               <button
                 onClick={handleStartTask}
-                disabled={isStarting}
+                disabled={isActioning}
                 className="flex-1 bg-green-600 hover:bg-green-700 disabled:bg-gray-700 disabled:cursor-not-allowed text-white font-medium py-2 px-4 rounded-lg transition-colors"
               >
                 {isStarting ? 'Starting...' : 'Start Task'}
               </button>
             )}
             {isRunning && (
-              <button
-                disabled
-                className="flex-1 bg-orange-600/50 cursor-not-allowed text-white font-medium py-2 px-4 rounded-lg"
-                title="Pause functionality coming soon"
-              >
-                Pause (coming soon)
-              </button>
+              <>
+                <button
+                  onClick={handlePauseTask}
+                  disabled={isActioning}
+                  className="flex-1 bg-orange-600 hover:bg-orange-700 disabled:bg-gray-700 disabled:cursor-not-allowed text-white font-medium py-2 px-4 rounded-lg transition-colors"
+                >
+                  {isPausing ? 'Pausing...' : 'Pause'}
+                </button>
+                <button
+                  onClick={handleCancelTask}
+                  disabled={isActioning}
+                  className="flex-1 bg-red-600 hover:bg-red-700 disabled:bg-gray-700 disabled:cursor-not-allowed text-white font-medium py-2 px-4 rounded-lg transition-colors"
+                >
+                  {isCancelling ? 'Cancelling...' : 'Cancel'}
+                </button>
+              </>
             )}
             {isPaused && (
-              <button
-                disabled
-                className="flex-1 bg-blue-600/50 cursor-not-allowed text-white font-medium py-2 px-4 rounded-lg"
-                title="Resume functionality coming soon"
-              >
-                Resume (coming soon)
-              </button>
+              <>
+                <button
+                  onClick={handleResumeTask}
+                  disabled={isActioning}
+                  className="flex-1 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-700 disabled:cursor-not-allowed text-white font-medium py-2 px-4 rounded-lg transition-colors"
+                >
+                  {isResuming ? 'Resuming...' : 'Resume'}
+                </button>
+                <button
+                  onClick={handleCancelTask}
+                  disabled={isActioning}
+                  className="flex-1 bg-red-600 hover:bg-red-700 disabled:bg-gray-700 disabled:cursor-not-allowed text-white font-medium py-2 px-4 rounded-lg transition-colors"
+                >
+                  {isCancelling ? 'Cancelling...' : 'Cancel'}
+                </button>
+              </>
             )}
             {isComplete && (
               <p className="text-gray-500 text-sm">Task {task.Status}</p>
@@ -955,6 +1229,217 @@ function TaskDetailPage() {
   );
 }
 
+// Approval type badge component
+function ApprovalTypeBadge({ type }: { type: string }) {
+  const colors: Record<string, string> = {
+    commit: 'bg-purple-600',
+    hat_transition: 'bg-blue-600',
+    pr: 'bg-green-600',
+    merge: 'bg-emerald-600',
+    conflict_resolution: 'bg-orange-600',
+  };
+
+  return (
+    <span className={`px-2 py-1 rounded text-xs font-medium ${colors[type] || 'bg-gray-600'}`}>
+      {type.replace('_', ' ')}
+    </span>
+  );
+}
+
+function ApprovalsPage() {
+  const [approvals, setApprovals] = useState<Approval[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [actioning, setActioning] = useState<{ [id: string]: 'approving' | 'rejecting' }>({});
+
+  const { connected, subscribe } = useWebSocket();
+
+  // Fetch approvals on mount
+  const loadApprovals = useCallback(async () => {
+    try {
+      const data = await fetchApprovals();
+      // Filter to show only pending approvals
+      setApprovals(data.approvals.filter((a) => a.status === 'pending'));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to fetch approvals';
+      setError(message);
+    }
+  }, []);
+
+  useEffect(() => {
+    const fetchData = async () => {
+      setLoading(true);
+      setError(null);
+      await loadApprovals();
+      setLoading(false);
+    };
+
+    fetchData();
+  }, [loadApprovals]);
+
+  // Subscribe to WebSocket for approval events
+  const handleWebSocketEvent = useCallback((event: WebSocketEvent) => {
+    if (event.type.startsWith('approval.')) {
+      // Refetch approvals on any approval event
+      loadApprovals();
+    }
+  }, [loadApprovals]);
+
+  useEffect(() => {
+    const unsubscribe = subscribe(handleWebSocketEvent);
+    return unsubscribe;
+  }, [subscribe, handleWebSocketEvent]);
+
+  // Handle approve
+  const handleApprove = async (id: string) => {
+    setActioning((prev) => ({ ...prev, [id]: 'approving' }));
+    setError(null);
+
+    try {
+      await approveApproval(id);
+      await loadApprovals();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to approve';
+      setError(message);
+    } finally {
+      setActioning((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+    }
+  };
+
+  // Handle reject
+  const handleReject = async (id: string) => {
+    setActioning((prev) => ({ ...prev, [id]: 'rejecting' }));
+    setError(null);
+
+    try {
+      await rejectApproval(id);
+      await loadApprovals();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to reject';
+      setError(message);
+    } finally {
+      setActioning((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+    }
+  };
+
+  // Format timestamp for display
+  const formatDate = (dateString: string) => {
+    return new Date(dateString).toLocaleString();
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto mb-4" />
+          <p className="text-gray-400">Loading approvals...</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-900 text-white">
+      {/* Header */}
+      <header className="bg-gray-800 border-b border-gray-700 px-4 py-3">
+        <div className="flex items-center justify-between max-w-2xl mx-auto">
+          <Link to="/" className="text-blue-400 hover:text-blue-300 text-sm flex items-center gap-1">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+            </svg>
+            Dashboard
+          </Link>
+          <div className="flex items-center gap-2 text-sm">
+            <span className={`w-2 h-2 rounded-full ${connected ? 'bg-green-500' : 'bg-red-500'}`} />
+            <span className="text-gray-400">{connected ? 'Live' : 'Offline'}</span>
+          </div>
+        </div>
+      </header>
+
+      <main className="p-4 max-w-2xl mx-auto">
+        <h1 className="text-2xl font-bold mb-4">Approvals</h1>
+
+        {error && (
+          <div className="bg-red-900/50 border border-red-500 rounded-lg p-3 mb-4">
+            <p className="text-red-400 text-sm">{error}</p>
+          </div>
+        )}
+
+        {approvals.length === 0 ? (
+          <div className="bg-gray-800 rounded-lg p-8 text-center">
+            <svg
+              className="w-12 h-12 mx-auto text-gray-600 mb-4"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+              />
+            </svg>
+            <p className="text-gray-400 mb-2">No pending approvals</p>
+            <p className="text-sm text-gray-500">You're all caught up!</p>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {approvals.map((approval) => {
+              const isActioning = !!actioning[approval.id];
+              const actionType = actioning[approval.id];
+
+              return (
+                <div key={approval.id} className="bg-gray-800 rounded-lg p-4">
+                  <div className="flex items-start justify-between gap-4 mb-3">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-2">
+                        <ApprovalTypeBadge type={approval.type} />
+                        <h3 className="font-medium">{approval.title}</h3>
+                      </div>
+                      {approval.description && (
+                        <p className="text-gray-400 text-sm mb-2">{approval.description}</p>
+                      )}
+                      <p className="text-xs text-gray-500">
+                        Created: {formatDate(approval.created_at)}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-3">
+                    <button
+                      onClick={() => handleApprove(approval.id)}
+                      disabled={isActioning}
+                      className="flex-1 bg-green-600 hover:bg-green-700 disabled:bg-gray-700 disabled:cursor-not-allowed text-white font-medium py-2 px-4 rounded-lg transition-colors"
+                    >
+                      {actionType === 'approving' ? 'Approving...' : 'Approve'}
+                    </button>
+                    <button
+                      onClick={() => handleReject(approval.id)}
+                      disabled={isActioning}
+                      className="flex-1 bg-red-600 hover:bg-red-700 disabled:bg-gray-700 disabled:cursor-not-allowed text-white font-medium py-2 px-4 rounded-lg transition-colors"
+                    >
+                      {actionType === 'rejecting' ? 'Rejecting...' : 'Reject'}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </main>
+    </div>
+  );
+}
+
 // Protected route wrapper
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
@@ -991,6 +1476,14 @@ function App() {
         element={
           <ProtectedRoute>
             <TaskDetailPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/approvals"
+        element={
+          <ProtectedRoute>
+            <ApprovalsPage />
           </ProtectedRoute>
         }
       />

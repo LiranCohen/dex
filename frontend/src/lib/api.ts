@@ -70,4 +70,22 @@ class ApiClient {
 }
 
 export const api = new ApiClient();
+
+// Approval API functions
+export async function fetchApprovals(): Promise<import('./types').ApprovalsResponse> {
+  return api.get('/approvals');
+}
+
+export async function fetchApproval(id: string): Promise<import('./types').Approval> {
+  return api.get(`/approvals/${id}`);
+}
+
+export async function approveApproval(id: string): Promise<void> {
+  return api.post(`/approvals/${id}/approve`);
+}
+
+export async function rejectApproval(id: string): Promise<void> {
+  return api.post(`/approvals/${id}/reject`);
+}
+
 export type { ApiError };
