@@ -154,21 +154,20 @@ install_go() {
 build_dex() {
     log "Building dex from source..."
 
-    # Ensure Go is in PATH
     export PATH="$PATH:/usr/local/go/bin"
-    export GOPATH="${GOPATH:-/root/go}"
-    export PATH="$PATH:$GOPATH/bin"
-    mkdir -p "$GOPATH/bin"
-
-    # Use GOPROXY=direct to bypass proxy cache (case sensitivity fix)
-    GOPROXY=direct go install github.com/lirancohen/dex/cmd/dex@latest
-    GOPROXY=direct go install github.com/lirancohen/dex/cmd/dex-setup@latest
-
-    # Copy to install dir
     mkdir -p "$DEX_INSTALL_DIR"
-    cp "$GOPATH/bin/dex" "$DEX_INSTALL_DIR/dex"
-    cp "$GOPATH/bin/dex-setup" "$DEX_INSTALL_DIR/dex-setup"
 
+    # Clone and build (avoids Go proxy cache issues with case sensitivity)
+    local src_dir="/tmp/dex-build"
+    rm -rf "$src_dir"
+    git clone --depth=1 https://github.com/LiranCohen/dex.git "$src_dir"
+
+    cd "$src_dir"
+    go build -o "$DEX_INSTALL_DIR/dex" ./cmd/dex
+    go build -o "$DEX_INSTALL_DIR/dex-setup" ./cmd/dex-setup
+    cd - >/dev/null
+
+    rm -rf "$src_dir"
     success "Built dex and dex-setup"
 }
 
