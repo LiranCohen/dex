@@ -470,19 +470,34 @@ configure_tailscale_serve() {
 
     # Wait for dex to be ready
     local attempts=0
-    while ! curl -s "http://127.0.0.1:${DEX_PORT}/api/v1/system/status" >/dev/null 2>&1; do
+    while ! curl -s "http://127.0.0.1:${DEX_PORT}/" >/dev/null 2>&1; do
         sleep 1
         attempts=$((attempts + 1))
         if [ $attempts -gt 30 ]; then
-            warn "Dex not responding, continuing anyway"
+            warn "Dex not responding on port ${DEX_PORT}, continuing anyway"
             break
         fi
     done
 
     # Configure permanent serve
-    tailscale serve --bg --https=443 "http://127.0.0.1:${DEX_PORT}"
+    if ! tailscale serve --bg --https=443 "http://127.0.0.1:${DEX_PORT}"; then
+        warn "Failed to configure Tailscale Serve"
+        echo ""
+        echo -e "  ${YELLOW}Run manually:${NC}"
+        echo -e "  ${CYAN}tailscale serve --bg --https=443 http://127.0.0.1:${DEX_PORT}${NC}"
+        echo ""
+        return 1
+    fi
 
-    success "HTTPS configured via Tailscale Serve"
+    # Verify it's configured
+    if ! tailscale serve status | grep -q "443"; then
+        warn "Tailscale Serve may not be configured correctly"
+        echo ""
+        tailscale serve status
+        echo ""
+    else
+        success "HTTPS configured via Tailscale Serve"
+    fi
 }
 
 print_success() {
