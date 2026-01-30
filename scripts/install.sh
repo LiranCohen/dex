@@ -476,28 +476,42 @@ configure_tailscale_serve() {
 print_success() {
     local dns_name
     dns_name=$(tailscale status --json | jq -r '.Self.DNSName' | sed 's/\.$//')
+    local dex_url="https://${dns_name}"
 
     echo ""
     echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
     echo -e "  ${GREEN}${BOLD}✓ POINDEXTER IS READY${NC}"
     echo ""
-    echo -e "  ${BOLD}Access from any device on your Tailscale network:${NC}"
+
+    # Show QR code for easy mobile access
+    echo -e "  ${BOLD}📱 Scan to access:${NC}"
     echo ""
-    echo -e "    ${CYAN}https://${dns_name}${NC}"
+    qrencode -t ANSI256 -m 2 "$dex_url"
+    echo ""
+    echo -e "  ${CYAN}$dex_url${NC}"
     echo ""
     echo -e "  ${BOLD}SSH access (no keys needed):${NC}"
     echo ""
     echo -e "    ${CYAN}tailscale ssh ${DEX_HOSTNAME}${NC}"
     echo ""
-    echo -e "  ${BOLD}Service management:${NC}"
-    echo ""
-    echo -e "    sudo systemctl status dex"
-    echo -e "    sudo systemctl restart dex"
-    echo -e "    sudo journalctl -u dex -f"
-    echo ""
+    if command -v systemctl &>/dev/null; then
+        echo -e "  ${BOLD}Service management:${NC}"
+        echo ""
+        echo -e "    sudo systemctl status dex"
+        echo -e "    sudo systemctl restart dex"
+        echo -e "    sudo journalctl -u dex -f"
+        echo ""
+    fi
     echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
+}
+
+is_configured() {
+    # Check if dex is already fully configured
+    [ -f "$DEX_INSTALL_DIR/.env" ] && \
+    [ -f "$DEX_INSTALL_DIR/dex" ] && \
+    [ -d "$DEX_INSTALL_DIR/frontend" ]
 }
 
 main() {
@@ -511,11 +525,22 @@ main() {
     install_tailscale
     authenticate_tailscale
     check_tailscale_access
-    run_setup_wizard
-    install_frontend
-    create_config
-    create_systemd_service
-    configure_tailscale_serve
+
+    if is_configured; then
+        success "Dex is already configured"
+        # Make sure service is running
+        if command -v systemctl &>/dev/null; then
+            systemctl start dex 2>/dev/null || true
+        fi
+        configure_tailscale_serve
+    else
+        run_setup_wizard
+        install_frontend
+        create_config
+        create_systemd_service
+        configure_tailscale_serve
+    fi
+
     print_success
 }
 
