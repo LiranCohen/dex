@@ -1,11 +1,11 @@
 # Session Handoff
 
-_Generated: 2026-01-30 00:37:58 UTC_
+_Generated: 2026-01-30 02:30:48 UTC_
 
 ## Git Context
 
 - **Branch:** `master`
-- **HEAD:** 5e719a0: chore: auto-commit before merge (loop primary)
+- **HEAD:** a30df8f: chore: auto-commit before merge (loop primary)
 
 ## Tasks
 
@@ -16,6 +16,7 @@ _No tasks tracked in this session._
 Recently modified:
 
 - `.gitignore`
+- `.ralph/agent/handoff.md`
 - `.ralph/agent/scratchpad.md`
 - `.ralph/agent/summary.md`
 - `.ralph/agent/tasks.jsonl.lock`
@@ -23,8 +24,7 @@ Recently modified:
 - `.ralph/current-loop-id`
 - `.ralph/events-20260129-205153.jsonl`
 - `.ralph/events-20260129-225521.jsonl`
-- `.ralph/history.jsonl`
-- `.ralph/history.jsonl.lock`
+- `.ralph/events-20260130-010730.jsonl`
 
 ## Next Session
 
@@ -35,10 +35,17 @@ Session completed successfully. No pending work.
 ```
 # POINDEXTER (dex) — Your Nerdy AI Orchestration Genius
 
-## Mission
+> **Disk is state. Git is memory. Fresh context each iteration.**
 
-Build **Poindexter** — a self-contained, single-user system for orchestrating 25+ concurrent Claude Code sessions on a local machine. Poindexter is the brilliant nerd who manages your AI workforce: decomposing tasks, assigning specialized "hats" to sessions, managing git worktrees for isolation, and building complete, deployed applications using a curated toolbelt of cloud services.
+## Completion Promise
 
-**Nickname:** `dex`  
-**Personality:** H...
+This task is **COMPLETE** when all of these are true:
+
+```
+[ ] go build ./cmd/dex && go test ./... → PASS
+[ ] Frontend builds: cd frontend && bun run build → PASS
+[ ] Can authenticate via BIP39 passphrase from mobile
+[ ] Can create a task via API and it appears in UI
+[ ] Can start a task and see a session running Ralph loop
+[ ] Session completes...
 ```
