@@ -1,0 +1,43 @@
+# Poindexter Toolbelt Configuration
+# Copy to toolbelt.yaml and fill in your API keys
+# API keys should reference environment variables for security
+
+github:
+  token: ${GITHUB_TOKEN}
+  default_org: your-org
+
+fly:
+  token: ${FLY_API_TOKEN}
+  default_region: ord
+
+cloudflare:
+  api_token: ${CLOUDFLARE_API_TOKEN}
+  account_id: ${CLOUDFLARE_ACCOUNT_ID}
+
+neon:
+  api_key: ${NEON_API_KEY}
+  default_region: aws-us-east-1
+
+upstash:
+  email: ${UPSTASH_EMAIL}
+  api_key: ${UPSTASH_API_KEY}
+  qstash_token: ${UPSTASH_QSTASH_TOKEN}  # Optional, for QStash queue operations
+
+resend:
+  api_key: ${RESEND_API_KEY}
+
+better_stack:
+  api_token: ${BETTER_STACK_API_TOKEN}
+
+doppler:
+  token: ${DOPPLER_TOKEN}
+
+moneydevkit:
+  api_key: ${MONEYDEVKIT_API_KEY}
+  webhook_secret: ${MONEYDEVKIT_WEBHOOK_SECRET}
+
+anthropic:
+  api_key: ${ANTHROPIC_API_KEY}
+
+fal:
+  api_key: ${FAL_API_KEY}

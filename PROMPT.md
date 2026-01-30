@@ -795,7 +795,7 @@ WS     /api/v1/ws
 - [ ] Create basic config.yaml and toolbelt.yaml
 - [ ] Setup .gitignore
 
-### Checkpoint 1.2: Tailscale HTTPS
+### Checkpoint 1.2: Tailscale HTTPS (question! Can tailscale https be set up through code/library without installing tailscale?)
 - [ ] Install Tailscale on host
 - [ ] Configure with hostname: `sudo tailscale up --hostname=dex`
 - [ ] Generate HTTPS cert: `sudo tailscale cert dex.{tailnet}.ts.net`

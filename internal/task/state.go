@@ -1,0 +1,159 @@
+// Package task provides task management services for Poindexter
+package task
+
+import (
+	"fmt"
+	"slices"
+	"time"
+
+	"github.com/liranmauda/dex/internal/db"
+)
+
+// validTransitions defines allowed status transitions
+// Key is the source status, value is a slice of valid target statuses
+var validTransitions = map[string][]string{
+	db.TaskStatusPending:     {db.TaskStatusReady, db.TaskStatusBlocked, db.TaskStatusCancelled},
+	db.TaskStatusBlocked:     {db.TaskStatusReady, db.TaskStatusCancelled},
+	db.TaskStatusReady:       {db.TaskStatusRunning, db.TaskStatusBlocked, db.TaskStatusCancelled},
+	db.TaskStatusRunning:     {db.TaskStatusPaused, db.TaskStatusCompleted, db.TaskStatusQuarantined, db.TaskStatusCancelled},
+	db.TaskStatusPaused:      {db.TaskStatusRunning, db.TaskStatusCancelled},
+	db.TaskStatusQuarantined: {db.TaskStatusRunning, db.TaskStatusCancelled},
+	db.TaskStatusCompleted:   {}, // Terminal state
+	db.TaskStatusCancelled:   {}, // Terminal state
+}
+
+// TransitionEvent represents a status change for notification
+type TransitionEvent struct {
+	TaskID    string
+	From      string
+	To        string
+	Timestamp time.Time
+}
+
+// StateMachine manages task status transitions with validation and event emission
+type StateMachine struct {
+	db        *db.DB
+	eventChan chan TransitionEvent // For future WebSocket integration
+}
+
+// NewStateMachine creates a new state machine instance
+func NewStateMachine(database *db.DB) *StateMachine {
+	return &StateMachine{
+		db:        database,
+		eventChan: nil, // Will be set when WebSocket integration is added
+	}
+}
+
+// NewStateMachineWithEvents creates a state machine with an event channel
+func NewStateMachineWithEvents(database *db.DB, eventChan chan TransitionEvent) *StateMachine {
+	return &StateMachine{
+		db:        database,
+		eventChan: eventChan,
+	}
+}
+
+// EventChannel returns the event channel for subscribing to transitions
+func (sm *StateMachine) EventChannel() <-chan TransitionEvent {
+	return sm.eventChan
+}
+
+// CanTransition checks if a transition from the current status to the target status is valid
+func (sm *StateMachine) CanTransition(from, to string) bool {
+	validTargets, exists := validTransitions[from]
+	if !exists {
+		return false
+	}
+	return slices.Contains(validTargets, to)
+}
+
+// ValidTransitionsFrom returns all valid target statuses from the given status
+func (sm *StateMachine) ValidTransitionsFrom(from string) []string {
+	targets, exists := validTransitions[from]
+	if !exists {
+		return nil
+	}
+	// Return a copy to prevent modification
+	result := make([]string, len(targets))
+	copy(result, targets)
+	return result
+}
+
+// IsTerminalState returns true if the status is a terminal state (no valid transitions)
+func (sm *StateMachine) IsTerminalState(status string) bool {
+	targets, exists := validTransitions[status]
+	return exists && len(targets) == 0
+}
+
+// Transition validates and executes a status change for a task
+// Returns an error if the task doesn't exist, the transition is invalid, or the DB update fails
+func (sm *StateMachine) Transition(taskID, targetStatus string) error {
+	// Validate target status is a known status
+	if !IsValidStatus(targetStatus) {
+		return fmt.Errorf("invalid target status: %s", targetStatus)
+	}
+
+	// Get current task to check current status
+	task, err := sm.db.GetTaskByID(taskID)
+	if err != nil {
+		return fmt.Errorf("failed to get task: %w", err)
+	}
+	if task == nil {
+		return fmt.Errorf("task not found: %s", taskID)
+	}
+
+	currentStatus := task.Status
+
+	// Validate transition is allowed
+	if !sm.CanTransition(currentStatus, targetStatus) {
+		return &InvalidTransitionError{
+			TaskID:       taskID,
+			FromStatus:   currentStatus,
+			TargetStatus: targetStatus,
+		}
+	}
+
+	// Execute the transition atomically in the database
+	if err := sm.db.TransitionTaskStatus(taskID, currentStatus, targetStatus); err != nil {
+		// Check for concurrent modification
+		if _, ok := err.(*db.StatusMismatchError); ok {
+			return fmt.Errorf("concurrent status change detected, retry transition: %w", err)
+		}
+		return fmt.Errorf("failed to update task status: %w", err)
+	}
+
+	// Emit event if channel is configured
+	if sm.eventChan != nil {
+		event := TransitionEvent{
+			TaskID:    taskID,
+			From:      currentStatus,
+			To:        targetStatus,
+			Timestamp: time.Now(),
+		}
+		// Non-blocking send to avoid deadlock
+		select {
+		case sm.eventChan <- event:
+		default:
+			// Channel full or closed, log would go here in production
+		}
+	}
+
+	return nil
+}
+
+// InvalidTransitionError is returned when an invalid status transition is attempted
+type InvalidTransitionError struct {
+	TaskID       string
+	FromStatus   string
+	TargetStatus string
+}
+
+func (e *InvalidTransitionError) Error() string {
+	return fmt.Sprintf("invalid transition for task %s: cannot transition from %q to %q",
+		e.TaskID, e.FromStatus, e.TargetStatus)
+}
+
+// IsInvalidTransition checks if an error is an InvalidTransitionError
+func IsInvalidTransition(err error) bool {
+	_, ok := err.(*InvalidTransitionError)
+	return ok
+}

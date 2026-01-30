@@ -1,0 +1,31 @@
+# Poindexter Configuration
+# Copy to config.yaml and customize
+
+server:
+  host: "0.0.0.0"
+  port: 8080
+  static_dir: "./frontend/dist"  # Frontend static files (built with bun run build)
+
+# Tailscale HTTPS configuration
+tailscale:
+  hostname: "dex"
+  # Cert paths will be auto-discovered from tailscale cert command
+  cert_dir: "/var/lib/tailscale/certs"
+
+# SQLite database path
+database:
+  path: "/opt/dex/dex.db"
+
+# Worktree configuration
+worktrees:
+  base_path: "~/src/worktrees"
+
+# Session limits
+sessions:
+  max_parallel: 25
+  default_token_budget: 100000
+  default_time_budget_min: 30
+
+# Prompt templates location
+prompts:
+  hats_dir: "./prompts/hats"
