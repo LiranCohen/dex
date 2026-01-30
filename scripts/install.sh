@@ -294,6 +294,13 @@ run_setup_wizard() {
 
     rm -f "$secrets_file" "$done_file"
 
+    # Kill any existing dex-setup process
+    pkill -f "dex-setup" 2>/dev/null || true
+    sleep 1
+
+    # Reset any existing tailscale serve config
+    tailscale serve reset 2>/dev/null || true
+
     # Run dex-setup
     local setup_bin="$DEX_INSTALL_DIR/dex-setup"
     if [ ! -f "$setup_bin" ]; then
@@ -308,7 +315,7 @@ run_setup_wizard() {
     local wizard_pid=$!
     CLEANUP_PIDS+=($wizard_pid)
 
-    sleep 1
+    sleep 2
 
     # Expose via tailscale serve
     if ! tailscale serve --bg --https=443 "http://127.0.0.1:$SETUP_PORT" 2>/dev/null; then
