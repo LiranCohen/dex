@@ -2,32 +2,48 @@ package api
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/labstack/echo/v4"
 	echomw "github.com/labstack/echo/v4/middleware"
 	"github.com/liranmauda/dex/internal/api/middleware"
+	"github.com/liranmauda/dex/internal/api/websocket"
 	"github.com/liranmauda/dex/internal/auth"
 	"github.com/liranmauda/dex/internal/db"
 	"github.com/liranmauda/dex/internal/git"
+	"github.com/liranmauda/dex/internal/orchestrator"
+	"github.com/liranmauda/dex/internal/session"
 	"github.com/liranmauda/dex/internal/task"
 	"github.com/liranmauda/dex/internal/toolbelt"
 )
 
+// challengeEntry holds a challenge and its expiry time
+type challengeEntry struct {
+	Challenge string
+	ExpiresAt time.Time
+}
+
 // Server represents the API server
 type Server struct {
-	echo        *echo.Echo
-	db          *db.DB
-	toolbelt    *toolbelt.Toolbelt
-	taskService *task.Service
-	gitService  *git.Service
-	addr        string
-	certFile    string
-	keyFile     string
-	tokenConfig *auth.TokenConfig
-	staticDir   string
+	echo           *echo.Echo
+	db             *db.DB
+	toolbelt       *toolbelt.Toolbelt
+	taskService    *task.Service
+	gitService     *git.Service
+	sessionManager *session.Manager
+	hub            *websocket.Hub
+	addr           string
+	certFile       string
+	keyFile        string
+	tokenConfig    *auth.TokenConfig
+	staticDir      string
+	challenges     map[string]challengeEntry // challenge -> expiry
+	challengesMu   sync.RWMutex
 }
 
 // Config holds server configuration
@@ -52,22 +68,58 @@ func NewServer(database *db.DB, cfg Config) *Server {
 	e.Use(echomw.Recover())
 	e.Use(echomw.RequestID())
 
+	// Create WebSocket hub
+	hub := websocket.NewHub()
+	go hub.Run()
+
 	s := &Server{
 		echo:        e,
 		db:          database,
 		toolbelt:    cfg.Toolbelt,
 		taskService: task.NewService(database),
+		hub:         hub,
 		addr:        cfg.Addr,
 		certFile:    cfg.CertFile,
 		keyFile:     cfg.KeyFile,
 		tokenConfig: cfg.TokenConfig,
 		staticDir:   cfg.StaticDir,
+		challenges:  make(map[string]challengeEntry),
 	}
 
 	// Setup git service if worktree base is configured
 	if cfg.WorktreeBase != "" {
 		s.gitService = git.NewService(database, cfg.WorktreeBase)
 	}
+
+	// Create scheduler for session management
+	scheduler := orchestrator.NewScheduler(database, s.taskService, 25) // Max 25 parallel sessions
+
+	// Create session manager
+	sessionMgr := session.NewManager(database, scheduler, "prompts")
+
+	// Wire up git operations if git service is available
+	if s.gitService != nil {
+		sessionMgr.SetGitOperations(s.gitService.Operations())
+	}
+
+	// Wire up GitHub client if toolbelt has it configured
+	if cfg.Toolbelt != nil && cfg.Toolbelt.GitHub != nil {
+		sessionMgr.SetGitHubClient(cfg.Toolbelt.GitHub)
+	}
+
+	// Wire up WebSocket hub for real-time updates
+	sessionMgr.SetWebSocketHub(s.hub)
+
+	// Wire up Anthropic client for Ralph loop execution
+	if cfg.Toolbelt != nil && cfg.Toolbelt.Anthropic != nil {
+		sessionMgr.SetAnthropicClient(cfg.Toolbelt.Anthropic)
+	}
+
+	// Create and wire transition handler for hat transitions
+	transitionHandler := orchestrator.NewTransitionHandler(database)
+	sessionMgr.SetTransitionHandler(transitionHandler)
+
+	s.sessionManager = sessionMgr
 
 	// Register routes
 	s.registerRoutes()
@@ -90,6 +142,11 @@ func (s *Server) registerRoutes() {
 	v1.GET("/toolbelt/status", s.handleToolbeltStatus)
 	v1.POST("/toolbelt/test", s.handleToolbeltTest)
 
+	// Auth endpoints (public, handles its own auth)
+	v1.POST("/auth/challenge", s.handleAuthChallenge)
+	v1.POST("/auth/verify", s.handleAuthVerify)
+	v1.POST("/auth/refresh", s.handleAuthRefresh)
+
 	// Task endpoints (public for now, will add auth later)
 	v1.GET("/tasks", s.handleListTasks)
 	v1.POST("/tasks", s.handleCreateTask)
@@ -102,6 +159,11 @@ func (s *Server) registerRoutes() {
 	// Worktree endpoints (public for now)
 	v1.GET("/worktrees", s.handleListWorktrees)
 	v1.DELETE("/worktrees/:task_id", s.handleDeleteWorktree)
+
+	// WebSocket endpoint for real-time updates
+	v1.GET("/ws", func(c echo.Context) error {
+		return websocket.ServeWS(s.hub, c)
+	})
 
 	// Protected endpoints (require auth)
 	if s.tokenConfig != nil {
@@ -129,6 +191,131 @@ func (s *Server) handleHealthCheck(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, status)
+}
+
+// handleAuthChallenge generates and returns a random challenge for authentication
+func (s *Server) handleAuthChallenge(c echo.Context) error {
+	// Generate 32 random bytes
+	challengeBytes := make([]byte, 32)
+	if _, err := rand.Read(challengeBytes); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to generate challenge")
+	}
+
+	challenge := hex.EncodeToString(challengeBytes)
+	expiresAt := time.Now().Add(5 * time.Minute)
+
+	// Store challenge with TTL
+	s.challengesMu.Lock()
+	s.challenges[challenge] = challengeEntry{
+		Challenge: challenge,
+		ExpiresAt: expiresAt,
+	}
+	s.challengesMu.Unlock()
+
+	return c.JSON(http.StatusOK, map[string]any{
+		"challenge":  challenge,
+		"expires_in": 300,
+	})
+}
+
+// handleAuthVerify verifies a signed challenge and returns a JWT
+func (s *Server) handleAuthVerify(c echo.Context) error {
+	var req struct {
+		PublicKey string `json:"public_key"`
+		Signature string `json:"signature"`
+		Challenge string `json:"challenge"`
+	}
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
+	}
+
+	if req.PublicKey == "" || req.Signature == "" || req.Challenge == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "public_key, signature, and challenge are required")
+	}
+
+	// Validate challenge exists and not expired
+	s.challengesMu.Lock()
+	entry, exists := s.challenges[req.Challenge]
+	if exists {
+		delete(s.challenges, req.Challenge) // One-time use
+	}
+	s.challengesMu.Unlock()
+
+	if !exists {
+		return echo.NewHTTPError(http.StatusUnauthorized, "invalid or expired challenge")
+	}
+	if time.Now().After(entry.ExpiresAt) {
+		return echo.NewHTTPError(http.StatusUnauthorized, "challenge expired")
+	}
+
+	// Decode public key and signature from hex
+	publicKey, err := hex.DecodeString(req.PublicKey)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid public_key format")
+	}
+	signature, err := hex.DecodeString(req.Signature)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid signature format")
+	}
+	challengeBytes, err := hex.DecodeString(req.Challenge)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid challenge format")
+	}
+
+	// Verify signature
+	if !auth.Verify(challengeBytes, signature, publicKey) {
+		return echo.NewHTTPError(http.StatusUnauthorized, "invalid signature")
+	}
+
+	// Get or create user
+	user, _, err := s.db.GetOrCreateUser(req.PublicKey)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to get or create user")
+	}
+
+	// Update last login
+	_ = s.db.UpdateUserLastLogin(user.ID)
+
+	// Generate JWT
+	if s.tokenConfig == nil {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "token configuration not available")
+	}
+	token, err := auth.GenerateToken(user.ID, s.tokenConfig)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to generate token")
+	}
+
+	return c.JSON(http.StatusOK, map[string]any{
+		"token":   token,
+		"user_id": user.ID,
+	})
+}
+
+// handleAuthRefresh refreshes an existing JWT token
+func (s *Server) handleAuthRefresh(c echo.Context) error {
+	var req struct {
+		Token string `json:"token"`
+	}
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
+	}
+
+	if req.Token == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "token is required")
+	}
+
+	if s.tokenConfig == nil {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "token configuration not available")
+	}
+
+	newToken, err := auth.RefreshToken(req.Token, s.tokenConfig)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusUnauthorized, "failed to refresh token")
+	}
+
+	return c.JSON(http.StatusOK, map[string]any{
+		"token": newToken,
+	})
 }
 
 // handleToolbeltStatus returns the configuration status of all toolbelt services
@@ -311,11 +498,35 @@ func (s *Server) handleStartTask(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("failed to create worktree: %v", err))
 	}
 
-	// Transition to running status
+	// Transition through ready to running status
+	// First: pending -> ready
+	if t.Status == "pending" {
+		if err := s.taskService.UpdateStatus(taskID, "ready"); err != nil {
+			_ = s.gitService.CleanupTaskWorktree(req.ProjectPath, taskID, true)
+			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		}
+	}
+	// Then: ready -> running
 	if err := s.taskService.UpdateStatus(taskID, "running"); err != nil {
 		// Try to clean up the worktree we just created
 		_ = s.gitService.CleanupTaskWorktree(req.ProjectPath, taskID, true)
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+
+	// Create and start a session for this task
+	hat := "implementer" // Default hat - could be determined from task type
+	if t.Hat.Valid && t.Hat.String != "" {
+		hat = t.Hat.String
+	}
+
+	session, err := s.sessionManager.CreateSession(taskID, hat, worktreePath)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("failed to create session: %v", err))
+	}
+
+	// Start the session (runs Ralph loop in background)
+	if err := s.sessionManager.Start(c.Request().Context(), session.ID); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("failed to start session: %v", err))
 	}
 
 	// Fetch updated task
@@ -324,6 +535,7 @@ func (s *Server) handleStartTask(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]any{
 		"task":          updated,
 		"worktree_path": worktreePath,
+		"session_id":    session.ID,
 	})
 }
 
@@ -426,4 +638,9 @@ func (s *Server) Start() error {
 // Shutdown gracefully stops the server
 func (s *Server) Shutdown(ctx context.Context) error {
 	return s.echo.Shutdown(ctx)
+}
+
+// GetHub returns the WebSocket hub for broadcasting events
+func (s *Server) GetHub() *websocket.Hub {
+	return s.hub
 }

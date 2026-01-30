@@ -7,8 +7,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/liranmauda/dex/internal/api/websocket"
 	"github.com/liranmauda/dex/internal/db"
+	"github.com/liranmauda/dex/internal/git"
 	"github.com/liranmauda/dex/internal/orchestrator"
+	"github.com/liranmauda/dex/internal/toolbelt"
 )
 
 // SessionState represents the current state of a session
@@ -55,6 +58,15 @@ type Manager struct {
 	scheduler    *orchestrator.Scheduler
 	promptLoader *PromptLoader
 
+	// External dependencies for Ralph loop
+	anthropicClient   *toolbelt.AnthropicClient
+	wsHub             *websocket.Hub
+	transitionHandler *orchestrator.TransitionHandler
+
+	// Git and GitHub for PR creation on completion
+	gitOps       *git.Operations
+	githubClient *toolbelt.GitHubClient
+
 	mu       sync.RWMutex
 	sessions map[string]*ActiveSession // sessionID -> session
 	byTask   map[string]string         // taskID -> sessionID
@@ -91,6 +103,41 @@ func (m *Manager) SetDefaults(maxIterations int, tokenBudget *int64, dollarBudge
 	m.defaultMaxIterations = maxIterations
 	m.defaultTokenBudget = tokenBudget
 	m.defaultDollarBudget = dollarBudgetFloat
+}
+
+// SetAnthropicClient sets the Anthropic client for the Ralph loop
+func (m *Manager) SetAnthropicClient(client *toolbelt.AnthropicClient) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.anthropicClient = client
+}
+
+// SetWebSocketHub sets the WebSocket hub for broadcasting events
+func (m *Manager) SetWebSocketHub(hub *websocket.Hub) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.wsHub = hub
+}
+
+// SetTransitionHandler sets the transition handler for hat transitions
+func (m *Manager) SetTransitionHandler(handler *orchestrator.TransitionHandler) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.transitionHandler = handler
+}
+
+// SetGitOperations sets the git operations for pushing branches
+func (m *Manager) SetGitOperations(ops *git.Operations) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.gitOps = ops
+}
+
+// SetGitHubClient sets the GitHub client for creating PRs
+func (m *Manager) SetGitHubClient(client *toolbelt.GitHubClient) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.githubClient = client
 }
 
 // CreateSession creates a new session for a task
@@ -296,39 +343,126 @@ func (m *Manager) copySession(s *ActiveSession) *ActiveSession {
 }
 
 // runSession is the main session execution loop (Ralph loop)
-// This is a placeholder - will be implemented in Checkpoint 5.3
 func (m *Manager) runSession(ctx context.Context, session *ActiveSession) {
 	defer close(session.done)
 
 	m.mu.Lock()
 	session.State = StateRunning
+	anthropicClient := m.anthropicClient
+	wsHub := m.wsHub
+	originalHat := session.Hat
 	m.mu.Unlock()
 
-	// Placeholder: just wait for cancellation
-	// Real implementation will run the Ralph loop
-	<-ctx.Done()
+	var loopErr error
 
+	// Run the Ralph loop if we have an Anthropic client
+	if anthropicClient != nil {
+		loop := NewRalphLoop(m, session, anthropicClient, wsHub, m.db)
+
+		// Try to restore from checkpoint
+		checkpoint, err := m.db.GetLatestSessionCheckpoint(session.ID)
+		if err == nil && checkpoint != nil {
+			if restoreErr := loop.RestoreFromCheckpoint(checkpoint); restoreErr != nil {
+				fmt.Printf("warning: failed to restore checkpoint: %v\n", restoreErr)
+			}
+		}
+
+		// Run the loop
+		loopErr = loop.Run(ctx)
+	} else {
+		// Fallback: wait for cancellation if no client
+		<-ctx.Done()
+		loopErr = ctx.Err()
+	}
+
+	// Determine final state based on error
 	m.mu.Lock()
+	nextHat := session.Hat
+	hatTransition := loopErr == nil && nextHat != originalHat
+	worktreePath := session.WorktreePath
+	taskID := session.TaskID
+	sessionID := session.ID
+
 	if session.State == StateStopping {
 		session.State = StateStopped
 	} else if session.State == StatePaused {
 		// Keep paused state
+	} else if loopErr != nil {
+		// Check if it's a budget error (requires approval, not a failure)
+		if loopErr == ErrBudgetExceeded || loopErr == ErrIterationLimit ||
+			loopErr == ErrTokenBudget || loopErr == ErrDollarBudget {
+			session.State = StatePaused
+		} else if loopErr == context.Canceled {
+			session.State = StateStopped
+		} else {
+			session.State = StateFailed
+		}
 	} else {
 		session.State = StateCompleted
 	}
 	finalState := session.State
-	sessionID := session.ID
-	taskID := session.TaskID
 	m.mu.Unlock()
 
-	// Update DB
+	// Update DB with final state and outcome
 	_ = m.db.UpdateSessionStatus(sessionID, string(finalState))
 
-	// Remove from active sessions
+	// Handle hat transition: create and start new session with next hat
+	if hatTransition {
+		m.handleHatTransition(ctx, taskID, originalHat, nextHat, worktreePath)
+		return
+	}
+
+	// If no transition, clean up normally
 	m.mu.Lock()
 	delete(m.sessions, sessionID)
 	delete(m.byTask, taskID)
 	m.mu.Unlock()
+
+	// If task completed successfully, update task status and create PR
+	if finalState == StateCompleted {
+		_ = m.db.UpdateTaskStatus(taskID, db.TaskStatusCompleted)
+
+		// Push branch and create PR (non-blocking, log errors)
+		go m.createPRForTask(taskID, worktreePath)
+	}
+}
+
+// handleHatTransition handles transitioning a task to a new hat
+func (m *Manager) handleHatTransition(ctx context.Context, taskID, originalHat, nextHat, worktreePath string) {
+	// Validate transition BEFORE removing old session
+	m.mu.RLock()
+	handler := m.transitionHandler
+	oldSessionID := m.byTask[taskID]
+	m.mu.RUnlock()
+
+	if handler != nil && !handler.ValidateTransition(originalHat, nextHat) {
+		fmt.Printf("warning: invalid hat transition from %s to %s, marking task failed\n", originalHat, nextHat)
+		_ = m.db.UpdateTaskStatus(taskID, db.TaskStatusCancelled)
+		return
+	}
+
+	// Now safe to remove old session
+	m.mu.Lock()
+	delete(m.sessions, oldSessionID)
+	delete(m.byTask, taskID)
+	m.mu.Unlock()
+
+	// Create new session with next hat
+	newSession, err := m.CreateSession(taskID, nextHat, worktreePath)
+	if err != nil {
+		fmt.Printf("error: failed to create session for hat transition: %v\n", err)
+		_ = m.db.UpdateTaskStatus(taskID, db.TaskStatusCancelled)
+		return
+	}
+
+	// Start the new session
+	if err := m.Start(ctx, newSession.ID); err != nil {
+		fmt.Printf("error: failed to start session for hat transition: %v\n", err)
+		_ = m.db.UpdateTaskStatus(taskID, db.TaskStatusCancelled)
+		return
+	}
+
+	fmt.Printf("hat transition: task %s transitioned from %s to %s (session %s)\n", taskID, originalHat, nextHat, newSession.ID)
 }
 
 // GetPrompt returns the rendered prompt for a session's hat
@@ -414,4 +548,91 @@ func (m *Manager) LoadActiveSessions() error {
 	}
 
 	return nil
+}
+
+// createPRForTask pushes the branch and creates a PR after task completion
+// This runs in a goroutine and logs errors without failing the session
+func (m *Manager) createPRForTask(taskID, worktreePath string) {
+	m.mu.RLock()
+	gitOps := m.gitOps
+	githubClient := m.githubClient
+	m.mu.RUnlock()
+
+	// Get task from DB
+	task, err := m.db.GetTaskByID(taskID)
+	if err != nil || task == nil {
+		fmt.Printf("createPRForTask: failed to get task %s: %v\n", taskID, err)
+		return
+	}
+
+	// Get project from DB to find GitHub owner/repo
+	project, err := m.db.GetProjectByID(task.ProjectID)
+	if err != nil || project == nil {
+		fmt.Printf("createPRForTask: failed to get project for task %s: %v\n", taskID, err)
+		return
+	}
+
+	// Check if project has GitHub configured
+	if !project.GitHubOwner.Valid || !project.GitHubRepo.Valid {
+		fmt.Printf("createPRForTask: project %s has no GitHub owner/repo configured\n", project.ID)
+		return
+	}
+
+	owner := project.GitHubOwner.String
+	repo := project.GitHubRepo.String
+
+	// Get current branch name from worktree
+	if gitOps == nil {
+		fmt.Printf("createPRForTask: no git operations configured\n")
+		return
+	}
+
+	branchName, err := gitOps.GetCurrentBranch(worktreePath)
+	if err != nil {
+		fmt.Printf("createPRForTask: failed to get current branch for task %s: %v\n", taskID, err)
+		return
+	}
+
+	// Push the branch to remote
+	pushOpts := git.PushOptions{
+		Remote:      "origin",
+		Branch:      branchName,
+		SetUpstream: true,
+	}
+	if err := gitOps.Push(worktreePath, pushOpts); err != nil {
+		fmt.Printf("createPRForTask: failed to push branch %s for task %s: %v\n", branchName, taskID, err)
+		return
+	}
+	fmt.Printf("createPRForTask: pushed branch %s for task %s\n", branchName, taskID)
+
+	// Create PR via GitHub client if configured
+	if githubClient == nil {
+		fmt.Printf("createPRForTask: no GitHub client configured, skipping PR creation\n")
+		return
+	}
+
+	prOpts := toolbelt.CreatePROptions{
+		Owner: owner,
+		Repo:  repo,
+		Title: task.Title,
+		Body:  fmt.Sprintf("Closes task: %s\n\n%s", taskID, task.GetDescription()),
+		Head:  branchName,
+		Base:  project.DefaultBranch,
+		Draft: false,
+	}
+
+	pr, err := githubClient.CreatePR(context.Background(), prOpts)
+	if err != nil {
+		fmt.Printf("createPRForTask: failed to create PR for task %s: %v\n", taskID, err)
+		return
+	}
+
+	// Update task with PR number
+	if pr.Number != nil {
+		if err := m.db.UpdateTaskPRNumber(taskID, *pr.Number); err != nil {
+			fmt.Printf("createPRForTask: failed to update task %s with PR number: %v\n", taskID, err)
+			return
+		}
+		fmt.Printf("createPRForTask: created PR #%d for task %s\n", *pr.Number, taskID)
+	}
 }

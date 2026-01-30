@@ -24,6 +24,7 @@ func main() {
 	keyFile := flag.String("key", "", "Path to TLS key (optional)")
 	staticDir := flag.String("static", "", "Path to frontend static files (e.g., ./frontend/dist)")
 	toolbeltConfig := flag.String("toolbelt", "", "Path to toolbelt.yaml config file (optional)")
+	worktreeBase := flag.String("worktree-base", "", "Base directory for git worktrees (e.g., ~/src/worktrees)")
 	showVersion := flag.Bool("version", false, "Show version and exit")
 	flag.Parse()
 
@@ -75,11 +76,12 @@ func main() {
 
 	// Create API server
 	server := api.NewServer(database, api.Config{
-		Addr:      *addr,
-		CertFile:  *certFile,
-		KeyFile:   *keyFile,
-		StaticDir: *staticDir,
-		Toolbelt:  tb,
+		Addr:         *addr,
+		CertFile:     *certFile,
+		KeyFile:      *keyFile,
+		StaticDir:    *staticDir,
+		Toolbelt:     tb,
+		WorktreeBase: *worktreeBase,
 	})
 
 	// Start server in goroutine
