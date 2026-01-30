@@ -123,6 +123,9 @@ install_jq() {
 }
 
 install_go() {
+    # Check common locations for Go
+    export PATH="$PATH:/usr/local/go/bin"
+
     if command -v go &>/dev/null; then
         success "Go already installed: $(go version | awk '{print $3}')"
         return
