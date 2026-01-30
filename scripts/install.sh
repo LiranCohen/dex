@@ -152,6 +152,12 @@ install_go() {
 }
 
 build_dex() {
+    # Skip if already built
+    if [ -f "$DEX_INSTALL_DIR/dex" ] && [ -f "$DEX_INSTALL_DIR/dex-setup" ]; then
+        success "Dex already installed at $DEX_INSTALL_DIR"
+        return
+    fi
+
     log "Building dex from source..."
 
     export PATH="$PATH:/usr/local/go/bin"
@@ -263,74 +269,13 @@ authenticate_tailscale() {
 }
 
 check_tailscale_access() {
-    log "Checking Tailscale access configuration..."
-
-    local self_ip
-    self_ip=$(tailscale status --json | jq -r '.Self.TailscaleIPs[0]')
+    # Just a brief note about ACLs - don't block
     local self_name
     self_name=$(tailscale status --json | jq -r '.Self.DNSName' | sed 's/\.$//')
 
-    # Get list of other devices on the tailnet
-    local devices
-    devices=$(tailscale status --json | jq -r '.Peer | to_entries[] | select(.value.Online == true) | "\(.value.HostName)|\(.value.TailscaleIPs[0])|\(.value.DNSName)"' 2>/dev/null || echo "")
-
-    if [ -z "$devices" ]; then
-        warn "No other devices found on your tailnet"
-        echo ""
-        echo -e "  ${DIM}Make sure your phone/computer has Tailscale installed and connected.${NC}"
-        echo ""
-        return 0
-    fi
-
     echo ""
-    echo -e "${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo ""
-    echo -e "  ${BOLD}📋 TAILSCALE ACCESS CONFIGURATION${NC}"
-    echo ""
-    echo -e "  ${DIM}This dex server is:${NC} ${CYAN}$self_name${NC} ($self_ip)"
-    echo ""
-    echo -e "  ${DIM}Other devices on your tailnet:${NC}"
-    echo ""
-
-    local i=1
-    local device_list=()
-    while IFS='|' read -r hostname ip dnsname; do
-        dnsname=$(echo "$dnsname" | sed 's/\.$//')
-        echo -e "    ${BOLD}$i.${NC} $hostname ${DIM}($ip)${NC}"
-        device_list+=("$hostname|$ip|$dnsname")
-        i=$((i + 1))
-    done <<< "$devices"
-
-    echo ""
-    echo -e "  ${YELLOW}If you have ACLs configured, add this rule to allow access:${NC}"
-    echo ""
-    echo -e "  ${DIM}// In your tailnet policy file (Access Controls):${NC}"
-    echo -e "  ${CYAN}{"
-    echo -e "    \"action\": \"accept\","
-    echo -e "    \"src\": [\"*\"],  // or specific users/devices"
-    echo -e "    \"dst\": [\"$self_name:443\"]"
-    echo -e "  }${NC}"
-    echo ""
-    echo -e "  ${DIM}Or for grants (recommended):${NC}"
-    echo ""
-    echo -e "  ${CYAN}{"
-    echo -e "    \"src\": [\"autogroup:member\"],"
-    echo -e "    \"dst\": [\"$self_name\"],"
-    echo -e "    \"app\": {"
-    echo -e "      \"tailscale.com/cap/dex\": [{"
-    echo -e "        \"ports\": [443]"
-    echo -e "      }]"
-    echo -e "    }"
-    echo -e "  }${NC}"
-    echo ""
-    echo -e "  ${BOLD}Edit ACLs:${NC} ${CYAN}https://login.tailscale.com/admin/acls${NC}"
-    echo ""
-    echo -e "${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo ""
-
-    echo -e "  ${DIM}If you don't have ACLs configured, the default allows all traffic.${NC}"
-    echo ""
-    read -p "  Press Enter to continue (or Ctrl+C to exit and fix ACLs first)... "
+    echo -e "  ${DIM}Note: If you have Tailscale ACLs, ensure this device can be reached on port 443.${NC}"
+    echo -e "  ${DIM}Edit ACLs: https://login.tailscale.com/admin/acls${NC}"
     echo ""
 }
 
@@ -414,6 +359,12 @@ run_setup_wizard() {
 }
 
 install_frontend() {
+    # Skip if already installed
+    if [ -d "$DEX_INSTALL_DIR/frontend" ] && [ -f "$DEX_INSTALL_DIR/frontend/index.html" ]; then
+        success "Frontend already installed"
+        return
+    fi
+
     log "Installing frontend..."
 
     # Check if bun is available
