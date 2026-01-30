@@ -157,8 +157,8 @@ build_dex() {
     mkdir -p "$GOPATH/bin"
 
     # Install dex and dex-setup
-    go install github.com/LiranCohen/dex/cmd/dex@latest
-    go install github.com/LiranCohen/dex/cmd/dex-setup@latest
+    go install github.com/lirancohen/dex/cmd/dex@latest
+    go install github.com/lirancohen/dex/cmd/dex-setup@latest
 
     # Copy to install dir
     mkdir -p "$DEX_INSTALL_DIR"
@@ -332,7 +332,7 @@ install_frontend() {
     # Clone repo to get frontend source
     local tmp_repo="/tmp/dex-repo"
     rm -rf "$tmp_repo"
-    git clone --depth=1 https://github.com/LiranCohen/dex.git "$tmp_repo"
+    git clone --depth=1 https://github.com/lirancohen/dex.git "$tmp_repo"
 
     # Build frontend
     cd "$tmp_repo/frontend"
