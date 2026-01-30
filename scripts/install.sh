@@ -155,9 +155,13 @@ build_dex() {
     log "Building dex from source..."
 
     export PATH="$PATH:/usr/local/go/bin"
+    export GOPROXY="https://proxy.golang.org,direct"
     mkdir -p "$DEX_INSTALL_DIR"
 
-    # Clone and build (avoids Go proxy cache issues with case sensitivity)
+    # Clear any corrupted module cache from previous attempts
+    go clean -modcache 2>/dev/null || true
+
+    # Clone and build
     local src_dir="/tmp/dex-build"
     rm -rf "$src_dir"
     git clone --depth=1 https://github.com/LiranCohen/dex.git "$src_dir"
