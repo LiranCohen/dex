@@ -40,7 +40,7 @@ cleanup() {
     for file in "${CLEANUP_FILES[@]:-}"; do
         rm -f "$file" 2>/dev/null || true
     done
-    tailscale serve reset 2>/dev/null || true
+    # NOTE: Don't reset tailscale serve here - we want the final config to persist!
 }
 trap cleanup EXIT
 
