@@ -4,7 +4,7 @@ package task
 import (
 	"fmt"
 
-	"github.com/liranmauda/dex/internal/db"
+	"github.com/lirancohen/dex/internal/db"
 )
 
 // Graph manages task dependency relationships

@@ -13,15 +13,15 @@ import (
 
 	"github.com/labstack/echo/v4"
 	echomw "github.com/labstack/echo/v4/middleware"
-	"github.com/liranmauda/dex/internal/api/middleware"
-	"github.com/liranmauda/dex/internal/api/websocket"
-	"github.com/liranmauda/dex/internal/auth"
-	"github.com/liranmauda/dex/internal/db"
-	"github.com/liranmauda/dex/internal/git"
-	"github.com/liranmauda/dex/internal/orchestrator"
-	"github.com/liranmauda/dex/internal/session"
-	"github.com/liranmauda/dex/internal/task"
-	"github.com/liranmauda/dex/internal/toolbelt"
+	"github.com/lirancohen/dex/internal/api/middleware"
+	"github.com/lirancohen/dex/internal/api/websocket"
+	"github.com/lirancohen/dex/internal/auth"
+	"github.com/lirancohen/dex/internal/db"
+	"github.com/lirancohen/dex/internal/git"
+	"github.com/lirancohen/dex/internal/orchestrator"
+	"github.com/lirancohen/dex/internal/session"
+	"github.com/lirancohen/dex/internal/task"
+	"github.com/lirancohen/dex/internal/toolbelt"
 )
 
 // challengeEntry holds a challenge and its expiry time

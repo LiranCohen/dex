@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/liranmauda/dex/internal/db"
+	"github.com/lirancohen/dex/internal/db"
 )
 
 // HatTransitions defines the valid transitions from each hat

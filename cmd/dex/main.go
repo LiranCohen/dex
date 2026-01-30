@@ -9,9 +9,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/liranmauda/dex/internal/api"
-	"github.com/liranmauda/dex/internal/db"
-	"github.com/liranmauda/dex/internal/toolbelt"
+	"github.com/lirancohen/dex/internal/api"
+	"github.com/lirancohen/dex/internal/db"
+	"github.com/lirancohen/dex/internal/toolbelt"
 )
 
 const version = "0.1.0-dev"

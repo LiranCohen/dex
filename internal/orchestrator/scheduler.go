@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/liranmauda/dex/internal/db"
-	"github.com/liranmauda/dex/internal/task"
+	"github.com/lirancohen/dex/internal/db"
+	"github.com/lirancohen/dex/internal/task"
 )
 
 // Default maximum number of parallel sessions

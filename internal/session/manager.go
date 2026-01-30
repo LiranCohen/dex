@@ -7,11 +7,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/liranmauda/dex/internal/api/websocket"
-	"github.com/liranmauda/dex/internal/db"
-	"github.com/liranmauda/dex/internal/git"
-	"github.com/liranmauda/dex/internal/orchestrator"
-	"github.com/liranmauda/dex/internal/toolbelt"
+	"github.com/lirancohen/dex/internal/api/websocket"
+	"github.com/lirancohen/dex/internal/db"
+	"github.com/lirancohen/dex/internal/git"
+	"github.com/lirancohen/dex/internal/orchestrator"
+	"github.com/lirancohen/dex/internal/toolbelt"
 )
 
 // SessionState represents the current state of a session

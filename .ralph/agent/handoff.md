@@ -1,11 +1,11 @@
 # Session Handoff
 
-_Generated: 2026-01-30 02:44:32 UTC_
+_Generated: 2026-01-30 03:45:32 UTC_
 
 ## Git Context
 
 - **Branch:** `master`
-- **HEAD:** 8540dec: chore: auto-commit before merge (loop primary)
+- **HEAD:** 65e00a2: chore: auto-commit before merge (loop primary)
 
 ## Tasks
 
@@ -15,16 +15,16 @@ _No tasks tracked in this session._
 
 Recently modified:
 
+- `.gitignore`
 - `.ralph/agent/handoff.md`
 - `.ralph/agent/scratchpad.md`
 - `.ralph/agent/summary.md`
+- `.ralph/agent/tasks.jsonl.lock`
 - `.ralph/current-events`
 - `.ralph/current-loop-id`
+- `.ralph/events-20260129-205153.jsonl`
+- `.ralph/events-20260129-225521.jsonl`
 - `.ralph/events-20260130-010730.jsonl`
-- `.ralph/events-20260130-023958.jsonl`
-- `.ralph/history.jsonl`
-- `.ralph/loop.lock`
-- `PROMPT.md`
 
 ## Next Session
 

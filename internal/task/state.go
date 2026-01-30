@@ -6,7 +6,7 @@ import (
 	"slices"
 	"time"
 
-	"github.com/liranmauda/dex/internal/db"
+	"github.com/lirancohen/dex/internal/db"
 )
 
 // validTransitions defines allowed status transitions

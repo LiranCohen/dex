@@ -1,4 +1,4 @@
-module github.com/liranmauda/dex
+module github.com/lirancohen/dex
 
 go 1.24.3
 

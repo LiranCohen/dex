@@ -9,7 +9,7 @@ import (
 	"sort"
 	"text/template"
 
-	"github.com/liranmauda/dex/internal/db"
+	"github.com/lirancohen/dex/internal/db"
 )
 
 // PromptContext provides context for rendering hat prompts

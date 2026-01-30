@@ -3,7 +3,7 @@ package session
 import (
 	"testing"
 
-	"github.com/liranmauda/dex/internal/toolbelt"
+	"github.com/lirancohen/dex/internal/toolbelt"
 )
 
 func TestNewRalphLoop(t *testing.T) {

@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/labstack/echo/v4"
-	"github.com/liranmauda/dex/internal/auth"
+	"github.com/lirancohen/dex/internal/auth"
 )
 
 // ContextKey type for context values

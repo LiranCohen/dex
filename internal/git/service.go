@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"github.com/liranmauda/dex/internal/db"
+	"github.com/lirancohen/dex/internal/db"
 )
 
 // Service coordinates git operations with database records

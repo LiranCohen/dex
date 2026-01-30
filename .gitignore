@@ -1,6 +1,7 @@
 # Binaries
 /dex
 /dex-cli
+/dex-setup
 *.exe
 
 # Dependencies
