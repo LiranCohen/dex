@@ -294,8 +294,13 @@ run_setup_wizard() {
 
     rm -f "$secrets_file" "$done_file"
 
-    # Kill any existing dex-setup process
-    pkill -f "dex-setup" 2>/dev/null || true
+    # Kill anything using the setup port
+    if command -v lsof &>/dev/null; then
+        lsof -ti ":$SETUP_PORT" | xargs -r kill -9 2>/dev/null || true
+    elif command -v fuser &>/dev/null; then
+        fuser -k "$SETUP_PORT/tcp" 2>/dev/null || true
+    fi
+    pkill -9 -f "dex-setup" 2>/dev/null || true
     sleep 1
 
     # Reset any existing tailscale serve config
