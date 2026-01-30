@@ -480,7 +480,8 @@ configure_tailscale_serve() {
     done
 
     # Configure permanent serve
-    if ! tailscale serve --bg --https=443 "http://127.0.0.1:${DEX_PORT}"; then
+    # Use setsid to detach from the curl|bash session so the config persists
+    if ! setsid tailscale serve --bg --https=443 "http://127.0.0.1:${DEX_PORT}"; then
         warn "Failed to configure Tailscale Serve"
         echo ""
         echo -e "  ${YELLOW}Run manually:${NC}"
