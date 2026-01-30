@@ -262,6 +262,78 @@ authenticate_tailscale() {
     success "Connected as ${BOLD}$dns_name${NC}"
 }
 
+check_tailscale_access() {
+    log "Checking Tailscale access configuration..."
+
+    local self_ip
+    self_ip=$(tailscale status --json | jq -r '.Self.TailscaleIPs[0]')
+    local self_name
+    self_name=$(tailscale status --json | jq -r '.Self.DNSName' | sed 's/\.$//')
+
+    # Get list of other devices on the tailnet
+    local devices
+    devices=$(tailscale status --json | jq -r '.Peer | to_entries[] | select(.value.Online == true) | "\(.value.HostName)|\(.value.TailscaleIPs[0])|\(.value.DNSName)"' 2>/dev/null || echo "")
+
+    if [ -z "$devices" ]; then
+        warn "No other devices found on your tailnet"
+        echo ""
+        echo -e "  ${DIM}Make sure your phone/computer has Tailscale installed and connected.${NC}"
+        echo ""
+        return 0
+    fi
+
+    echo ""
+    echo -e "${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+    echo -e "  ${BOLD}📋 TAILSCALE ACCESS CONFIGURATION${NC}"
+    echo ""
+    echo -e "  ${DIM}This dex server is:${NC} ${CYAN}$self_name${NC} ($self_ip)"
+    echo ""
+    echo -e "  ${DIM}Other devices on your tailnet:${NC}"
+    echo ""
+
+    local i=1
+    local device_list=()
+    while IFS='|' read -r hostname ip dnsname; do
+        dnsname=$(echo "$dnsname" | sed 's/\.$//')
+        echo -e "    ${BOLD}$i.${NC} $hostname ${DIM}($ip)${NC}"
+        device_list+=("$hostname|$ip|$dnsname")
+        i=$((i + 1))
+    done <<< "$devices"
+
+    echo ""
+    echo -e "  ${YELLOW}If you have ACLs configured, add this rule to allow access:${NC}"
+    echo ""
+    echo -e "  ${DIM}// In your tailnet policy file (Access Controls):${NC}"
+    echo -e "  ${CYAN}{"
+    echo -e "    \"action\": \"accept\","
+    echo -e "    \"src\": [\"*\"],  // or specific users/devices"
+    echo -e "    \"dst\": [\"$self_name:443\"]"
+    echo -e "  }${NC}"
+    echo ""
+    echo -e "  ${DIM}Or for grants (recommended):${NC}"
+    echo ""
+    echo -e "  ${CYAN}{"
+    echo -e "    \"src\": [\"autogroup:member\"],"
+    echo -e "    \"dst\": [\"$self_name\"],"
+    echo -e "    \"app\": {"
+    echo -e "      \"tailscale.com/cap/dex\": [{"
+    echo -e "        \"ports\": [443]"
+    echo -e "      }]"
+    echo -e "    }"
+    echo -e "  }${NC}"
+    echo ""
+    echo -e "  ${BOLD}Edit ACLs:${NC} ${CYAN}https://login.tailscale.com/admin/acls${NC}"
+    echo ""
+    echo -e "${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+
+    echo -e "  ${DIM}If you don't have ACLs configured, the default allows all traffic.${NC}"
+    echo ""
+    read -p "  Press Enter to continue (or Ctrl+C to exit and fix ACLs first)... "
+    echo ""
+}
+
 run_setup_wizard() {
     log "Starting setup wizard..."
 
@@ -294,7 +366,22 @@ run_setup_wizard() {
     sleep 1
 
     # Expose via tailscale serve
-    tailscale serve --bg --https=443 "http://127.0.0.1:$SETUP_PORT"
+    if ! tailscale serve --bg --https=443 "http://127.0.0.1:$SETUP_PORT" 2>/dev/null; then
+        echo ""
+        warn "Failed to configure Tailscale Serve"
+        echo ""
+        echo -e "  ${YELLOW}This is likely an ACL issue. Please ensure your tailnet policy allows:${NC}"
+        echo ""
+        echo -e "  ${CYAN}// Add to your tailnet policy file:${NC}"
+        echo -e "  ${CYAN}\"nodeAttrs\": [{"
+        echo -e "    \"target\": [\"*\"],"
+        echo -e "    \"attr\": [\"funnel\"]"
+        echo -e "  }]${NC}"
+        echo ""
+        echo -e "  ${BOLD}Edit at:${NC} ${CYAN}https://login.tailscale.com/admin/acls${NC}"
+        echo ""
+        error "Cannot continue without Tailscale Serve access"
+    fi
 
     show_qr "$setup_url" "SCAN TO COMPLETE SETUP"
     echo -e "  ${YELLOW}Enter your API keys and save your passphrase...${NC}"
@@ -472,6 +559,7 @@ main() {
     build_dex
     install_tailscale
     authenticate_tailscale
+    check_tailscale_access
     run_setup_wizard
     install_frontend
     create_config
