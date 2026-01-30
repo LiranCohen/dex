@@ -122,6 +122,52 @@ install_jq() {
     fi
 }
 
+install_go() {
+    if command -v go &>/dev/null; then
+        success "Go already installed: $(go version | awk '{print $3}')"
+        return
+    fi
+    log "Installing Go..."
+
+    local go_version="1.24.3"
+    local go_arch="$ARCH"
+    local go_os="$OS"
+
+    # Download and install Go
+    local go_tarball="go${go_version}.${go_os}-${go_arch}.tar.gz"
+    curl -fsSL "https://go.dev/dl/${go_tarball}" -o "/tmp/${go_tarball}"
+    rm -rf /usr/local/go
+    tar -C /usr/local -xzf "/tmp/${go_tarball}"
+    rm -f "/tmp/${go_tarball}"
+
+    # Add to PATH for this session
+    export PATH=$PATH:/usr/local/go/bin
+    export GOPATH=/root/go
+    export PATH=$PATH:$GOPATH/bin
+
+    success "Go installed: $(go version | awk '{print $3}')"
+}
+
+build_dex() {
+    log "Building dex from source..."
+
+    # Ensure GOPATH/bin exists and is in PATH
+    export GOPATH="${GOPATH:-/root/go}"
+    export PATH="$PATH:/usr/local/go/bin:$GOPATH/bin"
+    mkdir -p "$GOPATH/bin"
+
+    # Install dex and dex-setup
+    go install github.com/LiranCohen/dex/cmd/dex@latest
+    go install github.com/LiranCohen/dex/cmd/dex-setup@latest
+
+    # Copy to install dir
+    mkdir -p "$DEX_INSTALL_DIR"
+    cp "$GOPATH/bin/dex" "$DEX_INSTALL_DIR/dex"
+    cp "$GOPATH/bin/dex-setup" "$DEX_INSTALL_DIR/dex-setup"
+
+    success "Built dex and dex-setup"
+}
+
 install_tailscale() {
     if command -v tailscale &>/dev/null; then
         success "Tailscale already installed"
@@ -224,28 +270,10 @@ run_setup_wizard() {
 
     rm -f "$secrets_file" "$done_file"
 
-    # Run dex-setup (assumes it's in same dir or PATH)
-    local setup_bin
-    if [ -f "./dex-setup" ]; then
-        setup_bin="./dex-setup"
-    elif [ -f "$DEX_INSTALL_DIR/dex-setup" ]; then
-        setup_bin="$DEX_INSTALL_DIR/dex-setup"
-    else
-        # Download it
-        log "Downloading setup wizard..."
-        mkdir -p "$DEX_INSTALL_DIR"
-        # TODO: Replace with actual release URL
-        # curl -fsSL "https://github.com/lirancohen/dex/releases/download/${DEX_VERSION}/dex-setup-${PLATFORM}" \
-        #   -o "$DEX_INSTALL_DIR/dex-setup"
-        # chmod +x "$DEX_INSTALL_DIR/dex-setup"
-        # setup_bin="$DEX_INSTALL_DIR/dex-setup"
-
-        # For now, check if we have a local build
-        if [ -f "/Users/liran/src/dex/dex-setup" ]; then
-            setup_bin="/Users/liran/src/dex/dex-setup"
-        else
-            error "Setup wizard not found. Please build it first: go build ./cmd/dex-setup"
-        fi
+    # Run dex-setup
+    local setup_bin="$DEX_INSTALL_DIR/dex-setup"
+    if [ ! -f "$setup_bin" ]; then
+        error "Setup wizard not found at $setup_bin"
     fi
 
     "$setup_bin" \
@@ -291,36 +319,33 @@ run_setup_wizard() {
     success "Configuration received!"
 }
 
-install_dex() {
-    log "Installing Poindexter..."
+install_frontend() {
+    log "Installing frontend..."
 
+    # Check if bun is available
+    if ! command -v bun &>/dev/null; then
+        log "Installing bun..."
+        curl -fsSL https://bun.sh/install | bash
+        export PATH="$HOME/.bun/bin:$PATH"
+    fi
+
+    # Clone repo to get frontend source
+    local tmp_repo="/tmp/dex-repo"
+    rm -rf "$tmp_repo"
+    git clone --depth=1 https://github.com/LiranCohen/dex.git "$tmp_repo"
+
+    # Build frontend
+    cd "$tmp_repo/frontend"
+    bun install
+    bun run build
+    cd - >/dev/null
+
+    # Copy to install dir
     mkdir -p "$DEX_INSTALL_DIR"
+    cp -r "$tmp_repo/frontend/dist" "$DEX_INSTALL_DIR/frontend"
+    rm -rf "$tmp_repo"
 
-    # Download dex binary
-    local dex_bin
-    if [ -f "./dex" ]; then
-        cp ./dex "$DEX_INSTALL_DIR/dex"
-    elif [ -f "/Users/liran/src/dex/dex" ]; then
-        # Local dev build
-        cp /Users/liran/src/dex/dex "$DEX_INSTALL_DIR/dex"
-    else
-        # TODO: Download from releases
-        # curl -fsSL "https://github.com/lirancohen/dex/releases/download/${DEX_VERSION}/dex-${PLATFORM}" \
-        #   -o "$DEX_INSTALL_DIR/dex"
-        error "Dex binary not found. Please build it first: go build ./cmd/dex"
-    fi
-    chmod +x "$DEX_INSTALL_DIR/dex"
-
-    # Copy frontend
-    if [ -d "./frontend/dist" ]; then
-        cp -r ./frontend/dist "$DEX_INSTALL_DIR/frontend"
-    elif [ -d "/Users/liran/src/dex/frontend/dist" ]; then
-        cp -r /Users/liran/src/dex/frontend/dist "$DEX_INSTALL_DIR/frontend"
-    else
-        warn "Frontend not found. Build it with: cd frontend && bun run build"
-    fi
-
-    success "Poindexter installed to $DEX_INSTALL_DIR"
+    success "Frontend installed"
 }
 
 create_config() {
@@ -436,10 +461,12 @@ main() {
     check_root
     install_qrencode
     install_jq
+    install_go
+    build_dex
     install_tailscale
     authenticate_tailscale
     run_setup_wizard
-    install_dex
+    install_frontend
     create_config
     create_systemd_service
     configure_tailscale_serve
