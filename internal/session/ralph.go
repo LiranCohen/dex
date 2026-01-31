@@ -60,15 +60,21 @@ func NewRalphLoop(manager *Manager, session *ActiveSession, client *toolbelt.Ant
 
 // Run executes the Ralph loop until completion, error, or budget exceeded
 func (r *RalphLoop) Run(ctx context.Context) error {
+	fmt.Printf("RalphLoop.Run: starting for session %s (hat: %s)\n", r.session.ID, r.session.Hat)
+
 	if r.client == nil {
+		fmt.Printf("RalphLoop.Run: ERROR - Anthropic client is nil\n")
 		return ErrNoAnthropicClient
 	}
 
 	// Build initial system prompt from hat template
+	fmt.Printf("RalphLoop.Run: building prompt for hat %s\n", r.session.Hat)
 	systemPrompt, err := r.buildPrompt()
 	if err != nil {
+		fmt.Printf("RalphLoop.Run: ERROR - failed to build prompt: %v\n", err)
 		return fmt.Errorf("failed to build prompt: %w", err)
 	}
+	fmt.Printf("RalphLoop.Run: prompt built successfully (%d chars)\n", len(systemPrompt))
 
 	// Broadcast session started event
 	r.broadcastEvent(websocket.EventSessionStarted, map[string]any{
@@ -102,10 +108,13 @@ func (r *RalphLoop) Run(ctx context.Context) error {
 		}
 
 		// 3. Send to Claude
+		fmt.Printf("RalphLoop.Run: iteration %d - sending message to Claude\n", r.session.IterationCount+1)
 		response, err := r.sendMessage(ctx, systemPrompt)
 		if err != nil {
+			fmt.Printf("RalphLoop.Run: ERROR - Claude API call failed: %v\n", err)
 			return fmt.Errorf("claude API error: %w", err)
 		}
+		fmt.Printf("RalphLoop.Run: received response (input tokens: %d, output tokens: %d)\n", response.Usage.InputTokens, response.Usage.OutputTokens)
 
 		// 4. Update usage tracking
 		r.session.TokensUsed += int64(response.Usage.InputTokens + response.Usage.OutputTokens)

@@ -100,7 +100,20 @@ func main() {
 					}
 				}
 				fmt.Printf("Toolbelt loaded from secrets: %d/%d services configured\n", configured, len(status))
+				// Log specific client status for debugging
+				if tb.Anthropic != nil {
+					fmt.Println("  - Anthropic client: INITIALIZED")
+				} else {
+					fmt.Println("  - Anthropic client: NOT configured")
+				}
+				if tb.GitHub != nil {
+					fmt.Println("  - GitHub client: INITIALIZED")
+				} else {
+					fmt.Println("  - GitHub client: NOT configured")
+				}
 			}
+		} else {
+			fmt.Printf("No secrets.json found at %s\n", secretsPath)
 		}
 	}
 

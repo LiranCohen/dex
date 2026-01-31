@@ -353,10 +353,13 @@ func (m *Manager) runSession(ctx context.Context, session *ActiveSession) {
 	originalHat := session.Hat
 	m.mu.Unlock()
 
+	fmt.Printf("runSession: starting session %s for task %s (hat: %s)\n", session.ID, session.TaskID, session.Hat)
+
 	var loopErr error
 
 	// Run the Ralph loop if we have an Anthropic client
 	if anthropicClient != nil {
+		fmt.Printf("runSession: Anthropic client is configured, starting Ralph loop\n")
 		loop := NewRalphLoop(m, session, anthropicClient, wsHub, m.db)
 
 		// Try to restore from checkpoint
@@ -369,8 +372,14 @@ func (m *Manager) runSession(ctx context.Context, session *ActiveSession) {
 
 		// Run the loop
 		loopErr = loop.Run(ctx)
+		if loopErr != nil {
+			fmt.Printf("runSession: Ralph loop ended with error: %v\n", loopErr)
+		} else {
+			fmt.Printf("runSession: Ralph loop completed successfully\n")
+		}
 	} else {
 		// Fallback: wait for cancellation if no client
+		fmt.Printf("runSession: WARNING - No Anthropic client configured! Session will wait for cancellation.\n")
 		<-ctx.Done()
 		loopErr = ctx.Err()
 	}

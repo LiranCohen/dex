@@ -42,10 +42,11 @@ func NewPromptLoader(promptsDir string) *PromptLoader {
 // LoadAll loads all hat prompt templates from the prompts directory
 func (p *PromptLoader) LoadAll() error {
 	hatsDir := filepath.Join(p.promptsDir, "hats")
+	fmt.Printf("PromptLoader.LoadAll: loading prompts from %s\n", hatsDir)
 
 	entries, err := os.ReadDir(hatsDir)
 	if err != nil {
-		return fmt.Errorf("failed to read hats directory: %w", err)
+		return fmt.Errorf("failed to read hats directory %s: %w", hatsDir, err)
 	}
 
 	for _, entry := range entries {
@@ -69,6 +70,8 @@ func (p *PromptLoader) LoadAll() error {
 		p.templates[hatName] = tmpl
 	}
 
+	fmt.Printf("PromptLoader.LoadAll: loaded %d prompt templates\n", len(p.templates))
+
 	// Validate all required hats have templates
 	for _, hat := range ValidHats {
 		if _, exists := p.templates[hat]; !exists {
@@ -76,6 +79,7 @@ func (p *PromptLoader) LoadAll() error {
 		}
 	}
 
+	fmt.Printf("PromptLoader.LoadAll: all required hats validated\n")
 	return nil
 }
 
