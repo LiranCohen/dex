@@ -53,6 +53,7 @@ func (db *DB) Migrate() error {
 		migrationSessions,
 		migrationSessionCheckpoints,
 		migrationApprovals,
+		migrationSessionActivity,
 	}
 
 	for i, migration := range migrations {
@@ -220,4 +221,20 @@ CREATE TABLE IF NOT EXISTS approvals (
 
 CREATE INDEX IF NOT EXISTS idx_approvals_status ON approvals(status);
 CREATE INDEX IF NOT EXISTS idx_approvals_task ON approvals(task_id);
+`
+
+const migrationSessionActivity = `
+CREATE TABLE IF NOT EXISTS session_activity (
+	id TEXT PRIMARY KEY,
+	session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+	iteration INTEGER NOT NULL,
+	event_type TEXT NOT NULL,
+	content TEXT,
+	tokens_input INTEGER,
+	tokens_output INTEGER,
+	created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_session_activity_session ON session_activity(session_id);
+CREATE INDEX IF NOT EXISTS idx_session_activity_iteration ON session_activity(session_id, iteration);
 `

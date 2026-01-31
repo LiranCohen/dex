@@ -224,8 +224,14 @@ func (db *DB) SetSessionBudgets(id string, tokensBudget *int64, dollarsBudget *f
 
 // DeleteSession removes a session from the database
 func (db *DB) DeleteSession(id string) error {
-	// First delete checkpoints
-	_, err := db.Exec(`DELETE FROM session_checkpoints WHERE session_id = ?`, id)
+	// First delete activity
+	_, err := db.Exec(`DELETE FROM session_activity WHERE session_id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("failed to delete session activity: %w", err)
+	}
+
+	// Delete checkpoints
+	_, err = db.Exec(`DELETE FROM session_checkpoints WHERE session_id = ?`, id)
 	if err != nil {
 		return fmt.Errorf("failed to delete session checkpoints: %w", err)
 	}

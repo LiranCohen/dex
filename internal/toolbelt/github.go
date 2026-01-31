@@ -4,6 +4,7 @@ package toolbelt
 import (
 	"context"
 	"fmt"
+	"net/http"
 
 	"github.com/google/go-github/v68/github"
 )
@@ -325,4 +326,71 @@ func (g *GitHubClient) SetupActions(ctx context.Context, opts SetupActionsOption
 	}
 
 	return nil
+}
+
+// GetRepo retrieves repository information
+// Returns nil, nil if the repository doesn't exist (404)
+func (g *GitHubClient) GetRepo(ctx context.Context, owner, repo string) (*github.Repository, error) {
+	if owner == "" {
+		owner = g.defaultOrg
+	}
+
+	// If still no owner, get the authenticated user
+	if owner == "" {
+		user, err := g.GetAuthenticatedUser(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get authenticated user: %w", err)
+		}
+		owner = user.GetLogin()
+	}
+
+	repository, resp, err := g.client.Repositories.Get(ctx, owner, repo)
+	if err != nil {
+		// Check if it's a 404 (repo not found)
+		if resp != nil && resp.StatusCode == http.StatusNotFound {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to get repo: %w", err)
+	}
+
+	return repository, nil
+}
+
+// EnsureRepo creates a repo if it doesn't exist, or returns the existing repo
+func (g *GitHubClient) EnsureRepo(ctx context.Context, opts CreateRepoOptions) (*github.Repository, error) {
+	owner := opts.Org
+	if owner == "" {
+		owner = g.defaultOrg
+	}
+
+	// If still no owner, get the authenticated user
+	if owner == "" {
+		user, err := g.GetAuthenticatedUser(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get authenticated user: %w", err)
+		}
+		owner = user.GetLogin()
+	}
+
+	// Check if repo already exists
+	existing, err := g.GetRepo(ctx, owner, opts.Name)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check for existing repo: %w", err)
+	}
+
+	if existing != nil {
+		return existing, nil
+	}
+
+	// Repo doesn't exist, create it
+	return g.CreateRepo(ctx, opts)
+}
+
+// GetAuthenticatedUser returns the authenticated user's information
+func (g *GitHubClient) GetAuthenticatedUser(ctx context.Context) (*github.User, error) {
+	user, _, err := g.client.Users.Get(ctx, "")
+	if err != nil {
+		return nil, fmt.Errorf("failed to get authenticated user: %w", err)
+	}
+	return user, nil
 }

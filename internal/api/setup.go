@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v4"
+	"github.com/lirancohen/dex/internal/workspace"
 )
 
 // SetupStatus represents the current setup status
@@ -263,6 +264,19 @@ func (s *Server) handleSetupComplete(c echo.Context) error {
 		// configured with the right base path
 		if err := initWorkspaceRepo(workspacePath); err != nil {
 			return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("failed to create workspace: %v", err))
+		}
+	}
+
+	// Optionally create GitHub workspace repository
+	s.toolbeltMu.RLock()
+	githubClient := s.toolbelt != nil && s.toolbelt.GitHub != nil
+	s.toolbeltMu.RUnlock()
+
+	if githubClient {
+		ws := workspace.NewService(s.toolbelt.GitHub, workspacePath)
+		if err := ws.EnsureRemoteExists(c.Request().Context()); err != nil {
+			// Log warning but don't fail - GitHub workspace is optional
+			fmt.Printf("Warning: failed to create GitHub workspace: %v\n", err)
 		}
 	}
 

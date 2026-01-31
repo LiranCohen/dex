@@ -43,6 +43,9 @@ type RalphLoop struct {
 
 	// Checkpoint frequency (save every N iterations)
 	checkpointInterval int
+
+	// Activity recorder for visibility
+	activity *ActivityRecorder
 }
 
 // NewRalphLoop creates a new RalphLoop for the given session
@@ -67,6 +70,9 @@ func (r *RalphLoop) Run(ctx context.Context) error {
 		return ErrNoAnthropicClient
 	}
 
+	// Initialize activity recorder
+	r.activity = NewActivityRecorder(r.db, r.session.ID)
+
 	// Build initial system prompt from hat template
 	fmt.Printf("RalphLoop.Run: building prompt for hat %s\n", r.session.Hat)
 	systemPrompt, err := r.buildPrompt()
@@ -84,10 +90,16 @@ func (r *RalphLoop) Run(ctx context.Context) error {
 	})
 
 	// Initialize conversation with context message
+	initialMessage := "Begin working on the task. Follow your hat instructions and report progress."
 	r.messages = append(r.messages, toolbelt.AnthropicMessage{
 		Role:    "user",
-		Content: "Begin working on the task. Follow your hat instructions and report progress.",
+		Content: initialMessage,
 	})
+
+	// Record initial user message
+	if err := r.activity.RecordUserMessage(0, initialMessage); err != nil {
+		fmt.Printf("RalphLoop.Run: warning - failed to record initial message: %v\n", err)
+	}
 
 	// Main Ralph loop
 	for {
@@ -138,8 +150,23 @@ func (r *RalphLoop) Run(ctx context.Context) error {
 			Content: responseText,
 		})
 
+		// Record assistant response with token usage
+		if err := r.activity.RecordAssistantResponse(
+			r.session.IterationCount,
+			responseText,
+			response.Usage.InputTokens,
+			response.Usage.OutputTokens,
+		); err != nil {
+			fmt.Printf("RalphLoop.Run: warning - failed to record assistant response: %v\n", err)
+		}
+
 		// 7. Check for task completion
 		if r.detectCompletion(responseText) {
+			// Record completion signal
+			if err := r.activity.RecordCompletion(r.session.IterationCount, SignalTaskComplete); err != nil {
+				fmt.Printf("RalphLoop.Run: warning - failed to record completion: %v\n", err)
+			}
+
 			r.broadcastEvent(websocket.EventSessionCompleted, map[string]any{
 				"session_id": r.session.ID,
 				"outcome":    "completed",
@@ -150,6 +177,12 @@ func (r *RalphLoop) Run(ctx context.Context) error {
 
 		// 8. Check for hat transition
 		if nextHat := r.detectHatTransition(responseText); nextHat != "" {
+			// Record hat transition
+			oldHat := r.session.Hat
+			if err := r.activity.RecordHatTransition(r.session.IterationCount, oldHat, nextHat); err != nil {
+				fmt.Printf("RalphLoop.Run: warning - failed to record hat transition: %v\n", err)
+			}
+
 			// Store transition for manager to handle
 			r.session.Hat = nextHat
 			r.broadcastEvent(websocket.EventSessionCompleted, map[string]any{
@@ -169,10 +202,16 @@ func (r *RalphLoop) Run(ctx context.Context) error {
 		}
 
 		// 10. Add continuation prompt for next iteration
+		continuationMsg := "Continue. If the task is complete, output TASK_COMPLETE. If you need to transition to a different hat, output HAT_TRANSITION:<hat_name>."
 		r.messages = append(r.messages, toolbelt.AnthropicMessage{
 			Role:    "user",
-			Content: "Continue. If the task is complete, output TASK_COMPLETE. If you need to transition to a different hat, output HAT_TRANSITION:<hat_name>.",
+			Content: continuationMsg,
 		})
+
+		// Record continuation prompt
+		if err := r.activity.RecordUserMessage(r.session.IterationCount, continuationMsg); err != nil {
+			fmt.Printf("RalphLoop.Run: warning - failed to record continuation: %v\n", err)
+		}
 	}
 }
 

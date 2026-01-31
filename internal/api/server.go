@@ -203,6 +203,10 @@ func (s *Server) registerRoutes() {
 	v1.GET("/sessions/:id", s.handleGetSession)
 	v1.POST("/sessions/:id/kill", s.handleKillSession)
 
+	// Activity endpoints
+	v1.GET("/sessions/:id/activity", s.handleGetSessionActivity)
+	v1.GET("/tasks/:id/activity", s.handleGetTaskActivity)
+
 	// WebSocket endpoint for real-time updates
 	v1.GET("/ws", func(c echo.Context) error {
 		return websocket.ServeWS(s.hub, c)
@@ -1330,6 +1334,127 @@ func (s *Server) handleKillSession(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]any{
 		"message":    "session killed",
 		"session_id": sessionID,
+	})
+}
+
+// ActivityResponse is the JSON response format for session activity
+type ActivityResponse struct {
+	ID           string  `json:"id"`
+	SessionID    string  `json:"session_id"`
+	Iteration    int     `json:"iteration"`
+	EventType    string  `json:"event_type"`
+	Content      *string `json:"content,omitempty"`
+	TokensInput  *int64  `json:"tokens_input,omitempty"`
+	TokensOutput *int64  `json:"tokens_output,omitempty"`
+	CreatedAt    string  `json:"created_at"`
+}
+
+// toActivityResponse converts a db.SessionActivity to ActivityResponse
+func toActivityResponse(a *db.SessionActivity) ActivityResponse {
+	resp := ActivityResponse{
+		ID:        a.ID,
+		SessionID: a.SessionID,
+		Iteration: a.Iteration,
+		EventType: a.EventType,
+		CreatedAt: a.CreatedAt.Format(time.RFC3339),
+	}
+	if a.Content.Valid {
+		resp.Content = &a.Content.String
+	}
+	if a.TokensInput.Valid {
+		resp.TokensInput = &a.TokensInput.Int64
+	}
+	if a.TokensOutput.Valid {
+		resp.TokensOutput = &a.TokensOutput.Int64
+	}
+	return resp
+}
+
+// handleGetSessionActivity returns all activity for a session
+func (s *Server) handleGetSessionActivity(c echo.Context) error {
+	sessionID := c.Param("id")
+
+	// Verify session exists
+	sess, err := s.db.GetSessionByID(sessionID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	if sess == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "session not found")
+	}
+
+	// Get activity
+	activities, err := s.db.ListSessionActivity(sessionID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+
+	// Get summary
+	summary, err := s.db.GetSessionActivitySummary(sessionID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+
+	// Convert to response format
+	responses := make([]ActivityResponse, len(activities))
+	for i, a := range activities {
+		responses[i] = toActivityResponse(a)
+	}
+
+	return c.JSON(http.StatusOK, map[string]any{
+		"activity": responses,
+		"summary":  summary,
+	})
+}
+
+// handleGetTaskActivity returns all activity for all sessions of a task
+func (s *Server) handleGetTaskActivity(c echo.Context) error {
+	taskID := c.Param("id")
+
+	// Verify task exists
+	task, err := s.taskService.Get(taskID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusNotFound, err.Error())
+	}
+	if task == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "task not found")
+	}
+
+	// Get all activity for this task's sessions
+	activities, err := s.db.ListTaskActivity(taskID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+
+	// Get sessions for this task
+	sessions, err := s.db.ListSessionsByTask(taskID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+
+	// Calculate total tokens across all sessions
+	var totalTokens int64
+	var totalIterations int
+	for _, sess := range sessions {
+		totalTokens += sess.TokensUsed
+		if sess.IterationCount > totalIterations {
+			totalIterations = sess.IterationCount
+		}
+	}
+
+	// Convert to response format
+	responses := make([]ActivityResponse, len(activities))
+	for i, a := range activities {
+		responses[i] = toActivityResponse(a)
+	}
+
+	return c.JSON(http.StatusOK, map[string]any{
+		"activity": responses,
+		"summary": map[string]any{
+			"total_sessions":   len(sessions),
+			"total_iterations": totalIterations,
+			"total_tokens":     totalTokens,
+		},
 	})
 }
 
