@@ -1184,13 +1184,16 @@ function TaskDetailPage() {
     );
   }
 
+  console.log('[TaskDetailPage] Before status checks, task.Status:', task.Status);
   const isPlanning = task.Status === 'planning';
   const canStart = task.Status === 'pending' || task.Status === 'ready';
   const isRunning = task.Status === 'running';
   const isPaused = task.Status === 'paused';
   const isComplete = task.Status === 'completed' || task.Status === 'cancelled';
+  console.log('[TaskDetailPage] After status checks, isPlanning:', isPlanning);
 
   // Handler for when planning is accepted or skipped
+  console.log('[TaskDetailPage] Before handlePlanningComplete useCallback');
   const handlePlanningComplete = useCallback(async () => {
     if (!id) return;
     try {
@@ -1200,6 +1203,7 @@ function TaskDetailPage() {
       console.error('Failed to refresh task after planning:', err);
     }
   }, [id]);
+  console.log('[TaskDetailPage] After handlePlanningComplete useCallback');
 
   return (
     <div className="min-h-screen bg-gray-900 text-white">
