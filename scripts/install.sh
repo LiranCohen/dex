@@ -290,7 +290,7 @@ show_qr() {
 }
 
 start_quick_tunnel() {
-    log "Starting temporary tunnel..."
+    log "Starting temporary tunnel..." >&2
 
     local tunnel_log="/tmp/cloudflared-tunnel.log"
     CLEANUP_FILES+=("$tunnel_log")
