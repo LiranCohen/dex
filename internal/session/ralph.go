@@ -81,8 +81,8 @@ func (r *RalphLoop) Run(ctx context.Context) error {
 		return ErrNoAnthropicClient
 	}
 
-	// Initialize activity recorder
-	r.activity = NewActivityRecorder(r.db, r.session.ID)
+	// Initialize activity recorder with WebSocket broadcasting
+	r.activity = NewActivityRecorder(r.db, r.session.ID, r.session.TaskID, r.broadcastEvent)
 
 	// Build initial system prompt from hat template
 	fmt.Printf("RalphLoop.Run: building prompt for hat %s\n", r.session.Hat)
@@ -335,9 +335,33 @@ func (r *RalphLoop) buildPrompt() (string, error) {
 		return "", fmt.Errorf("task not found: %s", r.session.TaskID)
 	}
 
+	// Get project from DB for context
+	var projectCtx *ProjectContext
+	project, err := r.db.GetProjectByID(task.ProjectID)
+	if err == nil && project != nil {
+		projectCtx = &ProjectContext{
+			Name:     project.Name,
+			RepoPath: project.RepoPath,
+		}
+		if project.GitHubOwner.Valid {
+			projectCtx.GitHubOwner = project.GitHubOwner.String
+		}
+		if project.GitHubRepo.Valid {
+			projectCtx.GitHubRepo = project.GitHubRepo.String
+		}
+	}
+
+	// Build list of available tools
+	toolNames := make([]string, len(r.tools))
+	for i, tool := range r.tools {
+		toolNames[i] = tool.Name
+	}
+
 	ctx := &PromptContext{
 		Task:    task,
 		Session: r.session,
+		Project: projectCtx,
+		Tools:   toolNames,
 	}
 
 	return r.manager.promptLoader.Get(r.session.Hat, ctx)

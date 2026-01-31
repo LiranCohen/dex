@@ -44,13 +44,23 @@ export function ActivityFeed({ taskId, isRunning }: ActivityFeedProps) {
     fetchData();
   }, [loadActivity]);
 
-  // Subscribe to WebSocket for session events to trigger refetch
+  // Subscribe to WebSocket for session and activity events
   const handleWebSocketEvent = useCallback(
     (event: WebSocketEvent) => {
+      // Handle real-time activity events
+      if (event.type === 'activity.new') {
+        const payload = event.payload as { task_id: string; activity: Activity };
+        if (payload.task_id === taskId && payload.activity) {
+          setActivities((prev) => [...prev, payload.activity]);
+        }
+        return;
+      }
+
+      // Handle session events to trigger refetch (for backwards compatibility)
       if (event.type.startsWith('session.')) {
         const sessionEvent = event as SessionEvent;
         if (sessionEvent.payload.task_id === taskId) {
-          // Refetch activity on any session event for this task
+          // Refetch activity on session events for this task
           loadActivity();
         }
       }

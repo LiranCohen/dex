@@ -14,9 +14,19 @@ import (
 
 // PromptContext provides context for rendering hat prompts
 type PromptContext struct {
-	Task     *db.Task
-	Session  *ActiveSession
-	Toolbelt []ToolbeltService
+	Task        *db.Task
+	Session     *ActiveSession
+	Toolbelt    []ToolbeltService
+	Project     *ProjectContext
+	Tools       []string
+}
+
+// ProjectContext provides project-level context for prompts
+type ProjectContext struct {
+	Name        string
+	RepoPath    string
+	GitHubOwner string
+	GitHubRepo  string
 }
 
 // ToolbeltService represents a toolbelt service status

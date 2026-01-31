@@ -8,23 +8,48 @@ import (
 	"github.com/lirancohen/dex/internal/db"
 )
 
-// ActivityRecorder records session activity to the database
+// ActivityRecorder records session activity to the database and broadcasts via WebSocket
 type ActivityRecorder struct {
 	db        *db.DB
 	sessionID string
+	taskID    string
+	broadcast func(eventType string, payload map[string]any)
 }
 
 // NewActivityRecorder creates a new ActivityRecorder for a session
-func NewActivityRecorder(database *db.DB, sessionID string) *ActivityRecorder {
+func NewActivityRecorder(database *db.DB, sessionID, taskID string, broadcast func(eventType string, payload map[string]any)) *ActivityRecorder {
 	return &ActivityRecorder{
 		db:        database,
 		sessionID: sessionID,
+		taskID:    taskID,
+		broadcast: broadcast,
 	}
+}
+
+// broadcastActivity sends an activity event through WebSocket
+func (r *ActivityRecorder) broadcastActivity(activity *db.SessionActivity) {
+	if r.broadcast == nil {
+		return
+	}
+	r.broadcast("activity.new", map[string]any{
+		"task_id":    r.taskID,
+		"session_id": r.sessionID,
+		"activity": map[string]any{
+			"id":            activity.ID,
+			"session_id":    activity.SessionID,
+			"iteration":     activity.Iteration,
+			"event_type":    activity.EventType,
+			"content":       activity.Content,
+			"tokens_input":  activity.TokensInput,
+			"tokens_output": activity.TokensOutput,
+			"created_at":    activity.CreatedAt,
+		},
+	})
 }
 
 // RecordUserMessage records a user message sent to Claude
 func (r *ActivityRecorder) RecordUserMessage(iteration int, content string) error {
-	_, err := r.db.CreateSessionActivity(
+	activity, err := r.db.CreateSessionActivity(
 		r.sessionID,
 		iteration,
 		db.ActivityTypeUserMessage,
@@ -35,12 +60,13 @@ func (r *ActivityRecorder) RecordUserMessage(iteration int, content string) erro
 	if err != nil {
 		return fmt.Errorf("failed to record user message: %w", err)
 	}
+	r.broadcastActivity(activity)
 	return nil
 }
 
 // RecordAssistantResponse records Claude's response
 func (r *ActivityRecorder) RecordAssistantResponse(iteration int, content string, inputTokens, outputTokens int) error {
-	_, err := r.db.CreateSessionActivity(
+	activity, err := r.db.CreateSessionActivity(
 		r.sessionID,
 		iteration,
 		db.ActivityTypeAssistantResponse,
@@ -51,6 +77,7 @@ func (r *ActivityRecorder) RecordAssistantResponse(iteration int, content string
 	if err != nil {
 		return fmt.Errorf("failed to record assistant response: %w", err)
 	}
+	r.broadcastActivity(activity)
 	return nil
 }
 
@@ -71,7 +98,7 @@ func (r *ActivityRecorder) RecordToolCall(iteration int, toolName string, input 
 		return fmt.Errorf("failed to marshal tool call: %w", err)
 	}
 
-	_, err = r.db.CreateSessionActivity(
+	activity, err := r.db.CreateSessionActivity(
 		r.sessionID,
 		iteration,
 		db.ActivityTypeToolCall,
@@ -82,6 +109,7 @@ func (r *ActivityRecorder) RecordToolCall(iteration int, toolName string, input 
 	if err != nil {
 		return fmt.Errorf("failed to record tool call: %w", err)
 	}
+	r.broadcastActivity(activity)
 	return nil
 }
 
@@ -102,7 +130,7 @@ func (r *ActivityRecorder) RecordToolResult(iteration int, toolName string, resu
 		return fmt.Errorf("failed to marshal tool result: %w", err)
 	}
 
-	_, err = r.db.CreateSessionActivity(
+	activity, err := r.db.CreateSessionActivity(
 		r.sessionID,
 		iteration,
 		db.ActivityTypeToolResult,
@@ -113,12 +141,13 @@ func (r *ActivityRecorder) RecordToolResult(iteration int, toolName string, resu
 	if err != nil {
 		return fmt.Errorf("failed to record tool result: %w", err)
 	}
+	r.broadcastActivity(activity)
 	return nil
 }
 
 // RecordCompletion records a completion signal (task complete, hat complete, etc.)
 func (r *ActivityRecorder) RecordCompletion(iteration int, signal string) error {
-	_, err := r.db.CreateSessionActivity(
+	activity, err := r.db.CreateSessionActivity(
 		r.sessionID,
 		iteration,
 		db.ActivityTypeCompletion,
@@ -129,6 +158,7 @@ func (r *ActivityRecorder) RecordCompletion(iteration int, signal string) error 
 	if err != nil {
 		return fmt.Errorf("failed to record completion: %w", err)
 	}
+	r.broadcastActivity(activity)
 	return nil
 }
 
@@ -149,7 +179,7 @@ func (r *ActivityRecorder) RecordHatTransition(iteration int, fromHat, toHat str
 		return fmt.Errorf("failed to marshal hat transition: %w", err)
 	}
 
-	_, err = r.db.CreateSessionActivity(
+	activity, err := r.db.CreateSessionActivity(
 		r.sessionID,
 		iteration,
 		db.ActivityTypeHatTransition,
@@ -160,5 +190,6 @@ func (r *ActivityRecorder) RecordHatTransition(iteration int, fromHat, toHat str
 	if err != nil {
 		return fmt.Errorf("failed to record hat transition: %w", err)
 	}
+	r.broadcastActivity(activity)
 	return nil
 }
