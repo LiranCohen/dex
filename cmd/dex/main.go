@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -76,6 +77,30 @@ func main() {
 				}
 			}
 			fmt.Printf("Toolbelt loaded: %d/%d services configured\n", configured, len(status))
+		}
+	} else {
+		// Try loading from secrets.json (created during setup)
+		dataDir := os.Getenv("DEX_DATA_DIR")
+		if dataDir == "" {
+			dataDir = "/opt/dex"
+		}
+		secretsPath := filepath.Join(dataDir, "secrets.json")
+		if _, err := os.Stat(secretsPath); err == nil {
+			fmt.Printf("Loading toolbelt from secrets: %s\n", secretsPath)
+			var err error
+			tb, err = toolbelt.NewFromSecrets(secretsPath)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: Failed to load secrets: %v\n", err)
+			} else {
+				status := tb.Status()
+				configured := 0
+				for _, s := range status {
+					if s.HasToken {
+						configured++
+					}
+				}
+				fmt.Printf("Toolbelt loaded from secrets: %d/%d services configured\n", configured, len(status))
+			}
 		}
 	}
 

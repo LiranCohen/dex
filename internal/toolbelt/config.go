@@ -2,6 +2,7 @@
 package toolbelt
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"regexp"
@@ -144,4 +145,39 @@ func LoadConfig(path string) (*Config, error) {
 	}
 
 	return &config, nil
+}
+
+// LoadFromSecrets loads toolbelt configuration from a secrets.json file
+// This is used for dex installations where API keys are stored during setup
+func LoadFromSecrets(secretsPath string) (*Config, error) {
+	data, err := os.ReadFile(secretsPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read secrets file: %w", err)
+	}
+
+	var secrets map[string]string
+	if err := json.Unmarshal(data, &secrets); err != nil {
+		return nil, fmt.Errorf("failed to parse secrets file: %w", err)
+	}
+
+	config := &Config{}
+
+	// Map secrets to config
+	if token := secrets["github_token"]; token != "" {
+		config.GitHub = &GitHubConfig{Token: token}
+	}
+	if key := secrets["anthropic_key"]; key != "" {
+		config.Anthropic = &AnthropicConfig{APIKey: key}
+	}
+
+	return config, nil
+}
+
+// NewFromSecrets creates a Toolbelt from a secrets.json file
+func NewFromSecrets(secretsPath string) (*Toolbelt, error) {
+	config, err := LoadFromSecrets(secretsPath)
+	if err != nil {
+		return nil, err
+	}
+	return New(config)
 }
