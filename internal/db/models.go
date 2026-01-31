@@ -10,9 +10,21 @@ import (
 // User represents an authenticated user
 type User struct {
 	ID          string
-	PublicKey   string
+	PublicKey   string // Legacy: Ed25519 public key (may be empty for passkey-only users)
 	CreatedAt   time.Time
 	LastLoginAt sql.NullTime
+}
+
+// WebAuthnCredential represents a stored passkey credential
+type WebAuthnCredential struct {
+	ID           string
+	UserID       string
+	CredentialID []byte // Raw credential ID from authenticator
+	PublicKey    []byte // COSE-encoded public key
+	AttestationType string
+	AAGUID       []byte // Authenticator Attestation GUID
+	SignCount    uint32 // Signature counter for replay protection
+	CreatedAt    time.Time
 }
 
 // Project represents a managed project

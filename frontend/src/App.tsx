@@ -4,21 +4,35 @@ import { useAuthStore } from './stores/auth';
 import { api, fetchApprovals, approveApproval, rejectApproval } from './lib/api';
 import { useWebSocket } from './hooks/useWebSocket';
 import type { Task, TasksResponse, SystemStatus, TaskStatus, WebSocketEvent, SessionEvent, Approval } from './lib/types';
-import {
-  validateMnemonic,
-  generatePassphrase,
-  deriveKeypair,
-  sign,
-  bytesToHex,
-  hexToBytes,
-} from './lib/crypto';
+
+// WebAuthn helper to convert base64url to ArrayBuffer
+function base64urlToBuffer(base64url: string): ArrayBuffer {
+  const base64 = base64url.replace(/-/g, '+').replace(/_/g, '/');
+  const padding = '='.repeat((4 - (base64.length % 4)) % 4);
+  const binary = atob(base64 + padding);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes.buffer;
+}
+
+// WebAuthn helper to convert ArrayBuffer to base64url
+function bufferToBase64url(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  const base64 = btoa(binary);
+  return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+}
 
 function LoginPage() {
-  const [passphrase, setPassphrase] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
-  const [showGenerated, setShowGenerated] = useState(false);
-  const [generatedPhrase, setGeneratedPhrase] = useState<string | null>(null);
+  const [isCheckingStatus, setIsCheckingStatus] = useState(true);
+  const [isConfigured, setIsConfigured] = useState(false);
 
   const setToken = useAuthStore((state) => state.setToken);
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
@@ -31,52 +45,145 @@ function LoginPage() {
     }
   }, [isAuthenticated, navigate]);
 
-  const handleGeneratePassphrase = () => {
-    const newPhrase = generatePassphrase();
-    setGeneratedPhrase(newPhrase);
-    setShowGenerated(true);
-    setPassphrase(newPhrase);
-    setError(null);
-  };
+  // Check if passkeys are configured
+  useEffect(() => {
+    const checkStatus = async () => {
+      try {
+        const status = await api.get<{ configured: boolean }>('/auth/passkey/status');
+        setIsConfigured(status.configured);
+      } catch (err) {
+        console.error('Failed to check passkey status:', err);
+        setError('Failed to connect to server');
+      } finally {
+        setIsCheckingStatus(false);
+      }
+    };
+    checkStatus();
+  }, []);
 
-  const handleUseGenerated = () => {
-    setShowGenerated(false);
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  // Handle passkey registration (first time setup)
+  const handleRegister = async () => {
     setError(null);
     setIsLoading(true);
 
     try {
-      // 1. Validate mnemonic format
-      const normalizedPhrase = passphrase.trim().toLowerCase().replace(/\s+/g, ' ');
-      if (!validateMnemonic(normalizedPhrase)) {
-        throw new Error('Invalid passphrase. Please enter a valid 24-word BIP39 mnemonic.');
+      // 1. Begin registration - get options from server
+      const beginResponse = await api.post<{
+        session_id: string;
+        user_id: string;
+        options: PublicKeyCredentialCreationOptions;
+      }>('/auth/passkey/register/begin');
+
+      // 2. Convert base64url fields to ArrayBuffer for WebAuthn API
+      const options = beginResponse.options;
+      const publicKeyOptions: PublicKeyCredentialCreationOptions = {
+        ...options,
+        challenge: base64urlToBuffer(options.challenge as unknown as string),
+        user: {
+          ...options.user,
+          id: base64urlToBuffer(options.user.id as unknown as string),
+        },
+        excludeCredentials: options.excludeCredentials?.map((cred) => ({
+          ...cred,
+          id: base64urlToBuffer(cred.id as unknown as string),
+        })),
+      };
+
+      // 3. Create credential using WebAuthn API
+      const credential = await navigator.credentials.create({
+        publicKey: publicKeyOptions,
+      }) as PublicKeyCredential;
+
+      if (!credential) {
+        throw new Error('Failed to create credential');
       }
 
-      // 2. Derive Ed25519 keypair from mnemonic
-      const { publicKey, privateKey } = deriveKeypair(normalizedPhrase);
+      const attestationResponse = credential.response as AuthenticatorAttestationResponse;
 
-      // 3. Request challenge from server
-      const challengeResponse = await api.post<{ challenge: string; expires_in: number }>(
-        '/auth/challenge'
+      // 4. Send credential to server to complete registration
+      const finishResponse = await api.post<{ token: string; user_id: string }>(
+        '/auth/passkey/register/finish',
+        {
+          session_id: beginResponse.session_id,
+          user_id: beginResponse.user_id,
+          id: credential.id,
+          rawId: bufferToBase64url(credential.rawId),
+          type: credential.type,
+          response: {
+            attestationObject: bufferToBase64url(attestationResponse.attestationObject),
+            clientDataJSON: bufferToBase64url(attestationResponse.clientDataJSON),
+          },
+        }
       );
 
-      // 4. Sign challenge with private key
-      const challengeBytes = hexToBytes(challengeResponse.challenge);
-      const signature = sign(challengeBytes, privateKey);
+      // 5. Store JWT and navigate
+      setToken(finishResponse.token, finishResponse.user_id);
+      navigate('/', { replace: true });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Registration failed';
+      setError(message);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
-      // 5. Verify with server
-      const verifyResponse = await api.post<{ token: string; user_id: string }>('/auth/verify', {
-        public_key: bytesToHex(publicKey),
-        signature: bytesToHex(signature),
-        challenge: challengeResponse.challenge,
-      });
+  // Handle passkey login
+  const handleLogin = async () => {
+    setError(null);
+    setIsLoading(true);
 
-      // 6. Store JWT and navigate
-      setToken(verifyResponse.token, verifyResponse.user_id);
-      setPassphrase(''); // Clear sensitive data from memory
+    try {
+      // 1. Begin login - get options from server
+      const beginResponse = await api.post<{
+        session_id: string;
+        user_id: string;
+        options: PublicKeyCredentialRequestOptions;
+      }>('/auth/passkey/login/begin');
+
+      // 2. Convert base64url fields to ArrayBuffer for WebAuthn API
+      const options = beginResponse.options;
+      const publicKeyOptions: PublicKeyCredentialRequestOptions = {
+        ...options,
+        challenge: base64urlToBuffer(options.challenge as unknown as string),
+        allowCredentials: options.allowCredentials?.map((cred) => ({
+          ...cred,
+          id: base64urlToBuffer(cred.id as unknown as string),
+        })),
+      };
+
+      // 3. Get credential using WebAuthn API
+      const credential = await navigator.credentials.get({
+        publicKey: publicKeyOptions,
+      }) as PublicKeyCredential;
+
+      if (!credential) {
+        throw new Error('Failed to get credential');
+      }
+
+      const assertionResponse = credential.response as AuthenticatorAssertionResponse;
+
+      // 4. Send assertion to server to complete login
+      const finishResponse = await api.post<{ token: string; user_id: string }>(
+        '/auth/passkey/login/finish',
+        {
+          session_id: beginResponse.session_id,
+          user_id: beginResponse.user_id,
+          id: credential.id,
+          rawId: bufferToBase64url(credential.rawId),
+          type: credential.type,
+          response: {
+            authenticatorData: bufferToBase64url(assertionResponse.authenticatorData),
+            clientDataJSON: bufferToBase64url(assertionResponse.clientDataJSON),
+            signature: bufferToBase64url(assertionResponse.signature),
+            userHandle: assertionResponse.userHandle
+              ? bufferToBase64url(assertionResponse.userHandle)
+              : null,
+          },
+        }
+      );
+
+      // 5. Store JWT and navigate
+      setToken(finishResponse.token, finishResponse.user_id);
       navigate('/', { replace: true });
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Authentication failed';
@@ -86,6 +193,17 @@ function LoginPage() {
     }
   };
 
+  if (isCheckingStatus) {
+    return (
+      <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center p-4">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto mb-4" />
+          <p className="text-gray-400">Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center p-4">
       <div className="w-full max-w-md">
@@ -94,80 +212,114 @@ function LoginPage() {
           <p className="text-gray-400">Your AI Orchestration Genius</p>
         </div>
 
-        {showGenerated && generatedPhrase ? (
-          <div className="bg-gray-800 rounded-lg p-6 mb-6">
-            <div className="flex items-center gap-2 mb-4">
-              <svg
-                className="w-5 h-5 text-yellow-500"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
-                />
-              </svg>
-              <span className="text-yellow-500 font-semibold">Save This Passphrase</span>
+        <div className="bg-gray-800 rounded-lg p-6">
+          {error && (
+            <div className="bg-red-900/50 border border-red-500 rounded-lg p-3 mb-4">
+              <p className="text-red-400 text-sm">{error}</p>
             </div>
-            <p className="text-gray-300 text-sm mb-4">
-              This is your only way to access Poindexter. Write it down and store it somewhere safe.
-              It cannot be recovered.
-            </p>
-            <div className="bg-gray-900 rounded p-4 mb-4 font-mono text-sm break-words leading-relaxed">
-              {generatedPhrase}
-            </div>
-            <button
-              onClick={handleUseGenerated}
-              className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-4 rounded-lg transition-colors"
-            >
-              I've Saved It - Continue
-            </button>
-          </div>
-        ) : (
-          <form onSubmit={handleSubmit} className="space-y-6">
-            <div>
-              <label htmlFor="passphrase" className="block text-sm font-medium text-gray-300 mb-2">
-                Enter your 24-word passphrase
-              </label>
-              <textarea
-                id="passphrase"
-                value={passphrase}
-                onChange={(e) => setPassphrase(e.target.value)}
-                placeholder="word1 word2 word3 ... word24"
-                rows={4}
-                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none font-mono text-sm"
-                disabled={isLoading}
-              />
-            </div>
+          )}
 
-            {error && (
-              <div className="bg-red-900/50 border border-red-500 rounded-lg p-3">
-                <p className="text-red-400 text-sm">{error}</p>
+          {isConfigured ? (
+            // Login with existing passkey
+            <div className="space-y-4">
+              <div className="text-center mb-6">
+                <svg
+                  className="w-16 h-16 mx-auto text-blue-500 mb-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={1.5}
+                    d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"
+                  />
+                </svg>
+                <p className="text-gray-300">
+                  Use your passkey to sign in
+                </p>
               </div>
-            )}
 
-            <button
-              type="submit"
-              disabled={isLoading || !passphrase.trim()}
-              className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-700 disabled:cursor-not-allowed text-white font-semibold py-3 px-4 rounded-lg transition-colors"
-            >
-              {isLoading ? 'Signing In...' : 'Sign In'}
-            </button>
-
-            <div className="text-center">
               <button
-                type="button"
-                onClick={handleGeneratePassphrase}
-                className="text-blue-400 hover:text-blue-300 text-sm transition-colors"
+                onClick={handleLogin}
+                disabled={isLoading}
+                className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-700 disabled:cursor-not-allowed text-white font-semibold py-3 px-4 rounded-lg transition-colors flex items-center justify-center gap-2"
               >
-                First time? Generate a new passphrase
+                {isLoading ? (
+                  <>
+                    <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white" />
+                    Authenticating...
+                  </>
+                ) : (
+                  <>
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M12 11c0 3.517-1.009 6.799-2.753 9.571m-3.44-2.04l.054-.09A13.916 13.916 0 008 11a4 4 0 118 0c0 1.017-.07 2.019-.203 3m-2.118 6.844A21.88 21.88 0 0015.171 17m3.839 1.132c.645-2.266.99-4.659.99-7.132A8 8 0 008 4.07M3 15.364c.64-1.319 1-2.8 1-4.364 0-1.457.39-2.823 1.07-4"
+                      />
+                    </svg>
+                    Sign in with Passkey
+                  </>
+                )}
               </button>
             </div>
-          </form>
-        )}
+          ) : (
+            // First time setup - register passkey
+            <div className="space-y-4">
+              <div className="text-center mb-6">
+                <svg
+                  className="w-16 h-16 mx-auto text-green-500 mb-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={1.5}
+                    d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"
+                  />
+                </svg>
+                <h2 className="text-xl font-semibold mb-2">Welcome to Poindexter</h2>
+                <p className="text-gray-400 text-sm">
+                  Set up a passkey to secure your account. You'll use Face ID, Touch ID, or your device's security to sign in.
+                </p>
+              </div>
+
+              <button
+                onClick={handleRegister}
+                disabled={isLoading}
+                className="w-full bg-green-600 hover:bg-green-700 disabled:bg-gray-700 disabled:cursor-not-allowed text-white font-semibold py-3 px-4 rounded-lg transition-colors flex items-center justify-center gap-2"
+              >
+                {isLoading ? (
+                  <>
+                    <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white" />
+                    Setting up...
+                  </>
+                ) : (
+                  <>
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M12 11c0 3.517-1.009 6.799-2.753 9.571m-3.44-2.04l.054-.09A13.916 13.916 0 008 11a4 4 0 118 0c0 1.017-.07 2.019-.203 3m-2.118 6.844A21.88 21.88 0 0015.171 17m3.839 1.132c.645-2.266.99-4.659.99-7.132A8 8 0 008 4.07M3 15.364c.64-1.319 1-2.8 1-4.364 0-1.457.39-2.823 1.07-4"
+                      />
+                    </svg>
+                    Set up Passkey
+                  </>
+                )}
+              </button>
+
+              <p className="text-xs text-gray-500 text-center">
+                Passkeys are more secure than passwords and easier to use.
+              </p>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

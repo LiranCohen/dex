@@ -46,6 +46,7 @@ func (db *DB) Close() error {
 func (db *DB) Migrate() error {
 	migrations := []string{
 		migrationUsers,
+		migrationWebAuthnCredentials,
 		migrationProjects,
 		migrationTasks,
 		migrationTaskDependencies,
@@ -68,10 +69,26 @@ func (db *DB) Migrate() error {
 const migrationUsers = `
 CREATE TABLE IF NOT EXISTS users (
 	id TEXT PRIMARY KEY,
-	public_key TEXT NOT NULL UNIQUE,
+	public_key TEXT UNIQUE,
 	created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 	last_login_at DATETIME
 );
+`
+
+const migrationWebAuthnCredentials = `
+CREATE TABLE IF NOT EXISTS webauthn_credentials (
+	id TEXT PRIMARY KEY,
+	user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+	credential_id BLOB NOT NULL UNIQUE,
+	public_key BLOB NOT NULL,
+	attestation_type TEXT NOT NULL DEFAULT 'none',
+	aaguid BLOB,
+	sign_count INTEGER NOT NULL DEFAULT 0,
+	created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_webauthn_credentials_user ON webauthn_credentials(user_id);
+CREATE INDEX IF NOT EXISTS idx_webauthn_credentials_cred_id ON webauthn_credentials(credential_id);
 `
 
 const migrationProjects = `

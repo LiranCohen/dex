@@ -149,6 +149,13 @@ func (s *Server) registerRoutes() {
 	v1.POST("/auth/verify", s.handleAuthVerify)
 	v1.POST("/auth/refresh", s.handleAuthRefresh)
 
+	// Passkey endpoints (WebAuthn)
+	v1.GET("/auth/passkey/status", s.handlePasskeyStatus)
+	v1.POST("/auth/passkey/register/begin", s.handlePasskeyRegisterBegin)
+	v1.POST("/auth/passkey/register/finish", s.handlePasskeyRegisterFinish)
+	v1.POST("/auth/passkey/login/begin", s.handlePasskeyLoginBegin)
+	v1.POST("/auth/passkey/login/finish", s.handlePasskeyLoginFinish)
+
 	// Task endpoints (public for now, will add auth later)
 	v1.GET("/tasks", s.handleListTasks)
 	v1.POST("/tasks", s.handleCreateTask)
