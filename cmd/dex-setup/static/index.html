@@ -650,7 +650,12 @@
                     });
                     const authData = await authResp.json();
 
-                    if (authData.already_connected) {
+                    if (authData.error) {
+                        // Show error message
+                        document.getElementById('ts-auth-url').textContent = 'Error: ' + authData.error;
+                        document.getElementById('ts-auth-url').removeAttribute('href');
+                        document.getElementById('ts-qr').style.display = 'none';
+                    } else if (authData.already_connected) {
                         document.getElementById('ts-need-auth').classList.add('hidden');
                         document.getElementById('ts-connected').classList.remove('hidden');
                         document.getElementById('ts-permanent-url').textContent = authData.serve_url;
@@ -659,12 +664,22 @@
                     } else if (authData.auth_url) {
                         document.getElementById('ts-auth-url').textContent = authData.auth_url;
                         document.getElementById('ts-auth-url').href = authData.auth_url;
+                        document.getElementById('ts-qr').style.display = 'block';
                         // Generate QR code using external service
                         document.getElementById('ts-qr').src =
                             'https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=' +
                             encodeURIComponent(authData.auth_url);
 
                         // Start polling for connection
+                        if (!tsCheckInterval) {
+                            tsCheckInterval = setInterval(checkTailscaleStatus, 3000);
+                        }
+                    } else {
+                        // No auth URL returned - show manual instructions
+                        document.getElementById('ts-auth-url').textContent = 'Run "tailscale up" in terminal to authenticate';
+                        document.getElementById('ts-auth-url').removeAttribute('href');
+                        document.getElementById('ts-qr').style.display = 'none';
+                        // Still poll for connection
                         if (!tsCheckInterval) {
                             tsCheckInterval = setInterval(checkTailscaleStatus, 3000);
                         }
