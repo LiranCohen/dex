@@ -35,6 +35,8 @@ export function useWebSocket(): UseWebSocketReturn {
       ws.onopen = () => {
         setConnected(true);
         console.log('[WebSocket] Connected');
+        // Subscribe to all events
+        ws.send(JSON.stringify({ action: 'subscribe_all' }));
       };
 
       ws.onclose = (event) => {
