@@ -642,47 +642,47 @@
                     document.getElementById('ts-need-auth').classList.remove('hidden');
                     document.getElementById('ts-connected').classList.add('hidden');
 
-                    // Get auth URL
-                    const authResp = await fetch('/api/tailscale/auth-url', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ hostname: 'dex' })
-                    });
-                    const authData = await authResp.json();
+                    // Only get auth URL if we don't already have one displayed
+                    const currentAuthUrl = document.getElementById('ts-auth-url').textContent;
+                    if (!currentAuthUrl || currentAuthUrl.startsWith('Error:') || currentAuthUrl.startsWith('Run')) {
+                        // Get auth URL (only once, not on every poll)
+                        const authResp = await fetch('/api/tailscale/auth-url', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ hostname: 'dex' })
+                        });
+                        const authData = await authResp.json();
 
-                    if (authData.error) {
-                        // Show error message
-                        document.getElementById('ts-auth-url').textContent = 'Error: ' + authData.error;
-                        document.getElementById('ts-auth-url').removeAttribute('href');
-                        document.getElementById('ts-qr').style.display = 'none';
-                    } else if (authData.already_connected) {
-                        document.getElementById('ts-need-auth').classList.add('hidden');
-                        document.getElementById('ts-connected').classList.remove('hidden');
-                        document.getElementById('ts-permanent-url').textContent = authData.serve_url;
-                        document.getElementById('ts-permanent-url').href = authData.serve_url;
-                        permanentURL = authData.serve_url;
-                    } else if (authData.auth_url) {
-                        document.getElementById('ts-auth-url').textContent = authData.auth_url;
-                        document.getElementById('ts-auth-url').href = authData.auth_url;
-                        document.getElementById('ts-qr').style.display = 'block';
-                        // Generate QR code using external service
-                        document.getElementById('ts-qr').src =
-                            'https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=' +
-                            encodeURIComponent(authData.auth_url);
+                        if (authData.error) {
+                            // Show error message
+                            document.getElementById('ts-auth-url').textContent = 'Error: ' + authData.error;
+                            document.getElementById('ts-auth-url').removeAttribute('href');
+                            document.getElementById('ts-qr').style.display = 'none';
+                        } else if (authData.already_connected) {
+                            document.getElementById('ts-need-auth').classList.add('hidden');
+                            document.getElementById('ts-connected').classList.remove('hidden');
+                            document.getElementById('ts-permanent-url').textContent = authData.serve_url;
+                            document.getElementById('ts-permanent-url').href = authData.serve_url;
+                            permanentURL = authData.serve_url;
+                        } else if (authData.auth_url) {
+                            document.getElementById('ts-auth-url').textContent = authData.auth_url;
+                            document.getElementById('ts-auth-url').href = authData.auth_url;
+                            document.getElementById('ts-qr').style.display = 'block';
+                            // Generate QR code using external service
+                            document.getElementById('ts-qr').src =
+                                'https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=' +
+                                encodeURIComponent(authData.auth_url);
+                        } else {
+                            // No auth URL returned - show manual instructions
+                            document.getElementById('ts-auth-url').textContent = 'Run "tailscale up" in terminal to authenticate';
+                            document.getElementById('ts-auth-url').removeAttribute('href');
+                            document.getElementById('ts-qr').style.display = 'none';
+                        }
+                    }
 
-                        // Start polling for connection
-                        if (!tsCheckInterval) {
-                            tsCheckInterval = setInterval(checkTailscaleStatus, 3000);
-                        }
-                    } else {
-                        // No auth URL returned - show manual instructions
-                        document.getElementById('ts-auth-url').textContent = 'Run "tailscale up" in terminal to authenticate';
-                        document.getElementById('ts-auth-url').removeAttribute('href');
-                        document.getElementById('ts-qr').style.display = 'none';
-                        // Still poll for connection
-                        if (!tsCheckInterval) {
-                            tsCheckInterval = setInterval(checkTailscaleStatus, 3000);
-                        }
+                    // Start polling for connection (only once)
+                    if (!tsCheckInterval) {
+                        tsCheckInterval = setInterval(checkTailscaleStatus, 3000);
                     }
                 }
             } catch (e) {
