@@ -178,6 +178,21 @@ func (db *DB) DeleteProject(id string) error {
 	return nil
 }
 
+// GetOrCreateDefaultProject returns the default project, creating it if it doesn't exist
+func (db *DB) GetOrCreateDefaultProject() (*Project, error) {
+	// Try to get the first project
+	projects, err := db.ListProjects()
+	if err != nil {
+		return nil, err
+	}
+	if len(projects) > 0 {
+		return projects[0], nil
+	}
+
+	// Create a default project
+	return db.CreateProject("Default Project", ".")
+}
+
 // GetProjectByRepoPath retrieves a project by its local repository path
 func (db *DB) GetProjectByRepoPath(repoPath string) (*Project, error) {
 	project := &Project{}

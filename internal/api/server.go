@@ -435,16 +435,32 @@ func (s *Server) handleListTasks(c echo.Context) error {
 // handleCreateTask creates a new task
 func (s *Server) handleCreateTask(c echo.Context) error {
 	var req struct {
-		ProjectID string `json:"project_id"`
-		Title     string `json:"title"`
-		Type      string `json:"type"`
-		Priority  int    `json:"priority"`
+		ProjectID   any    `json:"project_id"` // Accept string or number
+		Title       string `json:"title"`
+		Description string `json:"description"`
+		Type        string `json:"type"`
+		Priority    int    `json:"priority"`
 	}
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
 	}
 
-	t, err := s.taskService.Create(req.ProjectID, req.Title, req.Type, req.Priority)
+	// Get or create default project for single-user mode
+	projectID := ""
+	if req.ProjectID != nil {
+		projectID = fmt.Sprintf("%v", req.ProjectID)
+	}
+
+	if projectID == "" || projectID == "0" || projectID == "1" {
+		// Use or create default project
+		project, err := s.db.GetOrCreateDefaultProject()
+		if err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, "failed to get default project")
+		}
+		projectID = project.ID
+	}
+
+	t, err := s.taskService.Create(projectID, req.Title, req.Type, req.Priority)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
