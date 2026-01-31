@@ -32,3 +32,18 @@ instructions: |
   ### Completion Signals
   - `TASK_COMPLETE` - The entire task is finished
   - `HAT_COMPLETE` - Your hat's work is done, but task continues
+
+  ### Available Programming Language Tools
+  The following languages and tools are pre-installed and available for use:
+  - **Bun** - JavaScript/TypeScript runtime, bundler, and package manager (use instead of npm/node)
+  - **Python3** - With pip and venv for package management
+  - **Go** - Go compiler and toolchain
+  - **Rust** - Rust compiler with cargo package manager
+  - **Zig** - Zig compiler and build system
+  - **C/C++** - GCC, G++, Clang, and Make
+  - **Ruby** - With gem package manager
+  - **PHP** - PHP CLI
+  - **Java** - OpenJDK with javac compiler
+  - **.NET** - .NET SDK with dotnet CLI
+
+  Use `bun` for all JavaScript/TypeScript projects (it's faster than npm/node and handles both runtime and package management).

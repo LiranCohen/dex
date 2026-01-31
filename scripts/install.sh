@@ -341,14 +341,23 @@ install_language_tools() {
     log "Installing programming language tools..."
     echo ""
 
-    # Node.js (LTS) with npm
-    install_nodejs
+    # Bun (JavaScript/TypeScript runtime, bundler, package manager)
+    install_bun
 
     # Python3 with pip
     install_python
 
     # Rust with cargo
     install_rust
+
+    # Go (already installed earlier, but ensure PATH is set)
+    verify_go
+
+    # Zig
+    install_zig
+
+    # C/C++ toolchain (gcc, g++, clang, make)
+    install_c_cpp
 
     # Ruby with gems
     install_ruby
@@ -366,43 +375,129 @@ install_language_tools() {
     success "All programming language tools installed"
 }
 
-install_nodejs() {
-    if command -v node &>/dev/null; then
-        success "Node.js already installed: $(node --version)"
+install_bun() {
+    if command -v bun &>/dev/null; then
+        success "Bun already installed: $(bun --version)"
         return
     fi
-    log "Installing Node.js (LTS)..."
+    log "Installing Bun..."
+
+    curl -fsSL https://bun.sh/install | bash >/dev/null 2>&1
+
+    # Add to path for current session
+    export BUN_INSTALL="$HOME/.bun"
+    export PATH="$BUN_INSTALL/bin:$PATH"
+
+    # Also check root location
+    if [ "$EUID" -eq 0 ] && [ -d "/root/.bun" ]; then
+        export PATH="/root/.bun/bin:$PATH"
+    fi
+
+    if command -v bun &>/dev/null; then
+        success "Bun installed: $(bun --version)"
+    else
+        warn "Bun installation failed - AI sessions may install it when needed"
+    fi
+}
+
+verify_go() {
+    # Go is installed earlier in install_go, just verify it's accessible
+    export PATH="$PATH:/usr/local/go/bin"
+    if command -v go &>/dev/null; then
+        success "Go available: $(go version | awk '{print $3}')"
+    else
+        warn "Go not found in PATH - may need manual configuration"
+    fi
+}
+
+install_zig() {
+    if command -v zig &>/dev/null; then
+        success "Zig already installed: $(zig version)"
+        return
+    fi
+    log "Installing Zig..."
 
     case "$OS" in
         darwin)
             if command -v brew &>/dev/null; then
-                brew install node >/dev/null 2>&1
-            else
-                # Use fnm or direct download
-                curl -fsSL https://fnm.vercel.app/install | bash -s -- --skip-shell
-                export PATH="$HOME/.local/share/fnm:$PATH"
-                eval "$(fnm env)"
-                fnm install --lts
+                brew install zig >/dev/null 2>&1
             fi
             ;;
         linux)
-            # Use NodeSource for latest LTS
+            # Download latest Zig from official releases
+            local zig_version="0.13.0"
+            local zig_arch="$ARCH"
+            if [ "$zig_arch" = "amd64" ]; then
+                zig_arch="x86_64"
+            elif [ "$zig_arch" = "arm64" ]; then
+                zig_arch="aarch64"
+            fi
+            local zig_url="https://ziglang.org/download/${zig_version}/zig-linux-${zig_arch}-${zig_version}.tar.xz"
+            curl -fsSL "$zig_url" -o /tmp/zig.tar.xz
+            tar -xf /tmp/zig.tar.xz -C /usr/local
+            ln -sf /usr/local/zig-linux-${zig_arch}-${zig_version}/zig /usr/local/bin/zig
+            rm -f /tmp/zig.tar.xz
+            ;;
+    esac
+
+    if command -v zig &>/dev/null; then
+        success "Zig installed: $(zig version)"
+    else
+        warn "Zig installation failed - AI sessions may install it when needed"
+    fi
+}
+
+install_c_cpp() {
+    local has_cc=false
+    local has_cpp=false
+    local has_make=false
+
+    if command -v gcc &>/dev/null || command -v clang &>/dev/null; then
+        has_cc=true
+    fi
+    if command -v g++ &>/dev/null || command -v clang++ &>/dev/null; then
+        has_cpp=true
+    fi
+    if command -v make &>/dev/null; then
+        has_make=true
+    fi
+
+    if [ "$has_cc" = true ] && [ "$has_cpp" = true ] && [ "$has_make" = true ]; then
+        local cc_version=""
+        if command -v gcc &>/dev/null; then
+            cc_version="gcc $(gcc -dumpversion)"
+        elif command -v clang &>/dev/null; then
+            cc_version="clang $(clang --version | head -1 | awk '{print $3}')"
+        fi
+        success "C/C++ toolchain already installed: $cc_version"
+        return
+    fi
+
+    log "Installing C/C++ toolchain..."
+
+    case "$OS" in
+        darwin)
+            # macOS: Xcode command line tools provide clang
+            if ! command -v clang &>/dev/null; then
+                xcode-select --install 2>/dev/null || true
+            fi
+            ;;
+        linux)
             if command -v apt-get &>/dev/null; then
-                curl -fsSL https://deb.nodesource.com/setup_lts.x | bash -
-                apt-get install -y nodejs >/dev/null
+                apt-get install -y build-essential clang >/dev/null
             elif command -v yum &>/dev/null; then
-                curl -fsSL https://rpm.nodesource.com/setup_lts.x | bash -
-                yum install -y nodejs >/dev/null
+                yum groupinstall -y "Development Tools" >/dev/null
+                yum install -y clang >/dev/null
             elif command -v pacman &>/dev/null; then
-                pacman -Sy --noconfirm nodejs npm >/dev/null
+                pacman -Sy --noconfirm base-devel clang >/dev/null
             fi
             ;;
     esac
 
-    if command -v node &>/dev/null; then
-        success "Node.js installed: $(node --version)"
+    if command -v gcc &>/dev/null || command -v clang &>/dev/null; then
+        success "C/C++ toolchain installed"
     else
-        warn "Node.js installation failed - AI sessions may install it when needed"
+        warn "C/C++ toolchain installation failed - AI sessions may install it when needed"
     fi
 }
 
