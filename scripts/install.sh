@@ -149,6 +149,7 @@ wipe_data() {
 
     # Remove data files but keep binaries
     rm -f "$DEX_INSTALL_DIR/dex.db" 2>/dev/null || true
+    rm -f "$DEX_INSTALL_DIR/secrets.json" 2>/dev/null || true
     rm -f "$DEX_INSTALL_DIR/setup-complete" 2>/dev/null || true
     rm -f "$DEX_INSTALL_DIR/setup-pin" 2>/dev/null || true
     rm -f "$DEX_INSTALL_DIR/permanent-url" 2>/dev/null || true
