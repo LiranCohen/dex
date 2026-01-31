@@ -2,14 +2,13 @@
 #
 # Poindexter Magic Installer
 #
-# Usage:
-#   curl -fsSL https://dex.example.com/install.sh | bash
+# Two-phase setup:
+#   Phase 1: Temporary Cloudflare tunnel -> PIN -> Choose access method
+#            (Tailscale or Cloudflare) -> Get permanent URL
+#   Phase 2: On permanent URL -> Register passkey -> Enter API keys
 #
-# Flow:
-#   1. Shows QR code → scan to join Tailscale (or login)
-#   2. Shows QR code → scan to enter API keys
-#   3. Done! Dex is running at https://dex.your-tailnet.ts.net
-#   4. Visit the URL to register a passkey for secure authentication
+# Usage:
+#   curl -fsSL https://example.com/install.sh | bash
 #
 set -euo pipefail
 
@@ -28,20 +27,25 @@ DEX_VERSION="${DEX_VERSION:-latest}"
 DEX_HOSTNAME="${DEX_HOSTNAME:-dex}"
 DEX_PORT="${DEX_PORT:-8080}"
 DEX_INSTALL_DIR="${DEX_INSTALL_DIR:-/opt/dex}"
-SETUP_PORT="${SETUP_PORT:-9999}"
+SETUP_PORT="${SETUP_PORT:-8081}"
 
 # State
 CLEANUP_PIDS=()
 CLEANUP_FILES=()
+TUNNEL_PID=""
+PERMANENT_URL=""
+ACCESS_METHOD=""
 
 cleanup() {
     for pid in "${CLEANUP_PIDS[@]:-}"; do
         kill "$pid" 2>/dev/null || true
     done
+    if [ -n "${TUNNEL_PID:-}" ]; then
+        kill "$TUNNEL_PID" 2>/dev/null || true
+    fi
     for file in "${CLEANUP_FILES[@]:-}"; do
         rm -f "$file" 2>/dev/null || true
     done
-    # NOTE: Don't reset tailscale serve here - we want the final config to persist!
 }
 trap cleanup EXIT
 
@@ -124,7 +128,6 @@ install_jq() {
 }
 
 install_go() {
-    # Check common locations for Go
     export PATH="$PATH:/usr/local/go/bin"
 
     if command -v go &>/dev/null; then
@@ -137,14 +140,12 @@ install_go() {
     local go_arch="$ARCH"
     local go_os="$OS"
 
-    # Download and install Go
     local go_tarball="go${go_version}.${go_os}-${go_arch}.tar.gz"
     curl -fsSL "https://go.dev/dl/${go_tarball}" -o "/tmp/${go_tarball}"
     rm -rf /usr/local/go
     tar -C /usr/local -xzf "/tmp/${go_tarball}"
     rm -f "/tmp/${go_tarball}"
 
-    # Add to PATH for this session
     export PATH=$PATH:/usr/local/go/bin
     export GOPATH=/root/go
     export PATH=$PATH:$GOPATH/bin
@@ -152,34 +153,42 @@ install_go() {
     success "Go installed: $(go version | awk '{print $3}')"
 }
 
-build_dex() {
-    # Skip if already built
-    if [ -f "$DEX_INSTALL_DIR/dex" ] && [ -f "$DEX_INSTALL_DIR/dex-setup" ]; then
-        success "Dex already installed at $DEX_INSTALL_DIR"
+install_cloudflared() {
+    if command -v cloudflared &>/dev/null; then
+        success "cloudflared already installed"
         return
     fi
+    log "Installing cloudflared..."
 
-    log "Building dex from source..."
+    case "$OS" in
+        darwin)
+            if command -v brew &>/dev/null; then
+                brew install cloudflare/cloudflare/cloudflared >/dev/null 2>&1 || {
+                    # Fallback to manual install
+                    local url="https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-darwin-${ARCH}.tgz"
+                    curl -fsSL "$url" -o /tmp/cloudflared.tgz
+                    tar -xzf /tmp/cloudflared.tgz -C /tmp
+                    mv /tmp/cloudflared /usr/local/bin/
+                    chmod +x /usr/local/bin/cloudflared
+                    rm -f /tmp/cloudflared.tgz
+                }
+            else
+                local url="https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-darwin-${ARCH}.tgz"
+                curl -fsSL "$url" -o /tmp/cloudflared.tgz
+                tar -xzf /tmp/cloudflared.tgz -C /tmp
+                mv /tmp/cloudflared /usr/local/bin/
+                chmod +x /usr/local/bin/cloudflared
+                rm -f /tmp/cloudflared.tgz
+            fi
+            ;;
+        linux)
+            local url="https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-${ARCH}"
+            curl -fsSL "$url" -o /usr/local/bin/cloudflared
+            chmod +x /usr/local/bin/cloudflared
+            ;;
+    esac
 
-    export PATH="$PATH:/usr/local/go/bin"
-    export GOPROXY="https://proxy.golang.org,direct"
-    mkdir -p "$DEX_INSTALL_DIR"
-
-    # Clear any corrupted module cache from previous attempts
-    go clean -modcache 2>/dev/null || true
-
-    # Clone and build
-    local src_dir="/tmp/dex-build"
-    rm -rf "$src_dir"
-    git clone --depth=1 https://github.com/LiranCohen/dex.git "$src_dir"
-
-    cd "$src_dir"
-    go build -o "$DEX_INSTALL_DIR/dex" ./cmd/dex
-    go build -o "$DEX_INSTALL_DIR/dex-setup" ./cmd/dex-setup
-    cd - >/dev/null
-
-    rm -rf "$src_dir"
-    success "Built dex and dex-setup"
+    success "cloudflared installed"
 }
 
 install_tailscale() {
@@ -193,6 +202,74 @@ install_tailscale() {
         systemctl enable --now tailscaled >/dev/null 2>&1 || true
     fi
     success "Tailscale installed"
+}
+
+build_dex() {
+    if [ -f "$DEX_INSTALL_DIR/dex" ] && [ -f "$DEX_INSTALL_DIR/dex-setup" ]; then
+        success "Dex already installed at $DEX_INSTALL_DIR"
+        return
+    fi
+
+    log "Building dex from source..."
+
+    export PATH="$PATH:/usr/local/go/bin"
+    export GOPROXY="https://proxy.golang.org,direct"
+    mkdir -p "$DEX_INSTALL_DIR"
+
+    go clean -modcache 2>/dev/null || true
+
+    local src_dir="/tmp/dex-build"
+    rm -rf "$src_dir"
+    git clone --depth=1 https://github.com/LiranCohen/dex.git "$src_dir"
+
+    cd "$src_dir"
+    go build -o "$DEX_INSTALL_DIR/dex" ./cmd/dex
+    go build -o "$DEX_INSTALL_DIR/dex-setup" ./cmd/dex-setup
+    cd - >/dev/null
+
+    rm -rf "$src_dir"
+    success "Built dex and dex-setup"
+}
+
+install_frontend() {
+    if [ -d "$DEX_INSTALL_DIR/frontend" ] && [ -f "$DEX_INSTALL_DIR/frontend/index.html" ]; then
+        success "Frontend already installed"
+        return
+    fi
+
+    log "Installing frontend..."
+
+    if ! command -v bun &>/dev/null; then
+        log "Installing bun..."
+        curl -fsSL https://bun.sh/install | bash
+        export PATH="$HOME/.bun/bin:$PATH"
+    fi
+
+    local tmp_repo="/tmp/dex-repo"
+    rm -rf "$tmp_repo"
+    git clone --depth=1 https://github.com/lirancohen/dex.git "$tmp_repo"
+
+    cd "$tmp_repo/frontend"
+    bun install
+    bun run build
+    cd - >/dev/null
+
+    mkdir -p "$DEX_INSTALL_DIR"
+    cp -r "$tmp_repo/frontend/dist" "$DEX_INSTALL_DIR/frontend"
+    rm -rf "$tmp_repo"
+
+    success "Frontend installed"
+}
+
+generate_pin() {
+    local pin
+    if command -v shuf &>/dev/null; then
+        pin=$(shuf -i 100000-999999 -n 1)
+    else
+        # Fallback for macOS
+        pin=$(jot -r 1 100000 999999)
+    fi
+    echo "$pin"
 }
 
 show_qr() {
@@ -212,88 +289,50 @@ show_qr() {
     echo ""
 }
 
-authenticate_tailscale() {
-    # Check if already connected
-    if tailscale status --json 2>/dev/null | jq -e '.BackendState == "Running"' >/dev/null 2>&1; then
-        success "Already connected to Tailscale"
-        return 0
-    fi
+start_quick_tunnel() {
+    log "Starting temporary tunnel..."
 
-    log "Connecting to Tailscale..."
+    local tunnel_log="/tmp/cloudflared-tunnel.log"
+    CLEANUP_FILES+=("$tunnel_log")
+    rm -f "$tunnel_log"
 
-    # Create a temp file to capture the auth URL
-    local auth_log
-    auth_log=$(mktemp)
-    CLEANUP_FILES+=("$auth_log")
+    # Start cloudflared quick tunnel
+    cloudflared tunnel --url "http://127.0.0.1:$SETUP_PORT" > "$tunnel_log" 2>&1 &
+    TUNNEL_PID=$!
 
-    # Start tailscale up in background
-    tailscale up --hostname="$DEX_HOSTNAME" --ssh 2>&1 | tee "$auth_log" &
-    local ts_pid=$!
-    CLEANUP_PIDS+=($ts_pid)
-
-    # Wait for auth URL
-    local auth_url=""
-    for _ in {1..30}; do
-        if grep -q "https://login.tailscale.com" "$auth_log" 2>/dev/null; then
-            auth_url=$(grep -o 'https://login.tailscale.com[^ ]*' "$auth_log" | head -1)
-            break
-        fi
-        # Check if already authenticated
-        if tailscale status --json 2>/dev/null | jq -e '.BackendState == "Running"' >/dev/null 2>&1; then
-            success "Connected to Tailscale"
-            return 0
-        fi
+    # Wait for tunnel URL
+    local temp_url=""
+    local attempts=0
+    while [ -z "$temp_url" ] && [ $attempts -lt 30 ]; do
         sleep 1
+        attempts=$((attempts + 1))
+        if [ -f "$tunnel_log" ]; then
+            temp_url=$(grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' "$tunnel_log" 2>/dev/null | head -1 || true)
+        fi
     done
 
-    if [ -z "$auth_url" ]; then
-        # One more check
-        if tailscale status --json 2>/dev/null | jq -e '.BackendState == "Running"' >/dev/null 2>&1; then
-            success "Connected to Tailscale"
-            return 0
-        fi
-        error "Could not get Tailscale auth URL"
+    if [ -z "$temp_url" ]; then
+        cat "$tunnel_log" 2>/dev/null || true
+        error "Failed to get temporary tunnel URL"
     fi
 
-    show_qr "$auth_url" "SCAN TO JOIN TAILSCALE"
-    echo -e "  ${YELLOW}Waiting for authentication...${NC}"
-
-    # Wait for connection
-    while ! tailscale status --json 2>/dev/null | jq -e '.BackendState == "Running"' >/dev/null 2>&1; do
-        sleep 2
-    done
-
-    local dns_name
-    dns_name=$(tailscale status --json | jq -r '.Self.DNSName' | sed 's/\.$//')
-    echo ""
-    success "Connected as ${BOLD}$dns_name${NC}"
+    echo "$temp_url"
 }
 
-check_tailscale_access() {
-    # Just a brief note about ACLs - don't block
-    local self_name
-    self_name=$(tailscale status --json | jq -r '.Self.DNSName' | sed 's/\.$//')
+run_setup_phase1() {
+    log "Starting setup wizard (Phase 1: Choose access method)..."
+
+    # Generate PIN
+    local pin
+    pin=$(generate_pin)
+    local pin_file="$DEX_INSTALL_DIR/setup-pin"
+    mkdir -p "$DEX_INSTALL_DIR"
+    echo -n "$pin" > "$pin_file"
+    chmod 600 "$pin_file"
 
     echo ""
-    echo -e "  ${DIM}Note: If you have Tailscale ACLs, ensure this device can be reached on port 443.${NC}"
-    echo -e "  ${DIM}Edit ACLs: https://login.tailscale.com/admin/acls${NC}"
+    echo -e "  ${BOLD}${YELLOW}Setup PIN: $pin${NC}"
     echo ""
-}
-
-run_setup_wizard() {
-    log "Starting setup wizard..."
-
-    # Get our DNS name
-    local dns_name
-    dns_name=$(tailscale status --json | jq -r '.Self.DNSName' | sed 's/\.$//')
-    local setup_url="https://${dns_name}"
-
-    # Start the setup wizard
-    local secrets_file="/tmp/dex-setup-secrets.json"
-    local done_file="/tmp/dex-setup-complete"
-    CLEANUP_FILES+=("$secrets_file" "$done_file")
-
-    rm -f "$secrets_file" "$done_file"
 
     # Kill anything using the setup port
     if command -v lsof &>/dev/null; then
@@ -304,10 +343,7 @@ run_setup_wizard() {
     pkill -9 -f "dex-setup" 2>/dev/null || true
     sleep 1
 
-    # Reset any existing tailscale serve config
-    tailscale serve reset 2>/dev/null || true
-
-    # Run dex-setup
+    # Run setup wizard
     local setup_bin="$DEX_INSTALL_DIR/dex-setup"
     if [ ! -f "$setup_bin" ]; then
         error "Setup wizard not found at $setup_bin"
@@ -315,40 +351,28 @@ run_setup_wizard() {
 
     "$setup_bin" \
         -addr "127.0.0.1:$SETUP_PORT" \
-        -output "$secrets_file" \
-        -done "$done_file" \
-        -url "$setup_url" &
+        -pin-file "$pin_file" \
+        -data-dir "$DEX_INSTALL_DIR" \
+        -dex-port "$DEX_PORT" &
     local wizard_pid=$!
     CLEANUP_PIDS+=($wizard_pid)
 
     sleep 2
 
-    # Expose via tailscale serve
-    if ! tailscale serve --bg --https=443 "http://127.0.0.1:$SETUP_PORT" 2>/dev/null; then
-        echo ""
-        warn "Failed to configure Tailscale Serve"
-        echo ""
-        echo -e "  ${YELLOW}This is likely an ACL issue. Please ensure your tailnet policy allows:${NC}"
-        echo ""
-        echo -e "  ${CYAN}// Add to your tailnet policy file:${NC}"
-        echo -e "  ${CYAN}\"nodeAttrs\": [{"
-        echo -e "    \"target\": [\"*\"],"
-        echo -e "    \"attr\": [\"funnel\"]"
-        echo -e "  }]${NC}"
-        echo ""
-        echo -e "  ${BOLD}Edit at:${NC} ${CYAN}https://login.tailscale.com/admin/acls${NC}"
-        echo ""
-        error "Cannot continue without Tailscale Serve access"
-    fi
+    # Start temporary cloudflare tunnel
+    local temp_url
+    temp_url=$(start_quick_tunnel)
 
-    show_qr "$setup_url" "SCAN TO COMPLETE SETUP"
-    echo -e "  ${YELLOW}Enter your API keys to continue...${NC}"
+    show_qr "$temp_url" "SCAN TO SETUP POINDEXTER"
+    echo -e "  ${BOLD}PIN: ${YELLOW}$pin${NC}"
+    echo ""
+    echo -e "  ${YELLOW}Waiting for you to choose an access method...${NC}"
+    echo ""
 
-    # Wait for completion
-    while [ ! -f "$done_file" ]; do
-        # Check if wizard is still running
+    # Wait for permanent URL to be written (phase 1 complete)
+    while [ ! -f "$DEX_INSTALL_DIR/permanent-url" ]; do
         if ! kill -0 "$wizard_pid" 2>/dev/null; then
-            if [ -f "$done_file" ]; then
+            if [ -f "$DEX_INSTALL_DIR/permanent-url" ]; then
                 break
             fi
             error "Setup wizard exited unexpectedly"
@@ -356,76 +380,47 @@ run_setup_wizard() {
         sleep 2
     done
 
-    # Stop the wizard serve
-    tailscale serve reset
-
-    # Read secrets
-    if [ ! -f "$secrets_file" ]; then
-        error "Secrets file not found"
-    fi
-
-    ANTHROPIC_API_KEY=$(jq -r '.anthropic' "$secrets_file")
-    GITHUB_TOKEN=$(jq -r '.github' "$secrets_file")
+    # Read permanent URL and access method
+    PERMANENT_URL=$(cat "$DEX_INSTALL_DIR/permanent-url")
+    ACCESS_METHOD=$(cat "$DEX_INSTALL_DIR/access-method" 2>/dev/null || echo "unknown")
 
     echo ""
-    success "Configuration received!"
+    success "Permanent access established!"
+    echo ""
+    echo -e "  ${BOLD}Access Method:${NC} $ACCESS_METHOD"
+    echo -e "  ${BOLD}Permanent URL:${NC} ${CYAN}$PERMANENT_URL${NC}"
+    echo ""
+
+    # Remove PIN file
+    rm -f "$pin_file"
 }
 
-install_frontend() {
-    # Skip if already installed
-    if [ -d "$DEX_INSTALL_DIR/frontend" ] && [ -f "$DEX_INSTALL_DIR/frontend/index.html" ]; then
-        success "Frontend already installed"
-        return
+wait_for_full_setup() {
+    log "Waiting for full setup completion (Phase 2)..."
+    echo ""
+    echo -e "  ${YELLOW}Complete the remaining setup steps on your permanent URL:${NC}"
+    echo -e "  ${CYAN}$PERMANENT_URL${NC}"
+    echo ""
+    echo -e "  - Register a passkey (Face ID / Touch ID / Security Key)"
+    echo -e "  - Enter your GitHub token"
+    echo -e "  - Enter your Anthropic API key"
+    echo ""
+    echo -e "  ${DIM}Temporary tunnel remains active for debugging...${NC}"
+    echo ""
+
+    # Wait for full setup completion
+    while [ ! -f "$DEX_INSTALL_DIR/setup-complete" ]; do
+        sleep 2
+    done
+
+    success "Setup complete!"
+
+    # Now we can shut down the temporary tunnel
+    if [ -n "${TUNNEL_PID:-}" ]; then
+        log "Shutting down temporary tunnel..."
+        kill "$TUNNEL_PID" 2>/dev/null || true
+        TUNNEL_PID=""
     fi
-
-    log "Installing frontend..."
-
-    # Check if bun is available
-    if ! command -v bun &>/dev/null; then
-        log "Installing bun..."
-        curl -fsSL https://bun.sh/install | bash
-        export PATH="$HOME/.bun/bin:$PATH"
-    fi
-
-    # Clone repo to get frontend source
-    local tmp_repo="/tmp/dex-repo"
-    rm -rf "$tmp_repo"
-    git clone --depth=1 https://github.com/lirancohen/dex.git "$tmp_repo"
-
-    # Build frontend
-    cd "$tmp_repo/frontend"
-    bun install
-    bun run build
-    cd - >/dev/null
-
-    # Copy to install dir
-    mkdir -p "$DEX_INSTALL_DIR"
-    cp -r "$tmp_repo/frontend/dist" "$DEX_INSTALL_DIR/frontend"
-    rm -rf "$tmp_repo"
-
-    success "Frontend installed"
-}
-
-create_config() {
-    log "Creating configuration..."
-
-    # Create .env
-    cat > "$DEX_INSTALL_DIR/.env" << EOF
-ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-GITHUB_TOKEN=${GITHUB_TOKEN}
-EOF
-    chmod 600 "$DEX_INSTALL_DIR/.env"
-
-    # Create toolbelt.yaml
-    cat > "$DEX_INSTALL_DIR/toolbelt.yaml" << 'EOF'
-github:
-  token: ${GITHUB_TOKEN}
-
-anthropic:
-  api_key: ${ANTHROPIC_API_KEY}
-EOF
-
-    success "Configuration saved"
 }
 
 create_systemd_service() {
@@ -436,6 +431,11 @@ create_systemd_service() {
 
     log "Creating systemd service..."
 
+    # Read access method to determine how to configure
+    local access_method
+    access_method=$(cat "$DEX_INSTALL_DIR/access-method" 2>/dev/null || echo "tailscale")
+
+    # Create the main service
     cat > /etc/systemd/system/dex.service << EOF
 [Unit]
 Description=Poindexter AI Orchestration
@@ -446,18 +446,44 @@ Wants=tailscaled.service
 Type=simple
 User=root
 WorkingDirectory=${DEX_INSTALL_DIR}
-EnvironmentFile=${DEX_INSTALL_DIR}/.env
 ExecStart=${DEX_INSTALL_DIR}/dex \\
     -db ${DEX_INSTALL_DIR}/dex.db \\
     -static ${DEX_INSTALL_DIR}/frontend \\
-    -toolbelt ${DEX_INSTALL_DIR}/toolbelt.yaml \\
     -addr 127.0.0.1:${DEX_PORT}
+Restart=always
+RestartSec=5
+Environment=DEX_DATA_DIR=${DEX_INSTALL_DIR}
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    # If using Cloudflare, create a tunnel service
+    if [ "$access_method" = "cloudflare" ] && [ -f "$DEX_INSTALL_DIR/cloudflare-tunnel.json" ]; then
+        local tunnel_id
+        tunnel_id=$(jq -r '.id' "$DEX_INSTALL_DIR/cloudflare-tunnel.json")
+        local cred_path="$DEX_INSTALL_DIR/cloudflared-creds.json"
+
+        cat > /etc/systemd/system/dex-tunnel.service << EOF
+[Unit]
+Description=Poindexter Cloudflare Tunnel
+After=network.target
+Wants=dex.service
+
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/local/bin/cloudflared tunnel --credentials-file ${cred_path} run ${tunnel_id}
 Restart=always
 RestartSec=5
 
 [Install]
 WantedBy=multi-user.target
 EOF
+        systemctl daemon-reload
+        systemctl enable dex-tunnel >/dev/null 2>&1
+        systemctl start dex-tunnel
+    fi
 
     systemctl daemon-reload
     systemctl enable dex >/dev/null 2>&1
@@ -467,9 +493,15 @@ EOF
 }
 
 configure_tailscale_serve() {
+    local access_method
+    access_method=$(cat "$DEX_INSTALL_DIR/access-method" 2>/dev/null || echo "")
+
+    if [ "$access_method" != "tailscale" ]; then
+        return
+    fi
+
     log "Configuring Tailscale Serve..."
 
-    # Wait for dex to be ready
     local attempts=0
     while ! curl -s "http://127.0.0.1:${DEX_PORT}/" >/dev/null 2>&1; do
         sleep 1
@@ -480,9 +512,7 @@ configure_tailscale_serve() {
         fi
     done
 
-    # Configure permanent serve
-    # Use setsid to detach from the curl|bash session so the config persists
-    if ! setsid tailscale serve --bg --https=443 "http://127.0.0.1:${DEX_PORT}"; then
+    if ! setsid tailscale serve --bg --https=443 "http://127.0.0.1:${DEX_PORT}" 2>/dev/null; then
         warn "Failed to configure Tailscale Serve"
         echo ""
         echo -e "  ${YELLOW}Run manually:${NC}"
@@ -491,21 +521,12 @@ configure_tailscale_serve() {
         return 1
     fi
 
-    # Verify it's configured
-    if ! tailscale serve status | grep -q "443"; then
-        warn "Tailscale Serve may not be configured correctly"
-        echo ""
-        tailscale serve status
-        echo ""
-    else
-        success "HTTPS configured via Tailscale Serve"
-    fi
+    success "HTTPS configured via Tailscale Serve"
 }
 
 print_success() {
-    local dns_name
-    dns_name=$(tailscale status --json | jq -r '.Self.DNSName' | sed 's/\.$//')
-    local dex_url="https://${dns_name}"
+    local permanent_url
+    permanent_url=$(cat "$DEX_INSTALL_DIR/permanent-url" 2>/dev/null || echo "")
 
     echo ""
     echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
@@ -513,17 +534,15 @@ print_success() {
     echo -e "  ${GREEN}${BOLD}✓ POINDEXTER IS READY${NC}"
     echo ""
 
-    # Show QR code for easy mobile access
-    echo -e "  ${BOLD}📱 Scan to access:${NC}"
-    echo ""
-    qrencode -t ANSI256 -m 2 "$dex_url"
-    echo ""
-    echo -e "  ${CYAN}$dex_url${NC}"
-    echo ""
-    echo -e "  ${BOLD}SSH access (no keys needed):${NC}"
-    echo ""
-    echo -e "    ${CYAN}tailscale ssh ${DEX_HOSTNAME}${NC}"
-    echo ""
+    if [ -n "$permanent_url" ]; then
+        echo -e "  ${BOLD}📱 Scan to access:${NC}"
+        echo ""
+        qrencode -t ANSI256 -m 2 "$permanent_url"
+        echo ""
+        echo -e "  ${CYAN}$permanent_url${NC}"
+        echo ""
+    fi
+
     if command -v systemctl &>/dev/null; then
         echo -e "  ${BOLD}Service management:${NC}"
         echo ""
@@ -538,7 +557,7 @@ print_success() {
 
 is_configured() {
     # Check if dex is already fully configured
-    [ -f "$DEX_INSTALL_DIR/.env" ] && \
+    [ -f "$DEX_INSTALL_DIR/setup-complete" ] && \
     [ -f "$DEX_INSTALL_DIR/dex" ] && \
     [ -d "$DEX_INSTALL_DIR/frontend" ]
 }
@@ -550,24 +569,22 @@ main() {
     install_qrencode
     install_jq
     install_go
-    build_dex
+    install_cloudflared
     install_tailscale
-    authenticate_tailscale
-    check_tailscale_access
+    build_dex
+    install_frontend
 
     if is_configured; then
         success "Dex is already configured"
-        # Make sure service is running
         if command -v systemctl &>/dev/null; then
             systemctl start dex 2>/dev/null || true
         fi
         configure_tailscale_serve
     else
-        run_setup_wizard
-        install_frontend
-        create_config
+        run_setup_phase1
         create_systemd_service
         configure_tailscale_serve
+        wait_for_full_setup
     fi
 
     print_success

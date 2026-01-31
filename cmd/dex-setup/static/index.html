@@ -30,35 +30,23 @@
             margin-bottom: 30px;
             font-size: 15px;
         }
-        .step {
+        .screen {
+            display: none;
+        }
+        .screen.active {
+            display: block;
+        }
+        .card {
             background: rgba(255,255,255,0.05);
             border-radius: 16px;
             padding: 24px;
             margin-bottom: 20px;
             backdrop-filter: blur(10px);
         }
-        .step-header {
-            display: flex;
-            align-items: center;
-            margin-bottom: 16px;
-        }
-        .step-number {
-            background: linear-gradient(135deg, #4CAF50, #45a049);
-            color: white;
-            width: 32px;
-            height: 32px;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-weight: bold;
-            margin-right: 12px;
-            font-size: 14px;
-            box-shadow: 0 2px 8px rgba(76, 175, 80, 0.3);
-        }
-        .step-title {
+        .card-title {
             font-size: 18px;
             font-weight: 600;
+            margin-bottom: 16px;
         }
         label {
             display: block;
@@ -66,7 +54,7 @@
             font-size: 14px;
             margin-bottom: 8px;
         }
-        input[type="text"], input[type="password"] {
+        input[type="text"], input[type="password"], select {
             width: 100%;
             padding: 16px;
             border: 2px solid rgba(255,255,255,0.1);
@@ -77,7 +65,7 @@
             margin-bottom: 12px;
             transition: border-color 0.2s, box-shadow 0.2s;
         }
-        input:focus {
+        input:focus, select:focus {
             outline: none;
             border-color: #4CAF50;
             box-shadow: 0 0 0 3px rgba(76, 175, 80, 0.2);
@@ -85,18 +73,19 @@
         input::placeholder {
             color: #555;
         }
-        .help-text {
-            font-size: 13px;
-            color: #666;
-            margin-top: -8px;
-            margin-bottom: 8px;
+        .pin-input {
+            display: flex;
+            gap: 8px;
+            justify-content: center;
+            margin: 20px 0;
         }
-        .help-text a {
-            color: #4CAF50;
-            text-decoration: none;
-        }
-        .help-text a:hover {
-            text-decoration: underline;
+        .pin-input input {
+            width: 50px;
+            height: 60px;
+            text-align: center;
+            font-size: 24px;
+            font-weight: bold;
+            padding: 0;
         }
         button {
             width: 100%;
@@ -124,6 +113,49 @@
             box-shadow: none;
             transform: none;
         }
+        button.secondary {
+            background: rgba(255,255,255,0.1);
+            box-shadow: none;
+        }
+        button.secondary:hover {
+            background: rgba(255,255,255,0.15);
+            box-shadow: none;
+        }
+        .choice-card {
+            background: rgba(255,255,255,0.05);
+            border: 2px solid rgba(255,255,255,0.1);
+            border-radius: 16px;
+            padding: 20px;
+            margin-bottom: 16px;
+            cursor: pointer;
+            transition: border-color 0.2s, background 0.2s;
+        }
+        .choice-card:hover {
+            border-color: rgba(76, 175, 80, 0.5);
+            background: rgba(255,255,255,0.08);
+        }
+        .choice-card .icon {
+            font-size: 32px;
+            margin-bottom: 12px;
+        }
+        .choice-card h3 {
+            font-size: 18px;
+            margin-bottom: 8px;
+        }
+        .choice-card p {
+            color: #888;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+        .choice-card .badge {
+            display: inline-block;
+            background: rgba(76, 175, 80, 0.2);
+            color: #4CAF50;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            margin-left: 8px;
+        }
         .info-box {
             background: rgba(33, 150, 243, 0.15);
             border: 1px solid rgba(33, 150, 243, 0.5);
@@ -135,41 +167,80 @@
             align-items: flex-start;
             gap: 12px;
         }
+        .info-box.warning {
+            background: rgba(255, 193, 7, 0.15);
+            border-color: rgba(255, 193, 7, 0.5);
+        }
+        .info-box.error {
+            background: rgba(244, 67, 54, 0.15);
+            border-color: rgba(244, 67, 54, 0.5);
+        }
         .info-icon {
             font-size: 24px;
             flex-shrink: 0;
         }
-        .success {
-            text-align: center;
-            padding: 40px 20px;
+        .status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 12px 16px;
+            background: rgba(0,0,0,0.2);
+            border-radius: 8px;
+            margin: 16px 0;
         }
-        .success-icon {
-            font-size: 64px;
-            margin-bottom: 20px;
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #888;
         }
-        .success h2 {
-            color: #4CAF50;
-            margin-bottom: 16px;
-            font-size: 24px;
+        .status-dot.connected {
+            background: #4CAF50;
         }
-        .success-url {
+        .status-dot.waiting {
+            background: #FFC107;
+            animation: pulse 1.5s infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        .qr-container {
+            background: white;
+            padding: 16px;
+            border-radius: 12px;
+            display: inline-block;
+            margin: 20px 0;
+        }
+        .qr-container img {
+            display: block;
+            width: 200px;
+            height: 200px;
+        }
+        .url-display {
             background: rgba(0,0,0,0.3);
             border-radius: 12px;
             padding: 16px;
             margin-top: 20px;
             font-family: monospace;
-            font-size: 16px;
+            font-size: 14px;
             color: #4CAF50;
             word-break: break-all;
+            text-align: center;
         }
-        .success-url a {
+        .url-display a {
             color: #4CAF50;
             text-decoration: none;
         }
-        .success-url a:hover {
+        .url-display a:hover {
             text-decoration: underline;
         }
-        .hidden { display: none; }
+        .success-icon {
+            font-size: 64px;
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        .hidden { display: none !important; }
         .loading {
             display: inline-block;
             width: 20px;
@@ -182,94 +253,436 @@
             margin-right: 8px;
         }
         @keyframes spin { to { transform: rotate(360deg); } }
+        .steps {
+            display: flex;
+            justify-content: center;
+            gap: 8px;
+            margin-bottom: 30px;
+        }
+        .step-indicator {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: rgba(255,255,255,0.2);
+        }
+        .step-indicator.active {
+            background: #4CAF50;
+        }
+        .step-indicator.completed {
+            background: #4CAF50;
+        }
+        .help-link {
+            color: #4CAF50;
+            text-decoration: none;
+        }
+        .help-link:hover {
+            text-decoration: underline;
+        }
+        .instructions {
+            background: rgba(0,0,0,0.2);
+            border-radius: 12px;
+            padding: 16px;
+            margin: 16px 0;
+        }
+        .instructions ol {
+            margin-left: 20px;
+            line-height: 1.8;
+        }
+        .instructions a {
+            color: #4CAF50;
+        }
     </style>
 </head>
 <body>
     <div class="container">
-        <!-- Step 1: Enter API Keys -->
-        <div id="setup-form">
+        <!-- Screen 1: PIN Entry -->
+        <div id="screen-pin" class="screen active">
             <h1>Poindexter</h1>
-            <p class="subtitle">AI Orchestration Platform Setup</p>
+            <p class="subtitle">Enter the PIN shown in your terminal</p>
 
-            <div class="step">
-                <div class="step-header">
-                    <div class="step-number">1</div>
-                    <div class="step-title">Anthropic API Key</div>
+            <div class="card">
+                <div class="pin-input">
+                    <input type="text" maxlength="1" pattern="[0-9]" inputmode="numeric" autofocus>
+                    <input type="text" maxlength="1" pattern="[0-9]" inputmode="numeric">
+                    <input type="text" maxlength="1" pattern="[0-9]" inputmode="numeric">
+                    <input type="text" maxlength="1" pattern="[0-9]" inputmode="numeric">
+                    <input type="text" maxlength="1" pattern="[0-9]" inputmode="numeric">
+                    <input type="text" maxlength="1" pattern="[0-9]" inputmode="numeric">
                 </div>
-                <label for="anthropic">Powers all AI sessions</label>
-                <input type="password" id="anthropic" placeholder="sk-ant-api03-..." autocomplete="off" autocapitalize="off" spellcheck="false">
-                <p class="help-text">
-                    <a href="https://console.anthropic.com/settings/keys" target="_blank">Get your key</a>
-                </p>
-            </div>
 
-            <div class="step">
-                <div class="step-header">
-                    <div class="step-number">2</div>
-                    <div class="step-title">GitHub Token</div>
+                <div id="pin-error" class="info-box error hidden">
+                    <span class="info-icon">!</span>
+                    <div id="pin-error-text">Invalid PIN</div>
                 </div>
-                <label for="github">For repository and PR management</label>
-                <input type="password" id="github" placeholder="ghp_..." autocomplete="off" autocapitalize="off" spellcheck="false">
-                <p class="help-text">
-                    <a href="https://github.com/settings/tokens/new?scopes=repo&description=Poindexter" target="_blank">Create token with repo scope</a>
-                </p>
+
+                <button id="btn-verify-pin" onclick="verifyPIN()">Continue</button>
             </div>
 
             <div class="info-box">
-                <span class="info-icon">&#x1F511;</span>
-                <div>
-                    <strong>Passkey Authentication</strong><br>
-                    After setup, you'll register a passkey (Face ID, Touch ID, or security key) to securely access Poindexter.
+                <span class="info-icon">&#x1F4BB;</span>
+                <div>Check your terminal for the 6-digit PIN. It was displayed when you ran the install script.</div>
+            </div>
+        </div>
+
+        <!-- Screen 2: Access Choice -->
+        <div id="screen-choice" class="screen">
+            <h1>Choose Access Method</h1>
+            <p class="subtitle">How do you want to connect to Poindexter?</p>
+
+            <div class="choice-card" onclick="chooseTailscale()">
+                <div class="icon">&#x1F512;</div>
+                <h3>Tailscale <span class="badge">Recommended</span></h3>
+                <p>Private network access. Only you can connect. Requires installing the Tailscale app on your devices.</p>
+            </div>
+
+            <div class="choice-card" onclick="chooseCloudflare()">
+                <div class="icon">&#x1F310;</div>
+                <h3>Cloudflare</h3>
+                <p>Public URL access. Connect from anywhere without installing apps. Requires a Cloudflare account and API token.</p>
+            </div>
+        </div>
+
+        <!-- Screen 3a: Tailscale Setup -->
+        <div id="screen-tailscale" class="screen">
+            <h1>Tailscale Setup</h1>
+            <p class="subtitle">Connect your device to your tailnet</p>
+
+            <div class="card">
+                <div id="ts-not-installed" class="hidden">
+                    <div class="info-box warning">
+                        <span class="info-icon">&#x26A0;</span>
+                        <div>Tailscale is not installed on the server. Please install it first.</div>
+                    </div>
+                    <div class="instructions">
+                        <ol>
+                            <li>Install Tailscale: <code>curl -fsSL https://tailscale.com/install.sh | sh</code></li>
+                            <li>Refresh this page</li>
+                        </ol>
+                    </div>
+                    <button onclick="checkTailscaleStatus()">Check Again</button>
+                </div>
+
+                <div id="ts-need-auth" class="hidden">
+                    <p style="margin-bottom: 16px;">Install the Tailscale app on your phone or computer, then scan this QR code to connect:</p>
+
+                    <div style="text-align: center;">
+                        <div class="qr-container">
+                            <img id="ts-qr" src="" alt="Tailscale Auth QR">
+                        </div>
+                    </div>
+
+                    <p style="text-align: center; margin-bottom: 16px; font-size: 14px; color: #888;">Or open this URL:</p>
+                    <div class="url-display">
+                        <a id="ts-auth-url" href="#" target="_blank"></a>
+                    </div>
+
+                    <div class="status">
+                        <div class="status-dot waiting"></div>
+                        <span>Waiting for connection...</span>
+                    </div>
+                </div>
+
+                <div id="ts-connected" class="hidden">
+                    <div class="success-icon">&#x2705;</div>
+                    <h3 style="text-align: center; margin-bottom: 16px;">Connected!</h3>
+                    <p style="text-align: center; color: #888; margin-bottom: 20px;">Your permanent URL:</p>
+                    <div class="url-display">
+                        <a id="ts-permanent-url" href="#" target="_blank"></a>
+                    </div>
+                    <button style="margin-top: 20px;" onclick="configureTailscale()">Continue</button>
                 </div>
             </div>
 
-            <button id="submit-btn" onclick="submitSetup()">Continue</button>
+            <button class="secondary" onclick="goBack()">Back</button>
         </div>
 
-        <!-- Step 2: Success -->
-        <div id="success-screen" class="hidden">
-            <div class="success">
-                <div class="success-icon">&#x1F389;</div>
-                <h2>Setup Complete!</h2>
-                <p style="color: #888;">Poindexter is now running. Click below to register your passkey and start using it.</p>
-                <div class="success-url">
-                    <a id="dex-url" href="#" target="_blank"></a>
+        <!-- Screen 3b: Cloudflare Setup -->
+        <div id="screen-cloudflare" class="screen">
+            <h1>Cloudflare Setup</h1>
+            <p class="subtitle">Create a permanent tunnel</p>
+
+            <div class="card">
+                <div id="cf-step-token">
+                    <div class="card-title">Step 1: Enter API Token</div>
+
+                    <div class="instructions">
+                        <ol>
+                            <li>Go to <a href="https://dash.cloudflare.com/profile/api-tokens" target="_blank">Cloudflare API Tokens</a></li>
+                            <li>Click "Create Token"</li>
+                            <li>Use the "Edit Cloudflare Tunnel" template</li>
+                            <li>Copy the token and paste below</li>
+                        </ol>
+                    </div>
+
+                    <label for="cf-token">API Token</label>
+                    <input type="password" id="cf-token" placeholder="Enter your Cloudflare API token">
+
+                    <div id="cf-token-error" class="info-box error hidden">
+                        <span class="info-icon">!</span>
+                        <div id="cf-token-error-text">Invalid token</div>
+                    </div>
+
+                    <button id="btn-validate-token" onclick="validateCloudflareToken()">Validate Token</button>
                 </div>
-                <p style="margin-top: 20px; color: #666; font-size: 14px;">
-                    You'll set up a passkey on your first visit.
+
+                <div id="cf-step-zone" class="hidden">
+                    <div class="card-title">Step 2: Choose Domain</div>
+
+                    <label for="cf-zone">Domain</label>
+                    <select id="cf-zone">
+                        <option value="">Select a domain...</option>
+                    </select>
+
+                    <label for="cf-subdomain">Subdomain</label>
+                    <input type="text" id="cf-subdomain" placeholder="dex" value="dex">
+
+                    <p style="color: #888; font-size: 13px; margin-bottom: 16px;">
+                        Your URL will be: <strong id="cf-preview-url">https://dex.example.com</strong>
+                    </p>
+
+                    <button id="btn-create-tunnel" onclick="createCloudfllareTunnel()">Create Tunnel</button>
+                </div>
+
+                <div id="cf-step-complete" class="hidden">
+                    <div class="success-icon">&#x2705;</div>
+                    <h3 style="text-align: center; margin-bottom: 16px;">Tunnel Created!</h3>
+                    <p style="text-align: center; color: #888; margin-bottom: 20px;">Your permanent URL:</p>
+                    <div class="url-display">
+                        <a id="cf-permanent-url" href="#" target="_blank"></a>
+                    </div>
+                    <button style="margin-top: 20px;" onclick="completeSetup()">Continue to Setup</button>
+                </div>
+            </div>
+
+            <button class="secondary" onclick="goBack()">Back</button>
+        </div>
+
+        <!-- Screen 4: Complete -->
+        <div id="screen-complete" class="screen">
+            <div class="card" style="text-align: center;">
+                <div class="success-icon">&#x1F389;</div>
+                <h2 style="margin-bottom: 16px;">Access Configured!</h2>
+                <p style="color: #888; margin-bottom: 20px;">
+                    Redirecting you to your permanent URL to complete setup...
                 </p>
+                <div class="url-display">
+                    <a id="final-url" href="#" target="_blank"></a>
+                </div>
+                <div class="status" style="justify-content: center;">
+                    <div class="loading"></div>
+                    <span>Redirecting...</span>
+                </div>
             </div>
         </div>
     </div>
 
     <script>
-        async function submitSetup() {
-            const btn = document.getElementById('submit-btn');
-            const anthropic = document.getElementById('anthropic').value.trim();
-            const github = document.getElementById('github').value.trim();
+        // State
+        let currentScreen = 'pin';
+        let permanentURL = '';
+        let accessMethod = '';
+        let cfZones = [];
+        let tsCheckInterval = null;
 
-            if (!anthropic) {
-                alert('Please enter your Anthropic API key');
-                document.getElementById('anthropic').focus();
-                return;
-            }
-            if (!github) {
-                alert('Please enter your GitHub token');
-                document.getElementById('github').focus();
-                return;
-            }
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            setupPINInputs();
+            fetchState();
+        });
 
+        function setupPINInputs() {
+            const inputs = document.querySelectorAll('.pin-input input');
+            inputs.forEach((input, index) => {
+                input.addEventListener('input', (e) => {
+                    const value = e.target.value;
+                    if (value && index < inputs.length - 1) {
+                        inputs[index + 1].focus();
+                    }
+                    if (value && index === inputs.length - 1) {
+                        verifyPIN();
+                    }
+                });
+                input.addEventListener('keydown', (e) => {
+                    if (e.key === 'Backspace' && !e.target.value && index > 0) {
+                        inputs[index - 1].focus();
+                    }
+                });
+                input.addEventListener('paste', (e) => {
+                    e.preventDefault();
+                    const paste = (e.clipboardData || window.clipboardData).getData('text');
+                    const digits = paste.replace(/\D/g, '').slice(0, 6);
+                    digits.split('').forEach((digit, i) => {
+                        if (inputs[i]) inputs[i].value = digit;
+                    });
+                    if (digits.length === 6) verifyPIN();
+                });
+            });
+        }
+
+        async function fetchState() {
+            try {
+                const resp = await fetch('/api/state');
+                const state = await resp.json();
+
+                if (state.phase === 'access_choice') {
+                    showScreen('choice');
+                } else if (state.phase === 'tailscale_setup') {
+                    accessMethod = 'tailscale';
+                    showScreen('tailscale');
+                    checkTailscaleStatus();
+                } else if (state.phase === 'cloudflare_setup') {
+                    accessMethod = 'cloudflare';
+                    showScreen('cloudflare');
+                } else if (state.phase === 'complete') {
+                    permanentURL = state.permanent_url;
+                    showScreen('complete');
+                    setTimeout(() => {
+                        window.location.href = permanentURL;
+                    }, 2000);
+                }
+            } catch (e) {
+                console.error('Failed to fetch state:', e);
+            }
+        }
+
+        function showScreen(screen) {
+            document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+            document.getElementById('screen-' + screen).classList.add('active');
+            currentScreen = screen;
+        }
+
+        function getPIN() {
+            const inputs = document.querySelectorAll('.pin-input input');
+            return Array.from(inputs).map(i => i.value).join('');
+        }
+
+        async function verifyPIN() {
+            const pin = getPIN();
+            if (pin.length !== 6) return;
+
+            const btn = document.getElementById('btn-verify-pin');
             btn.disabled = true;
-            btn.innerHTML = '<span class="loading"></span>Saving...';
+            btn.innerHTML = '<span class="loading"></span>Verifying...';
 
             try {
-                const res = await fetch('/api/setup', {
+                const resp = await fetch('/api/verify-pin', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ anthropic, github })
+                    body: JSON.stringify({ pin })
                 });
 
-                const data = await res.json();
+                const data = await resp.json();
+
+                if (data.error) {
+                    document.getElementById('pin-error').classList.remove('hidden');
+                    document.getElementById('pin-error-text').textContent =
+                        data.error + (data.attempts_remaining ? ` (${data.attempts_remaining} attempts left)` : '');
+                    // Clear inputs
+                    document.querySelectorAll('.pin-input input').forEach(i => i.value = '');
+                    document.querySelector('.pin-input input').focus();
+                } else {
+                    showScreen('choice');
+                }
+            } catch (e) {
+                document.getElementById('pin-error').classList.remove('hidden');
+                document.getElementById('pin-error-text').textContent = 'Connection error. Please try again.';
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Continue';
+            }
+        }
+
+        async function chooseTailscale() {
+            try {
+                await fetch('/api/choose-tailscale', { method: 'POST' });
+                accessMethod = 'tailscale';
+                showScreen('tailscale');
+                checkTailscaleStatus();
+            } catch (e) {
+                alert('Error: ' + e.message);
+            }
+        }
+
+        async function chooseCloudflare() {
+            try {
+                await fetch('/api/choose-cloudflare', { method: 'POST' });
+                accessMethod = 'cloudflare';
+                showScreen('cloudflare');
+            } catch (e) {
+                alert('Error: ' + e.message);
+            }
+        }
+
+        async function checkTailscaleStatus() {
+            try {
+                const resp = await fetch('/api/tailscale/status');
+                const status = await resp.json();
+
+                if (!status.installed) {
+                    document.getElementById('ts-not-installed').classList.remove('hidden');
+                    document.getElementById('ts-need-auth').classList.add('hidden');
+                    document.getElementById('ts-connected').classList.add('hidden');
+                    return;
+                }
+
+                if (status.connected) {
+                    document.getElementById('ts-not-installed').classList.add('hidden');
+                    document.getElementById('ts-need-auth').classList.add('hidden');
+                    document.getElementById('ts-connected').classList.remove('hidden');
+                    document.getElementById('ts-permanent-url').textContent = status.serve_url;
+                    document.getElementById('ts-permanent-url').href = status.serve_url;
+                    permanentURL = status.serve_url;
+                    if (tsCheckInterval) {
+                        clearInterval(tsCheckInterval);
+                        tsCheckInterval = null;
+                    }
+                } else {
+                    // Need to authenticate
+                    document.getElementById('ts-not-installed').classList.add('hidden');
+                    document.getElementById('ts-need-auth').classList.remove('hidden');
+                    document.getElementById('ts-connected').classList.add('hidden');
+
+                    // Get auth URL
+                    const authResp = await fetch('/api/tailscale/auth-url', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ hostname: 'dex' })
+                    });
+                    const authData = await authResp.json();
+
+                    if (authData.already_connected) {
+                        document.getElementById('ts-need-auth').classList.add('hidden');
+                        document.getElementById('ts-connected').classList.remove('hidden');
+                        document.getElementById('ts-permanent-url').textContent = authData.serve_url;
+                        document.getElementById('ts-permanent-url').href = authData.serve_url;
+                        permanentURL = authData.serve_url;
+                    } else if (authData.auth_url) {
+                        document.getElementById('ts-auth-url').textContent = authData.auth_url;
+                        document.getElementById('ts-auth-url').href = authData.auth_url;
+                        // Generate QR code using external service
+                        document.getElementById('ts-qr').src =
+                            'https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=' +
+                            encodeURIComponent(authData.auth_url);
+
+                        // Start polling for connection
+                        if (!tsCheckInterval) {
+                            tsCheckInterval = setInterval(checkTailscaleStatus, 3000);
+                        }
+                    }
+                }
+            } catch (e) {
+                console.error('Failed to check Tailscale status:', e);
+            }
+        }
+
+        async function configureTailscale() {
+            const btn = document.querySelector('#ts-connected button');
+            btn.disabled = true;
+            btn.innerHTML = '<span class="loading"></span>Configuring...';
+
+            try {
+                const resp = await fetch('/api/tailscale/configure', { method: 'POST' });
+                const data = await resp.json();
 
                 if (data.error) {
                     alert('Error: ' + data.error);
@@ -278,33 +691,164 @@
                     return;
                 }
 
-                // Setup saved, now complete
+                permanentURL = data.permanent_url;
                 await completeSetup();
             } catch (e) {
-                alert('Setup failed: ' + e.message);
+                alert('Error: ' + e.message);
                 btn.disabled = false;
                 btn.textContent = 'Continue';
             }
         }
 
+        async function validateCloudflareToken() {
+            const token = document.getElementById('cf-token').value.trim();
+            if (!token) {
+                document.getElementById('cf-token-error').classList.remove('hidden');
+                document.getElementById('cf-token-error-text').textContent = 'Please enter an API token';
+                return;
+            }
+
+            const btn = document.getElementById('btn-validate-token');
+            btn.disabled = true;
+            btn.innerHTML = '<span class="loading"></span>Validating...';
+
+            try {
+                const resp = await fetch('/api/cloudflare/validate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ api_token: token })
+                });
+
+                const data = await resp.json();
+
+                if (data.error) {
+                    document.getElementById('cf-token-error').classList.remove('hidden');
+                    document.getElementById('cf-token-error-text').textContent = data.error;
+                    btn.disabled = false;
+                    btn.textContent = 'Validate Token';
+                    return;
+                }
+
+                // Token valid, get zones
+                const zonesResp = await fetch('/api/cloudflare/zones');
+                const zonesData = await zonesResp.json();
+
+                if (zonesData.zones && zonesData.zones.length > 0) {
+                    cfZones = zonesData.zones;
+                    const select = document.getElementById('cf-zone');
+                    select.innerHTML = '<option value="">Select a domain...</option>';
+                    cfZones.forEach(zone => {
+                        const option = document.createElement('option');
+                        option.value = zone.id;
+                        option.textContent = zone.name;
+                        option.dataset.name = zone.name;
+                        select.appendChild(option);
+                    });
+
+                    select.addEventListener('change', updateCFPreview);
+                    document.getElementById('cf-subdomain').addEventListener('input', updateCFPreview);
+
+                    document.getElementById('cf-step-token').classList.add('hidden');
+                    document.getElementById('cf-step-zone').classList.remove('hidden');
+                } else {
+                    document.getElementById('cf-token-error').classList.remove('hidden');
+                    document.getElementById('cf-token-error-text').textContent = 'No domains found in your account';
+                    btn.disabled = false;
+                    btn.textContent = 'Validate Token';
+                }
+            } catch (e) {
+                document.getElementById('cf-token-error').classList.remove('hidden');
+                document.getElementById('cf-token-error-text').textContent = 'Connection error: ' + e.message;
+                btn.disabled = false;
+                btn.textContent = 'Validate Token';
+            }
+        }
+
+        function updateCFPreview() {
+            const select = document.getElementById('cf-zone');
+            const subdomain = document.getElementById('cf-subdomain').value || 'dex';
+            const selectedOption = select.options[select.selectedIndex];
+            const zoneName = selectedOption?.dataset?.name || 'example.com';
+            document.getElementById('cf-preview-url').textContent = `https://${subdomain}.${zoneName}`;
+        }
+
+        async function createCloudfllareTunnel() {
+            const select = document.getElementById('cf-zone');
+            const zoneID = select.value;
+            const zoneName = select.options[select.selectedIndex]?.dataset?.name;
+            const subdomain = document.getElementById('cf-subdomain').value.trim() || 'dex';
+
+            if (!zoneID) {
+                alert('Please select a domain');
+                return;
+            }
+
+            const btn = document.getElementById('btn-create-tunnel');
+            btn.disabled = true;
+            btn.innerHTML = '<span class="loading"></span>Creating tunnel...';
+
+            try {
+                const resp = await fetch('/api/cloudflare/setup', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        tunnel_name: 'poindexter',
+                        subdomain: subdomain,
+                        zone_id: zoneID,
+                        zone_name: zoneName
+                    })
+                });
+
+                const data = await resp.json();
+
+                if (data.error) {
+                    alert('Error: ' + data.error);
+                    btn.disabled = false;
+                    btn.textContent = 'Create Tunnel';
+                    return;
+                }
+
+                permanentURL = data.permanent_url;
+                document.getElementById('cf-permanent-url').textContent = permanentURL;
+                document.getElementById('cf-permanent-url').href = permanentURL;
+                document.getElementById('cf-step-zone').classList.add('hidden');
+                document.getElementById('cf-step-complete').classList.remove('hidden');
+            } catch (e) {
+                alert('Error: ' + e.message);
+                btn.disabled = false;
+                btn.textContent = 'Create Tunnel';
+            }
+        }
+
         async function completeSetup() {
             try {
-                const res = await fetch('/api/complete', { method: 'POST' });
-                const data = await res.json();
+                const resp = await fetch('/api/complete', { method: 'POST' });
+                const data = await resp.json();
 
                 if (data.error) {
                     alert('Error: ' + data.error);
                     return;
                 }
 
-                const urlElement = document.getElementById('dex-url');
-                urlElement.textContent = data.url;
-                urlElement.href = data.url;
-                document.getElementById('setup-form').classList.add('hidden');
-                document.getElementById('success-screen').classList.remove('hidden');
+                document.getElementById('final-url').textContent = permanentURL;
+                document.getElementById('final-url').href = permanentURL;
+                showScreen('complete');
+
+                // Redirect after a short delay
+                setTimeout(() => {
+                    window.location.href = permanentURL;
+                }, 3000);
             } catch (e) {
-                alert('Error completing setup: ' + e.message);
+                alert('Error: ' + e.message);
             }
+        }
+
+        function goBack() {
+            if (tsCheckInterval) {
+                clearInterval(tsCheckInterval);
+                tsCheckInterval = null;
+            }
+            showScreen('choice');
         }
     </script>
 </body>

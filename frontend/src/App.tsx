@@ -3,7 +3,16 @@ import { Routes, Route, Navigate, useNavigate, useParams, Link } from 'react-rou
 import { useAuthStore } from './stores/auth';
 import { api, fetchApprovals, approveApproval, rejectApproval } from './lib/api';
 import { useWebSocket } from './hooks/useWebSocket';
+import { Onboarding } from './components/Onboarding';
 import type { Task, TasksResponse, SystemStatus, TaskStatus, WebSocketEvent, SessionEvent, Approval } from './lib/types';
+
+// Setup status type
+interface SetupStatus {
+  passkey_registered: boolean;
+  github_token_set: boolean;
+  anthropic_key_set: boolean;
+  setup_complete: boolean;
+}
 
 // WebAuthn helper to convert base64url to ArrayBuffer
 function base64urlToBuffer(base64url: string): ArrayBuffer {
@@ -1604,12 +1613,59 @@ function ApprovalsPage() {
   );
 }
 
-// Protected route wrapper
+// Protected route wrapper that also handles onboarding
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
+  const [_setupStatus, setSetupStatus] = useState<SetupStatus | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [showOnboarding, setShowOnboarding] = useState(false);
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      checkSetupStatus();
+    }
+  }, [isAuthenticated]);
+
+  const checkSetupStatus = async () => {
+    setIsLoading(true);
+    try {
+      const status = await api.get<SetupStatus>('/api/v1/setup/status');
+      setSetupStatus(status);
+
+      // Show onboarding if setup is not complete
+      if (!status.setup_complete && (!status.github_token_set || !status.anthropic_key_set)) {
+        setShowOnboarding(true);
+      }
+    } catch (err) {
+      console.error('Failed to check setup status:', err);
+      // Don't block user if setup check fails
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleOnboardingComplete = () => {
+    setShowOnboarding(false);
+    checkSetupStatus();
+  };
 
   if (!isAuthenticated) {
     return <Navigate to="/login" replace />;
+  }
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto mb-4" />
+          <p className="text-gray-400">Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (showOnboarding) {
+    return <Onboarding onComplete={handleOnboardingComplete} />;
   }
 
   return <>{children}</>;

@@ -5,25 +5,18 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
-	"strings"
 	"testing"
 )
 
-func TestSetupHandler(t *testing.T) {
-	// Create temp files for output
-	tmpDir := t.TempDir()
-	secretsPath := filepath.Join(tmpDir, "secrets.json")
-	donePath := filepath.Join(tmpDir, "done")
-
-	// Set flags
-	*outputFile = secretsPath
-	*doneFile = donePath
-	*dexURL = "https://dex.test.ts.net"
-
+func TestPINVerification(t *testing.T) {
 	server := &SetupServer{
-		done: make(chan struct{}),
+		state: SetupState{
+			Phase: PhasePin,
+		},
+		pinVerifier: NewPINVerifier("123456"),
+		done:        make(chan struct{}),
+		dataDir:     t.TempDir(),
+		dexPort:     8080,
 	}
 
 	t.Run("health check", func(t *testing.T) {
@@ -37,140 +30,120 @@ func TestSetupHandler(t *testing.T) {
 		}
 	})
 
-	t.Run("setup with valid keys", func(t *testing.T) {
-		body := SetupRequest{
-			Anthropic: "sk-ant-api03-test-key",
-			GitHub:    "ghp_testtoken123456789",
-		}
-		jsonBody, _ := json.Marshal(body)
-
-		req := httptest.NewRequest(http.MethodPost, "/api/setup", bytes.NewReader(jsonBody))
-		req.Header.Set("Content-Type", "application/json")
+	t.Run("get initial state", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/state", nil)
 		w := httptest.NewRecorder()
 
-		server.handleSetup(w, req)
-
-		if w.Code != http.StatusOK {
-			t.Errorf("Expected 200, got %d: %s", w.Code, w.Body.String())
-		}
-
-		var resp SetupResponse
-		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
-			t.Fatalf("Failed to decode response: %v", err)
-		}
-
-		if resp.Error != "" {
-			t.Errorf("Unexpected error: %s", resp.Error)
-		}
-
-		if !resp.Success {
-			t.Error("Expected success in response")
-		}
-
-		// Verify secrets file was created
-		data, err := os.ReadFile(secretsPath)
-		if err != nil {
-			t.Fatalf("Failed to read secrets file: %v", err)
-		}
-
-		var secrets Secrets
-		if err := json.Unmarshal(data, &secrets); err != nil {
-			t.Fatalf("Failed to parse secrets: %v", err)
-		}
-
-		if secrets.Anthropic != body.Anthropic {
-			t.Errorf("Anthropic key mismatch")
-		}
-		if secrets.GitHub != body.GitHub {
-			t.Errorf("GitHub token mismatch")
-		}
-	})
-
-	t.Run("setup with invalid anthropic key", func(t *testing.T) {
-		body := SetupRequest{
-			Anthropic: "invalid-key",
-			GitHub:    "ghp_testtoken123456789",
-		}
-		jsonBody, _ := json.Marshal(body)
-
-		req := httptest.NewRequest(http.MethodPost, "/api/setup", bytes.NewReader(jsonBody))
-		req.Header.Set("Content-Type", "application/json")
-		w := httptest.NewRecorder()
-
-		server.handleSetup(w, req)
-
-		if w.Code != http.StatusBadRequest {
-			t.Errorf("Expected 400, got %d", w.Code)
-		}
-
-		var resp SetupResponse
-		json.NewDecoder(w.Body).Decode(&resp)
-		if !strings.Contains(resp.Error, "Anthropic") {
-			t.Errorf("Expected Anthropic error, got: %s", resp.Error)
-		}
-	})
-
-	t.Run("setup with invalid github token", func(t *testing.T) {
-		body := SetupRequest{
-			Anthropic: "sk-ant-api03-valid",
-			GitHub:    "invalid-token",
-		}
-		jsonBody, _ := json.Marshal(body)
-
-		req := httptest.NewRequest(http.MethodPost, "/api/setup", bytes.NewReader(jsonBody))
-		req.Header.Set("Content-Type", "application/json")
-		w := httptest.NewRecorder()
-
-		server.handleSetup(w, req)
-
-		if w.Code != http.StatusBadRequest {
-			t.Errorf("Expected 400, got %d", w.Code)
-		}
-
-		var resp SetupResponse
-		json.NewDecoder(w.Body).Decode(&resp)
-		if !strings.Contains(resp.Error, "GitHub") {
-			t.Errorf("Expected GitHub error, got: %s", resp.Error)
-		}
-	})
-
-	t.Run("complete endpoint", func(t *testing.T) {
-		// Reset done file
-		os.Remove(donePath)
-
-		req := httptest.NewRequest(http.MethodPost, "/api/complete", nil)
-		w := httptest.NewRecorder()
-
-		server.handleComplete(w, req)
+		server.handleGetState(w, req)
 
 		if w.Code != http.StatusOK {
 			t.Errorf("Expected 200, got %d", w.Code)
 		}
 
-		var resp CompleteResponse
-		json.NewDecoder(w.Body).Decode(&resp)
+		var state SetupState
+		json.NewDecoder(w.Body).Decode(&state)
 
-		if resp.URL != *dexURL {
-			t.Errorf("Expected URL %s, got %s", *dexURL, resp.URL)
+		if state.Phase != PhasePin {
+			t.Errorf("Expected phase pin, got %s", state.Phase)
+		}
+	})
+
+	t.Run("verify PIN with wrong PIN", func(t *testing.T) {
+		body := map[string]string{"pin": "000000"}
+		jsonBody, _ := json.Marshal(body)
+
+		req := httptest.NewRequest(http.MethodPost, "/api/verify-pin", bytes.NewReader(jsonBody))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		server.handleVerifyPIN(w, req)
+
+		if w.Code != http.StatusUnauthorized {
+			t.Errorf("Expected 401, got %d: %s", w.Code, w.Body.String())
+		}
+	})
+
+	t.Run("verify PIN with correct PIN", func(t *testing.T) {
+		body := map[string]string{"pin": "123456"}
+		jsonBody, _ := json.Marshal(body)
+
+		req := httptest.NewRequest(http.MethodPost, "/api/verify-pin", bytes.NewReader(jsonBody))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		server.handleVerifyPIN(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Errorf("Expected 200, got %d: %s", w.Code, w.Body.String())
 		}
 
-		// Verify done file was created
-		if _, err := os.Stat(donePath); os.IsNotExist(err) {
-			t.Error("Done file was not created")
+		// Check state advanced
+		req = httptest.NewRequest(http.MethodGet, "/api/state", nil)
+		w = httptest.NewRecorder()
+		server.handleGetState(w, req)
+
+		var state SetupState
+		json.NewDecoder(w.Body).Decode(&state)
+
+		if state.Phase != PhaseAccessChoice {
+			t.Errorf("Expected phase access_choice, got %s", state.Phase)
+		}
+	})
+
+	t.Run("choose tailscale", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/api/choose-tailscale", nil)
+		w := httptest.NewRecorder()
+
+		server.handleChooseTailscale(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Errorf("Expected 200, got %d", w.Code)
+		}
+
+		// Check state
+		req = httptest.NewRequest(http.MethodGet, "/api/state", nil)
+		w = httptest.NewRecorder()
+		server.handleGetState(w, req)
+
+		var state SetupState
+		json.NewDecoder(w.Body).Decode(&state)
+
+		if state.Phase != PhaseTailscaleSetup {
+			t.Errorf("Expected phase tailscale_setup, got %s", state.Phase)
+		}
+		if state.AccessMethod != "tailscale" {
+			t.Errorf("Expected access method tailscale, got %s", state.AccessMethod)
 		}
 	})
 }
 
-func TestSetupMethodNotAllowed(t *testing.T) {
+func TestMethodNotAllowed(t *testing.T) {
 	server := &SetupServer{
-		done: make(chan struct{}),
+		state: SetupState{
+			Phase: PhasePin,
+		},
+		pinVerifier: NewPINVerifier("123456"),
+		done:        make(chan struct{}),
+		dataDir:     t.TempDir(),
+		dexPort:     8080,
 	}
 
-	t.Run("setup GET not allowed", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/api/setup", nil)
+	t.Run("state POST not allowed", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/api/state", nil)
 		w := httptest.NewRecorder()
 
-		server.handleSetup(w, req)
+		server.handleGetState(w, req)
+
+		if w.Code != http.StatusMethodNotAllowed {
+			t.Errorf("Expected 405, got %d", w.Code)
+		}
+	})
+
+	t.Run("verify-pin GET not allowed", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/verify-pin", nil)
+		w := httptest.NewRecorder()
+
+		server.handleVerifyPIN(w, req)
 
 		if w.Code != http.StatusMethodNotAllowed {
 			t.Errorf("Expected 405, got %d", w.Code)
@@ -185,6 +158,48 @@ func TestSetupMethodNotAllowed(t *testing.T) {
 
 		if w.Code != http.StatusMethodNotAllowed {
 			t.Errorf("Expected 405, got %d", w.Code)
+		}
+	})
+}
+
+func TestPINVerifier(t *testing.T) {
+	t.Run("correct PIN", func(t *testing.T) {
+		v := NewPINVerifier("123456")
+		err := v.Verify("123456")
+		if err != nil {
+			t.Errorf("Expected nil error, got %v", err)
+		}
+	})
+
+	t.Run("wrong PIN", func(t *testing.T) {
+		v := NewPINVerifier("123456")
+		err := v.Verify("000000")
+		if err != ErrInvalidPIN {
+			t.Errorf("Expected ErrInvalidPIN, got %v", err)
+		}
+	})
+
+	t.Run("rate limiting", func(t *testing.T) {
+		v := NewPINVerifier("123456")
+		v.maxAttempts = 3 // Lower for testing
+
+		// Make 3 wrong attempts
+		for i := 0; i < 3; i++ {
+			v.Verify("000000")
+		}
+
+		// Next attempt should be rate limited
+		err := v.Verify("123456")
+		if err != ErrRateLimited {
+			t.Errorf("Expected ErrRateLimited, got %v", err)
+		}
+	})
+
+	t.Run("empty PIN config", func(t *testing.T) {
+		v := NewPINVerifier("")
+		err := v.Verify("123456")
+		if err != ErrPINNotSet {
+			t.Errorf("Expected ErrPINNotSet, got %v", err)
 		}
 	})
 }
