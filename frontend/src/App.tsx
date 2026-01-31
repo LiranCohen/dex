@@ -1002,7 +1002,6 @@ function TaskDetailPage() {
 
       try {
         const taskData = await api.get<Task>(`/tasks/${id}`);
-        console.log('[TaskDetailPage] Fetched task:', JSON.stringify(taskData, null, 2));
         setTask(taskData);
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to fetch task';
@@ -1017,7 +1016,6 @@ function TaskDetailPage() {
 
   // Subscribe to WebSocket for session events
   const handleWebSocketEvent = useCallback((event: WebSocketEvent) => {
-    console.log('[TaskDetailPage] WebSocket event:', event.type, JSON.stringify(event.payload));
     if (!id) return;
 
     // Handle session events for this task
@@ -1053,6 +1051,18 @@ function TaskDetailPage() {
     const unsubscribe = subscribe(handleWebSocketEvent);
     return unsubscribe;
   }, [subscribe, handleWebSocketEvent]);
+
+  // Handler for when planning is accepted or skipped
+  // MUST be defined before early returns to satisfy React hooks rules
+  const handlePlanningComplete = useCallback(async () => {
+    if (!id) return;
+    try {
+      const taskData = await api.get<Task>(`/tasks/${id}`);
+      setTask(taskData);
+    } catch (err) {
+      console.error('Failed to refresh task after planning:', err);
+    }
+  }, [id]);
 
   // Start task handler
   const handleStartTask = async () => {
@@ -1184,26 +1194,11 @@ function TaskDetailPage() {
     );
   }
 
-  console.log('[TaskDetailPage] Before status checks, task.Status:', task.Status);
   const isPlanning = task.Status === 'planning';
   const canStart = task.Status === 'pending' || task.Status === 'ready';
   const isRunning = task.Status === 'running';
   const isPaused = task.Status === 'paused';
   const isComplete = task.Status === 'completed' || task.Status === 'cancelled';
-  console.log('[TaskDetailPage] After status checks, isPlanning:', isPlanning);
-
-  // Handler for when planning is accepted or skipped
-  console.log('[TaskDetailPage] Before handlePlanningComplete useCallback');
-  const handlePlanningComplete = useCallback(async () => {
-    if (!id) return;
-    try {
-      const taskData = await api.get<Task>(`/tasks/${id}`);
-      setTask(taskData);
-    } catch (err) {
-      console.error('Failed to refresh task after planning:', err);
-    }
-  }, [id]);
-  console.log('[TaskDetailPage] After handlePlanningComplete useCallback');
 
   return (
     <div className="min-h-screen bg-gray-900 text-white">

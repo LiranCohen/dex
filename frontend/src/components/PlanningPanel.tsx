@@ -22,7 +22,6 @@ interface PlanningPanelProps {
 }
 
 export function PlanningPanel({ taskId, onPlanAccepted, onPlanSkipped }: PlanningPanelProps) {
-  console.log('[PlanningPanel] Render start, taskId:', taskId);
   const [session, setSession] = useState<PlanningSession | null>(null);
   const [messages, setMessages] = useState<PlanningMessage[]>([]);
   const [loading, setLoading] = useState(true);
@@ -39,7 +38,6 @@ export function PlanningPanel({ taskId, onPlanAccepted, onPlanSkipped }: Plannin
   const loadPlanning = useCallback(async () => {
     try {
       const data = await fetchPlanning(taskId);
-      console.log('[PlanningPanel] Fetched planning data:', JSON.stringify(data, null, 2));
       setSession(data.session);
       setMessages(data.messages);
       setError(null);
