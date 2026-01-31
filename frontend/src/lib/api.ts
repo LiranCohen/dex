@@ -88,4 +88,9 @@ export async function rejectApproval(id: string): Promise<void> {
   return api.post(`/approvals/${id}/reject`);
 }
 
+// Activity API functions
+export async function fetchTaskActivity(taskId: string): Promise<import('./types').ActivityResponse> {
+  return api.get(`/tasks/${taskId}/activity`);
+}
+
 export type { ApiError };

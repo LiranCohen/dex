@@ -4,6 +4,7 @@ import { useAuthStore } from './stores/auth';
 import { api, fetchApprovals, approveApproval, rejectApproval } from './lib/api';
 import { useWebSocket } from './hooks/useWebSocket';
 import { Onboarding } from './components/Onboarding';
+import { ActivityFeed } from './components/ActivityFeed';
 import type { Task, TasksResponse, SystemStatus, TaskStatus, WebSocketEvent, SessionEvent, Approval } from './lib/types';
 
 // Setup status type
@@ -1344,6 +1345,12 @@ function TaskDetailPage() {
             </div>
           </div>
         )}
+
+        {/* Activity Feed */}
+        <div className="bg-gray-800 rounded-lg p-4 mb-4">
+          <h2 className="text-sm font-semibold text-gray-400 mb-3">Activity</h2>
+          <ActivityFeed taskId={task.ID} isRunning={isRunning} />
+        </div>
 
         {/* Worktree Info */}
         {task.WorktreePath && (

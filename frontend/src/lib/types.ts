@@ -123,3 +123,51 @@ export interface ApprovalEvent extends WebSocketEvent {
     title: string;
   };
 }
+
+// Activity event types
+export type ActivityEventType =
+  | 'user_message'
+  | 'assistant_response'
+  | 'tool_call'
+  | 'tool_result'
+  | 'completion_signal'
+  | 'hat_transition';
+
+// Activity event from API
+export interface Activity {
+  id: string;
+  session_id: string;
+  iteration: number;
+  event_type: ActivityEventType;
+  content?: string;
+  tokens_input?: number;
+  tokens_output?: number;
+  created_at: string;
+}
+
+// Parsed content for tool events
+export interface ToolCallContent {
+  name: string;
+  input: Record<string, unknown>;
+}
+
+export interface ToolResultContent {
+  name: string;
+  result: { Output: string; IsError: boolean };
+}
+
+export interface HatTransitionContent {
+  from_hat: string;
+  to_hat: string;
+}
+
+// API response for activity
+export interface ActivityResponse {
+  activity: Activity[];
+  summary: {
+    total_iterations: number;
+    total_tokens: number;
+    total_sessions?: number;
+    completion_reason?: string;
+  };
+}
