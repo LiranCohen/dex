@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os/exec"
 	"os/user"
 	"regexp"
@@ -159,6 +160,11 @@ func StartTailscaleAuth(hostname string) (authURL string, checkConnected func() 
 
 	cmd := exec.Command("tailscale", args...)
 
+	// Capture both stdout and stderr - tailscale may output URL to either
+	stdoutPipe, err := cmd.StdoutPipe()
+	if err != nil {
+		return "", nil, fmt.Errorf("failed to create stdout pipe: %w", err)
+	}
 	stderrPipe, err := cmd.StderrPipe()
 	if err != nil {
 		return "", nil, fmt.Errorf("failed to create stderr pipe: %w", err)
@@ -168,19 +174,23 @@ func StartTailscaleAuth(hostname string) (authURL string, checkConnected func() 
 		return "", nil, fmt.Errorf("failed to start tailscale up: %w", err)
 	}
 
-	// Read output in background to find auth URL
+	// Read output in background to find auth URL from either pipe
 	urlChan := make(chan string, 1)
-	go func() {
-		scanner := bufio.NewScanner(stderrPipe)
+	scanPipe := func(pipe io.Reader) {
+		scanner := bufio.NewScanner(pipe)
 		for scanner.Scan() {
 			line := scanner.Text()
 			if url := extractAuthURL(line); url != "" {
-				urlChan <- url
+				select {
+				case urlChan <- url:
+				default:
+				}
 				return
 			}
 		}
-		close(urlChan)
-	}()
+	}
+	go scanPipe(stdoutPipe)
+	go scanPipe(stderrPipe)
 
 	// Wait for URL with timeout
 	select {
@@ -208,10 +218,18 @@ func StartTailscaleAuth(hostname string) (authURL string, checkConnected func() 
 
 // extractAuthURL extracts the auth URL from tailscale output
 func extractAuthURL(output string) string {
-	// Match https://login.tailscale.com/... URL
-	re := regexp.MustCompile(`https://login\.tailscale\.com/[^\s]+`)
-	match := re.FindString(output)
-	return match
+	// Match various Tailscale auth URL patterns
+	patterns := []string{
+		`https://login\.tailscale\.com/[^\s]+`,
+		`https://[a-z]+\.tailscale\.com/[^\s]*auth[^\s]*`,
+	}
+	for _, pattern := range patterns {
+		re := regexp.MustCompile(pattern)
+		if match := re.FindString(output); match != "" {
+			return match
+		}
+	}
+	return ""
 }
 
 // GetTailscaleDNSName returns the DNS name for the current node
