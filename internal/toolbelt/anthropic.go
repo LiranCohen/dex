@@ -97,10 +97,30 @@ func parseAnthropicResponse[T any](resp *http.Response) (*T, error) {
 
 // --- Message Types ---
 
+// AnthropicTool defines a tool Claude can use
+type AnthropicTool struct {
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	InputSchema map[string]any `json:"input_schema"`
+}
+
 // AnthropicMessage represents a message in a conversation
+// Content can be a string (simple message) or []ContentBlock (tool results)
 type AnthropicMessage struct {
 	Role    string `json:"role"`    // "user" or "assistant"
-	Content string `json:"content"` // Message text
+	Content any    `json:"content"` // string OR []ContentBlock
+}
+
+// ContentBlock for tool_use and tool_result messages
+type ContentBlock struct {
+	Type      string         `json:"type"`                  // "text", "tool_use", "tool_result"
+	Text      string         `json:"text,omitempty"`        // type=text
+	ID        string         `json:"id,omitempty"`          // type=tool_use
+	Name      string         `json:"name,omitempty"`        // type=tool_use
+	Input     map[string]any `json:"input,omitempty"`       // type=tool_use
+	ToolUseID string         `json:"tool_use_id,omitempty"` // type=tool_result
+	Content   string         `json:"content,omitempty"`     // type=tool_result (the result text)
+	IsError   bool           `json:"is_error,omitempty"`    // type=tool_result
 }
 
 // AnthropicChatRequest represents a request to the messages API
@@ -109,12 +129,16 @@ type AnthropicChatRequest struct {
 	MaxTokens int                `json:"max_tokens"`
 	Messages  []AnthropicMessage `json:"messages"`
 	System    string             `json:"system,omitempty"`
+	Tools     []AnthropicTool    `json:"tools,omitempty"`
 }
 
 // AnthropicContentBlock represents a content block in a response
 type AnthropicContentBlock struct {
-	Type string `json:"type"`
-	Text string `json:"text,omitempty"`
+	Type  string         `json:"type"`
+	Text  string         `json:"text,omitempty"`
+	ID    string         `json:"id,omitempty"`    // for tool_use
+	Name  string         `json:"name,omitempty"`  // for tool_use
+	Input map[string]any `json:"input,omitempty"` // for tool_use
 }
 
 // AnthropicUsage represents token usage in a response
@@ -143,6 +167,22 @@ func (r *AnthropicChatResponse) Text() string {
 		}
 	}
 	return ""
+}
+
+// HasToolUse returns true if the response contains tool_use blocks
+func (r *AnthropicChatResponse) HasToolUse() bool {
+	return r.StopReason == "tool_use"
+}
+
+// ToolUseBlocks returns all tool_use content blocks from the response
+func (r *AnthropicChatResponse) ToolUseBlocks() []AnthropicContentBlock {
+	var blocks []AnthropicContentBlock
+	for _, block := range r.Content {
+		if block.Type == "tool_use" {
+			blocks = append(blocks, block)
+		}
+	}
+	return blocks
 }
 
 // --- API Operations ---

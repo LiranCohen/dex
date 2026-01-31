@@ -362,6 +362,29 @@ func (m *Manager) runSession(ctx context.Context, session *ActiveSession) {
 		fmt.Printf("runSession: Anthropic client is configured, starting Ralph loop\n")
 		loop := NewRalphLoop(m, session, anthropicClient, wsHub, m.db)
 
+		// Get task and project for tool executor context
+		task, err := m.db.GetTaskByID(session.TaskID)
+		if err != nil {
+			fmt.Printf("runSession: warning - failed to get task for executor: %v\n", err)
+		}
+		if task != nil {
+			project, err := m.db.GetProjectByID(task.ProjectID)
+			if err != nil {
+				fmt.Printf("runSession: warning - failed to get project for executor: %v\n", err)
+			}
+			if project != nil {
+				var owner, repo string
+				if project.GitHubOwner.Valid {
+					owner = project.GitHubOwner.String
+				}
+				if project.GitHubRepo.Valid {
+					repo = project.GitHubRepo.String
+				}
+				loop.InitExecutor(session.WorktreePath, m.gitOps, m.githubClient, owner, repo)
+				fmt.Printf("runSession: initialized tool executor (owner=%s, repo=%s)\n", owner, repo)
+			}
+		}
+
 		// Try to restore from checkpoint
 		checkpoint, err := m.db.GetLatestSessionCheckpoint(session.ID)
 		if err == nil && checkpoint != nil {

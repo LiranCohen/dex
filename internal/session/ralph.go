@@ -11,6 +11,7 @@ import (
 
 	"github.com/lirancohen/dex/internal/api/websocket"
 	"github.com/lirancohen/dex/internal/db"
+	"github.com/lirancohen/dex/internal/git"
 	"github.com/lirancohen/dex/internal/toolbelt"
 )
 
@@ -46,6 +47,10 @@ type RalphLoop struct {
 
 	// Activity recorder for visibility
 	activity *ActivityRecorder
+
+	// Tool use support
+	executor *ToolExecutor
+	tools    []toolbelt.AnthropicTool
 }
 
 // NewRalphLoop creates a new RalphLoop for the given session
@@ -58,7 +63,13 @@ func NewRalphLoop(manager *Manager, session *ActiveSession, client *toolbelt.Ant
 		db:                 database,
 		messages:           make([]toolbelt.AnthropicMessage, 0),
 		checkpointInterval: 5,
+		tools:              GetToolDefinitions(),
 	}
+}
+
+// InitExecutor initializes the tool executor with project context
+func (r *RalphLoop) InitExecutor(worktreePath string, gitOps *git.Operations, githubClient *toolbelt.GitHubClient, owner, repo string) {
+	r.executor = NewToolExecutor(worktreePath, gitOps, githubClient, owner, repo)
 }
 
 // Run executes the Ralph loop until completion, error, or budget exceeded
@@ -141,10 +152,75 @@ func (r *RalphLoop) Run(ctx context.Context) error {
 			"tokens":     r.session.TokensUsed,
 		})
 
-		// 5. Get response text
+		// 5. Handle tool use if requested
+		if response.HasToolUse() {
+			// Add assistant message with tool_use blocks
+			r.messages = append(r.messages, toolbelt.AnthropicMessage{
+				Role:    "assistant",
+				Content: response.Content, // Include full content with tool_use blocks
+			})
+
+			// Record assistant response
+			responseText := response.Text()
+			if err := r.activity.RecordAssistantResponse(
+				r.session.IterationCount,
+				responseText,
+				response.Usage.InputTokens,
+				response.Usage.OutputTokens,
+			); err != nil {
+				fmt.Printf("RalphLoop.Run: warning - failed to record assistant response: %v\n", err)
+			}
+
+			// Execute tools and collect results
+			var results []toolbelt.ContentBlock
+			for _, block := range response.ToolUseBlocks() {
+				fmt.Printf("RalphLoop.Run: executing tool %s\n", block.Name)
+
+				// Record tool call
+				if err := r.activity.RecordToolCall(r.session.IterationCount, block.Name, block.Input); err != nil {
+					fmt.Printf("RalphLoop.Run: warning - failed to record tool call: %v\n", err)
+				}
+
+				// Execute the tool
+				var result ToolResult
+				if r.executor != nil {
+					result = r.executor.Execute(ctx, block.Name, block.Input)
+				} else {
+					result = ToolResult{
+						Output:  "Tool executor not initialized",
+						IsError: true,
+					}
+				}
+
+				// Record tool result
+				if err := r.activity.RecordToolResult(r.session.IterationCount, block.Name, result); err != nil {
+					fmt.Printf("RalphLoop.Run: warning - failed to record tool result: %v\n", err)
+				}
+
+				fmt.Printf("RalphLoop.Run: tool %s result (error=%v): %s\n", block.Name, result.IsError, truncateOutput(result.Output, 200))
+
+				results = append(results, toolbelt.ContentBlock{
+					Type:      "tool_result",
+					ToolUseID: block.ID,
+					Content:   result.Output,
+					IsError:   result.IsError,
+				})
+			}
+
+			// Add tool results as user message
+			r.messages = append(r.messages, toolbelt.AnthropicMessage{
+				Role:    "user",
+				Content: results,
+			})
+
+			// Continue loop without adding continuation prompt
+			continue
+		}
+
+		// 6. Get response text (non-tool response)
 		responseText := response.Text()
 
-		// 6. Add assistant response to conversation
+		// 7. Add assistant response to conversation
 		r.messages = append(r.messages, toolbelt.AnthropicMessage{
 			Role:    "assistant",
 			Content: responseText,
@@ -160,7 +236,7 @@ func (r *RalphLoop) Run(ctx context.Context) error {
 			fmt.Printf("RalphLoop.Run: warning - failed to record assistant response: %v\n", err)
 		}
 
-		// 7. Check for task completion
+		// 8. Check for task completion
 		if r.detectCompletion(responseText) {
 			// Record completion signal
 			if err := r.activity.RecordCompletion(r.session.IterationCount, SignalTaskComplete); err != nil {
@@ -175,7 +251,7 @@ func (r *RalphLoop) Run(ctx context.Context) error {
 			return nil
 		}
 
-		// 8. Check for hat transition
+		// 9. Check for hat transition
 		if nextHat := r.detectHatTransition(responseText); nextHat != "" {
 			// Record hat transition
 			oldHat := r.session.Hat
@@ -193,7 +269,7 @@ func (r *RalphLoop) Run(ctx context.Context) error {
 			return nil
 		}
 
-		// 9. Checkpoint periodically
+		// 10. Checkpoint periodically
 		if r.session.IterationCount%r.checkpointInterval == 0 {
 			if err := r.checkpoint(); err != nil {
 				// Log but don't fail on checkpoint error
@@ -201,7 +277,7 @@ func (r *RalphLoop) Run(ctx context.Context) error {
 			}
 		}
 
-		// 10. Add continuation prompt for next iteration
+		// 11. Add continuation prompt for next iteration
 		continuationMsg := "Continue. If the task is complete, output TASK_COMPLETE. If you need to transition to a different hat, output HAT_TRANSITION:<hat_name>."
 		r.messages = append(r.messages, toolbelt.AnthropicMessage{
 			Role:    "user",
@@ -213,6 +289,14 @@ func (r *RalphLoop) Run(ctx context.Context) error {
 			fmt.Printf("RalphLoop.Run: warning - failed to record continuation: %v\n", err)
 		}
 	}
+}
+
+// truncateOutput truncates a string to maxLen characters, adding "..." if truncated
+func truncateOutput(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
 }
 
 // checkBudget returns an error if any budget limit is exceeded
@@ -266,6 +350,7 @@ func (r *RalphLoop) sendMessage(ctx context.Context, systemPrompt string) (*tool
 		MaxTokens: 8192,
 		System:    systemPrompt,
 		Messages:  r.messages,
+		Tools:     r.tools,
 	}
 
 	return r.client.Chat(ctx, req)
