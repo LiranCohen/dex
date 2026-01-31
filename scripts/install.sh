@@ -364,7 +364,8 @@ run_setup_phase1() {
     local temp_url
     temp_url=$(start_quick_tunnel)
 
-    show_qr "$temp_url" "SCAN TO SETUP POINDEXTER"
+    # Include PIN in QR URL as hash anchor for auto-fill
+    show_qr "${temp_url}#${pin}" "SCAN TO SETUP POINDEXTER"
     echo -e "  ${BOLD}PIN: ${YELLOW}$pin${NC}"
     echo ""
     echo -e "  ${YELLOW}Waiting for you to choose an access method...${NC}"

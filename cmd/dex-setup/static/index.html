@@ -487,8 +487,26 @@
         // Initialize
         document.addEventListener('DOMContentLoaded', () => {
             setupPINInputs();
-            fetchState();
+            // Check for PIN in URL hash (e.g., #123456) and auto-fill
+            checkURLHashForPIN();
+            // Always start on PIN screen - require PIN each time
+            // Don't call fetchState() to auto-advance based on saved state
         });
+
+        function checkURLHashForPIN() {
+            const hash = window.location.hash;
+            if (hash && /^#\d{6}$/.test(hash)) {
+                const pin = hash.substring(1);
+                const inputs = document.querySelectorAll('.pin-input input');
+                pin.split('').forEach((digit, i) => {
+                    if (inputs[i]) inputs[i].value = digit;
+                });
+                // Clear hash from URL to avoid confusion
+                history.replaceState(null, '', window.location.pathname + window.location.search);
+                // Auto-verify after a brief delay
+                setTimeout(() => verifyPIN(), 100);
+            }
+        }
 
         function setupPINInputs() {
             const inputs = document.querySelectorAll('.pin-input input');
@@ -617,6 +635,7 @@
             try {
                 const resp = await fetch('/api/tailscale/status');
                 const status = await resp.json();
+                console.log('Tailscale status:', status);
 
                 if (!status.installed) {
                     document.getElementById('ts-not-installed').classList.remove('hidden');
@@ -626,12 +645,22 @@
                 }
 
                 if (status.connected) {
+                    console.log('Tailscale connected! serve_url:', status.serve_url);
                     document.getElementById('ts-not-installed').classList.add('hidden');
                     document.getElementById('ts-need-auth').classList.add('hidden');
                     document.getElementById('ts-connected').classList.remove('hidden');
-                    document.getElementById('ts-permanent-url').textContent = status.serve_url;
-                    document.getElementById('ts-permanent-url').href = status.serve_url;
-                    permanentURL = status.serve_url;
+
+                    // Use serve_url or construct from dns_name
+                    const serveUrl = status.serve_url || (status.dns_name ? 'https://' + status.dns_name : '');
+                    if (serveUrl) {
+                        document.getElementById('ts-permanent-url').textContent = serveUrl;
+                        document.getElementById('ts-permanent-url').href = serveUrl;
+                        permanentURL = serveUrl;
+                    } else {
+                        document.getElementById('ts-permanent-url').textContent = 'URL will be available after configuration';
+                    }
+
+                    // Stop polling
                     if (tsCheckInterval) {
                         clearInterval(tsCheckInterval);
                         tsCheckInterval = null;
@@ -644,7 +673,7 @@
 
                     // Only get auth URL if we don't already have one displayed
                     const currentAuthUrl = document.getElementById('ts-auth-url').textContent;
-                    if (!currentAuthUrl || currentAuthUrl.startsWith('Error:') || currentAuthUrl.startsWith('Run')) {
+                    if (!currentAuthUrl || currentAuthUrl.startsWith('Error:') || currentAuthUrl.startsWith('Run') || currentAuthUrl === '') {
                         // Get auth URL (only once, not on every poll)
                         const authResp = await fetch('/api/tailscale/auth-url', {
                             method: 'POST',
@@ -652,6 +681,7 @@
                             body: JSON.stringify({ hostname: 'dex' })
                         });
                         const authData = await authResp.json();
+                        console.log('Tailscale auth response:', authData);
 
                         if (authData.error) {
                             // Show error message
@@ -659,11 +689,19 @@
                             document.getElementById('ts-auth-url').removeAttribute('href');
                             document.getElementById('ts-qr').style.display = 'none';
                         } else if (authData.already_connected) {
+                            console.log('Already connected via auth-url check');
                             document.getElementById('ts-need-auth').classList.add('hidden');
                             document.getElementById('ts-connected').classList.remove('hidden');
-                            document.getElementById('ts-permanent-url').textContent = authData.serve_url;
-                            document.getElementById('ts-permanent-url').href = authData.serve_url;
-                            permanentURL = authData.serve_url;
+                            const url = authData.serve_url || '';
+                            document.getElementById('ts-permanent-url').textContent = url || 'Configuring...';
+                            if (url) {
+                                document.getElementById('ts-permanent-url').href = url;
+                                permanentURL = url;
+                            }
+                            if (tsCheckInterval) {
+                                clearInterval(tsCheckInterval);
+                                tsCheckInterval = null;
+                            }
                         } else if (authData.auth_url) {
                             document.getElementById('ts-auth-url').textContent = authData.auth_url;
                             document.getElementById('ts-auth-url').href = authData.auth_url;
