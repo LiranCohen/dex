@@ -141,6 +141,33 @@ type AnthropicContentBlock struct {
 	Input map[string]any `json:"input,omitempty"` // for tool_use
 }
 
+// MarshalJSON implements custom JSON marshaling to ensure tool_use blocks always have input field
+func (b AnthropicContentBlock) MarshalJSON() ([]byte, error) {
+	if b.Type == "tool_use" {
+		// For tool_use, we need input to always be present (even if empty)
+		type toolUseBlock struct {
+			Type  string         `json:"type"`
+			ID    string         `json:"id"`
+			Name  string         `json:"name"`
+			Input map[string]any `json:"input"`
+		}
+		input := b.Input
+		if input == nil {
+			input = map[string]any{}
+		}
+		return json.Marshal(toolUseBlock{
+			Type:  b.Type,
+			ID:    b.ID,
+			Name:  b.Name,
+			Input: input,
+		})
+	}
+
+	// For other types (text), use default behavior
+	type contentBlock AnthropicContentBlock
+	return json.Marshal(contentBlock(b))
+}
+
 // AnthropicUsage represents token usage in a response
 type AnthropicUsage struct {
 	InputTokens  int `json:"input_tokens"`
