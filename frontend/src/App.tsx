@@ -1629,7 +1629,7 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const checkSetupStatus = async () => {
     setIsLoading(true);
     try {
-      const status = await api.get<SetupStatus>('/api/v1/setup/status');
+      const status = await api.get<SetupStatus>('/setup/status');
       setSetupStatus(status);
 
       // Show onboarding if setup is not complete

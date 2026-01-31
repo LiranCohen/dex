@@ -36,7 +36,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
 
   const fetchStatus = async () => {
     try {
-      const data = await api.get<SetupStatus>('/api/v1/setup/status');
+      const data = await api.get<SetupStatus>('/setup/status');
       setStatus(data);
 
       // Determine which step we should be on
@@ -70,7 +70,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
     setIsLoading(true);
 
     try {
-      await api.post('/api/v1/setup/github-token', { token: githubToken });
+      await api.post('/setup/github-token', { token: githubToken });
       setStep('anthropic_key');
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to save GitHub token';
@@ -86,7 +86,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
     setIsLoading(true);
 
     try {
-      await api.post('/api/v1/setup/anthropic-key', { key: anthropicKey });
+      await api.post('/setup/anthropic-key', { key: anthropicKey });
       await completeSetup();
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to save Anthropic API key';
@@ -98,7 +98,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
 
   const completeSetup = async () => {
     try {
-      await api.post('/api/v1/setup/complete', {});
+      await api.post('/setup/complete', {});
       setStep('complete');
       setTimeout(onComplete, 1500);
     } catch (err) {
