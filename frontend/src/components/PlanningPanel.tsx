@@ -3,6 +3,18 @@ import { fetchPlanning, sendPlanningResponse, acceptPlan, skipPlanning } from '.
 import type { PlanningMessage, PlanningSession, WebSocketEvent } from '../lib/types';
 import { useWebSocket } from '../hooks/useWebSocket';
 
+// Safely convert any value to a renderable string
+function safeString(value: unknown): string {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return '[Object]';
+  }
+}
+
 interface PlanningPanelProps {
   taskId: string;
   onPlanAccepted?: () => void;
@@ -233,7 +245,7 @@ export function PlanningPanel({ taskId, onPlanAccepted, onPlanSkipped }: Plannin
               <div className="text-xs text-gray-400 mb-1">
                 {msg.role === 'user' ? 'You' : 'Planning Assistant'}
               </div>
-              <div className="whitespace-pre-wrap text-sm">{msg.content}</div>
+              <div className="whitespace-pre-wrap text-sm">{safeString(msg.content)}</div>
             </div>
           </div>
         ))}

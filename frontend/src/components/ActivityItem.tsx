@@ -1,6 +1,18 @@
 import type { Activity, ToolCallContent, ToolResultContent, HatTransitionContent, DebugLogContent } from '../lib/types';
 import { CollapsibleContent } from './CollapsibleContent';
 
+// Safely convert any value to a renderable string
+function safeString(value: unknown): string {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return '[Object]';
+  }
+}
+
 interface ActivityItemProps {
   activity: Activity;
 }
@@ -157,7 +169,7 @@ export function ActivityItem({ activity }: ActivityItemProps) {
       case 'user_message':
         return (
           <div className="text-sm text-gray-300">
-            {activity.content || '(empty message)'}
+            {safeString(activity.content) || '(empty message)'}
           </div>
         );
 
@@ -239,7 +251,7 @@ export function ActivityItem({ activity }: ActivityItemProps) {
       case 'completion_signal':
         return (
           <div className="text-sm text-emerald-400">
-            {activity.content || 'Session completed'}
+            {safeString(activity.content) || 'Session completed'}
           </div>
         );
 
@@ -254,7 +266,7 @@ export function ActivityItem({ activity }: ActivityItemProps) {
                 <span className="bg-yellow-900/50 px-2 py-0.5 rounded">{transition.to_hat}</span>
               </>
             ) : (
-              activity.content || 'Hat changed'
+              safeString(activity.content) || 'Hat changed'
             )}
           </div>
         );
