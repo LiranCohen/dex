@@ -106,21 +106,31 @@ wipe_data() {
     if [ "$CONFIRM_FRESH" = true ]; then
         echo -e "  ${YELLOW}--yes flag provided, proceeding with wipe...${NC}"
         echo ""
-    elif [ -t 0 ]; then
-        # stdin is a terminal, we can prompt
+    elif [ -e /dev/tty ]; then
+        # Try to read from the actual terminal (works even when stdin is piped)
         echo -ne "  Type ${BOLD}DELETE${NC} to confirm: "
-        read -r confirmation
-
-        if [ "$confirmation" != "DELETE" ]; then
+        if read -r confirmation < /dev/tty 2>/dev/null; then
+            if [ "$confirmation" != "DELETE" ]; then
+                echo ""
+                echo -e "  ${GREEN}Aborted.${NC} No data was deleted."
+                echo ""
+                exit 0
+            fi
             echo ""
-            echo -e "  ${GREEN}Aborted.${NC} No data was deleted."
+        else
+            # Can't read from tty, require --yes
             echo ""
-            exit 0
+            echo -e "  ${RED}ERROR:${NC} Cannot read from terminal."
+            echo ""
+            echo -e "  To confirm fresh install, add ${BOLD}--yes${NC} flag:"
+            echo ""
+            echo -e "    ${CYAN}curl -fsSL ... | sudo bash -s -- --fresh --yes${NC}"
+            echo ""
+            exit 1
         fi
-        echo ""
     else
-        # stdin is not a terminal (piped), require --yes
-        echo -e "  ${RED}ERROR:${NC} Running in non-interactive mode (piped from curl)."
+        # No tty available, require --yes
+        echo -e "  ${RED}ERROR:${NC} Running in non-interactive mode."
         echo ""
         echo -e "  To confirm fresh install, add ${BOLD}--yes${NC} flag:"
         echo ""
