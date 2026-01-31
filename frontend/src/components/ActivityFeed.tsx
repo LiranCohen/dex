@@ -10,6 +10,7 @@ interface ActivityFeedProps {
 }
 
 export function ActivityFeed({ taskId, isRunning }: ActivityFeedProps) {
+  console.log('[ActivityFeed] Render start, taskId:', taskId, 'isRunning:', isRunning);
   const [activities, setActivities] = useState<Activity[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

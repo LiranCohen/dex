@@ -22,6 +22,7 @@ interface PlanningPanelProps {
 }
 
 export function PlanningPanel({ taskId, onPlanAccepted, onPlanSkipped }: PlanningPanelProps) {
+  console.log('[PlanningPanel] Render start, taskId:', taskId);
   const [session, setSession] = useState<PlanningSession | null>(null);
   const [messages, setMessages] = useState<PlanningMessage[]>([]);
   const [loading, setLoading] = useState(true);

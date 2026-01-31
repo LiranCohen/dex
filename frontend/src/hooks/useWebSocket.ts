@@ -13,6 +13,7 @@ interface UseWebSocketReturn {
 const WS_RECONNECT_DELAY = 3000;
 
 export function useWebSocket(): UseWebSocketReturn {
+  console.log('[useWebSocket] Hook called');
   const [connected, setConnected] = useState(false);
   const [lastMessage, setLastMessage] = useState<WebSocketEvent | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
