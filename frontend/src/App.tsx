@@ -119,8 +119,14 @@ function LoginPage() {
       // 5. Store JWT and navigate
       setToken(finishResponse.token, finishResponse.user_id);
       navigate('/', { replace: true });
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Registration failed';
+    } catch (err: unknown) {
+      let message = 'Registration failed';
+      if (err instanceof Error) {
+        message = err.message;
+      } else if (err && typeof err === 'object' && 'message' in err) {
+        message = String((err as { message: unknown }).message);
+      }
+      console.error('Registration error:', err);
       setError(message);
     } finally {
       setIsLoading(false);
@@ -185,8 +191,14 @@ function LoginPage() {
       // 5. Store JWT and navigate
       setToken(finishResponse.token, finishResponse.user_id);
       navigate('/', { replace: true });
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Authentication failed';
+    } catch (err: unknown) {
+      let message = 'Authentication failed';
+      if (err instanceof Error) {
+        message = err.message;
+      } else if (err && typeof err === 'object' && 'message' in err) {
+        message = String((err as { message: unknown }).message);
+      }
+      console.error('Login error:', err);
       setError(message);
     } finally {
       setIsLoading(false);

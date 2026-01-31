@@ -1,6 +1,7 @@
 package api
 
 import (
+	"log"
 	"net/http"
 	"sync"
 
@@ -159,12 +160,16 @@ func (s *Server) handlePasskeyRegisterFinish(c echo.Context) error {
 	// Parse the credential from request body
 	parsedCredential, err := protocol.ParseCredentialCreationResponseBody(c.Request().Body)
 	if err != nil {
+		log.Printf("Passkey registration: failed to parse credential: %v", err)
 		return echo.NewHTTPError(http.StatusBadRequest, "failed to parse credential: "+err.Error())
 	}
+
+	log.Printf("Passkey registration: parsed credential for user %s, RPID=%s, Origin=%s", userID, cfg.RPID, cfg.RPOrigin)
 
 	// Finish registration using CreateCredential
 	credential, err := wa.CreateCredential(user, *session, parsedCredential)
 	if err != nil {
+		log.Printf("Passkey registration: CreateCredential failed: %v", err)
 		return echo.NewHTTPError(http.StatusBadRequest, "registration failed: "+err.Error())
 	}
 
