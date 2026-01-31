@@ -38,6 +38,7 @@ export function PlanningPanel({ taskId, onPlanAccepted, onPlanSkipped }: Plannin
   const loadPlanning = useCallback(async () => {
     try {
       const data = await fetchPlanning(taskId);
+      console.log('[PlanningPanel] Fetched planning data:', JSON.stringify(data, null, 2));
       setSession(data.session);
       setMessages(data.messages);
       setError(null);

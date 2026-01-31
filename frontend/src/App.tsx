@@ -1002,6 +1002,7 @@ function TaskDetailPage() {
 
       try {
         const taskData = await api.get<Task>(`/tasks/${id}`);
+        console.log('[TaskDetailPage] Fetched task:', JSON.stringify(taskData, null, 2));
         setTask(taskData);
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to fetch task';
@@ -1016,6 +1017,7 @@ function TaskDetailPage() {
 
   // Subscribe to WebSocket for session events
   const handleWebSocketEvent = useCallback((event: WebSocketEvent) => {
+    console.log('[TaskDetailPage] WebSocket event:', event.type, JSON.stringify(event.payload));
     if (!id) return;
 
     // Handle session events for this task
