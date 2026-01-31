@@ -102,11 +102,10 @@ function LoginPage() {
       const attestationResponse = credential.response as AuthenticatorAttestationResponse;
 
       // 4. Send credential to server to complete registration
+      // session_id and user_id go in query params, credential in body
       const finishResponse = await api.post<{ token: string; user_id: string }>(
-        '/auth/passkey/register/finish',
+        `/auth/passkey/register/finish?session_id=${encodeURIComponent(beginResponse.session_id)}&user_id=${encodeURIComponent(beginResponse.user_id)}`,
         {
-          session_id: beginResponse.session_id,
-          user_id: beginResponse.user_id,
           id: credential.id,
           rawId: bufferToBase64url(credential.rawId),
           type: credential.type,
@@ -165,11 +164,10 @@ function LoginPage() {
       const assertionResponse = credential.response as AuthenticatorAssertionResponse;
 
       // 4. Send assertion to server to complete login
+      // session_id and user_id go in query params, credential in body
       const finishResponse = await api.post<{ token: string; user_id: string }>(
-        '/auth/passkey/login/finish',
+        `/auth/passkey/login/finish?session_id=${encodeURIComponent(beginResponse.session_id)}&user_id=${encodeURIComponent(beginResponse.user_id)}`,
         {
-          session_id: beginResponse.session_id,
-          user_id: beginResponse.user_id,
           id: credential.id,
           rawId: bufferToBase64url(credential.rawId),
           type: credential.type,

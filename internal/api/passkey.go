@@ -130,20 +130,20 @@ func (s *Server) handlePasskeyRegisterBegin(c echo.Context) error {
 
 // handlePasskeyRegisterFinish completes passkey registration
 func (s *Server) handlePasskeyRegisterFinish(c echo.Context) error {
-	var req struct {
-		SessionID string `json:"session_id"`
-		UserID    string `json:"user_id"`
-	}
-	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid request")
+	// Get session_id and user_id from query params (body is reserved for credential)
+	sessionID := c.QueryParam("session_id")
+	userID := c.QueryParam("user_id")
+
+	if sessionID == "" || userID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "missing session_id or user_id")
 	}
 
 	// Get session data
-	session := passkeyStore.Get(req.SessionID)
+	session := passkeyStore.Get(sessionID)
 	if session == nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid or expired session")
 	}
-	defer passkeyStore.Delete(req.SessionID)
+	defer passkeyStore.Delete(sessionID)
 
 	// Create WebAuthn instance
 	cfg := s.getWebAuthnConfig(c)
@@ -153,9 +153,9 @@ func (s *Server) handlePasskeyRegisterFinish(c echo.Context) error {
 	}
 
 	// Create user for verification
-	user := auth.NewWebAuthnUser(req.UserID, "owner", nil)
+	user := auth.NewWebAuthnUser(userID, "owner", nil)
 
-	// Finish registration
+	// Finish registration - body contains the credential response
 	credential, err := wa.FinishRegistration(user, *session, c.Request())
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "registration failed: "+err.Error())
@@ -241,23 +241,23 @@ func (s *Server) handlePasskeyLoginBegin(c echo.Context) error {
 
 // handlePasskeyLoginFinish completes passkey authentication
 func (s *Server) handlePasskeyLoginFinish(c echo.Context) error {
-	var req struct {
-		SessionID string `json:"session_id"`
-		UserID    string `json:"user_id"`
-	}
-	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid request")
+	// Get session_id and user_id from query params (body is reserved for credential)
+	sessionID := c.QueryParam("session_id")
+	userID := c.QueryParam("user_id")
+
+	if sessionID == "" || userID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "missing session_id or user_id")
 	}
 
 	// Get session data
-	session := passkeyStore.Get(req.SessionID)
+	session := passkeyStore.Get(sessionID)
 	if session == nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid or expired session")
 	}
-	defer passkeyStore.Delete(req.SessionID)
+	defer passkeyStore.Delete(sessionID)
 
 	// Get user
-	user, err := s.db.GetUserByID(req.UserID)
+	user, err := s.db.GetUserByID(userID)
 	if err != nil || user == nil {
 		return echo.NewHTTPError(http.StatusNotFound, "user not found")
 	}
