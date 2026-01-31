@@ -166,9 +166,10 @@ func (r *RalphLoop) Run(ctx context.Context) error {
 			r.activity.Debug(r.session.IterationCount, fmt.Sprintf("Processing %d tool calls", len(toolBlocks)))
 
 			// Add assistant message with tool_use blocks
+			// Use NormalizedContent to ensure Input fields are never nil (API requirement)
 			r.messages = append(r.messages, toolbelt.AnthropicMessage{
 				Role:    "assistant",
-				Content: response.Content, // Include full content with tool_use blocks
+				Content: response.NormalizedContent(),
 			})
 
 			// Record assistant response

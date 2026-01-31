@@ -185,6 +185,19 @@ func (r *AnthropicChatResponse) ToolUseBlocks() []AnthropicContentBlock {
 	return blocks
 }
 
+// NormalizedContent returns content blocks with nil Input maps converted to empty maps
+// This is required because Anthropic API requires the input field to be present on tool_use blocks
+func (r *AnthropicChatResponse) NormalizedContent() []AnthropicContentBlock {
+	normalized := make([]AnthropicContentBlock, len(r.Content))
+	for i, block := range r.Content {
+		normalized[i] = block
+		if block.Type == "tool_use" && normalized[i].Input == nil {
+			normalized[i].Input = map[string]any{}
+		}
+	}
+	return normalized
+}
+
 // --- API Operations ---
 
 // Ping verifies the Anthropic connection by making a minimal API call
