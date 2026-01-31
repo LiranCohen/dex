@@ -47,6 +47,7 @@ type Server struct {
 	reposDir       string
 	challenges     map[string]challengeEntry // challenge -> expiry
 	challengesMu   sync.RWMutex
+	toolbeltMu     sync.RWMutex // Protects toolbelt updates
 }
 
 // Config holds server configuration
@@ -1376,4 +1377,44 @@ func (s *Server) Shutdown(ctx context.Context) error {
 // GetHub returns the WebSocket hub for broadcasting events
 func (s *Server) GetHub() *websocket.Hub {
 	return s.hub
+}
+
+// ReloadToolbelt reloads the toolbelt from secrets.json and updates the session manager
+// This is called after setup completes when API keys are first entered
+func (s *Server) ReloadToolbelt() error {
+	dataDir := s.getDataDir()
+	secretsPath := fmt.Sprintf("%s/secrets.json", dataDir)
+
+	fmt.Printf("ReloadToolbelt: loading from %s\n", secretsPath)
+
+	tb, err := toolbelt.NewFromSecrets(secretsPath)
+	if err != nil {
+		return fmt.Errorf("failed to load toolbelt from secrets: %w", err)
+	}
+
+	s.toolbeltMu.Lock()
+	s.toolbelt = tb
+	s.toolbeltMu.Unlock()
+
+	// Update session manager with new clients
+	if tb.Anthropic != nil {
+		fmt.Println("ReloadToolbelt: Anthropic client initialized, updating session manager")
+		s.sessionManager.SetAnthropicClient(tb.Anthropic)
+	}
+	if tb.GitHub != nil {
+		fmt.Println("ReloadToolbelt: GitHub client initialized, updating session manager")
+		s.sessionManager.SetGitHubClient(tb.GitHub)
+	}
+
+	// Log status
+	status := tb.Status()
+	configured := 0
+	for _, svc := range status {
+		if svc.HasToken {
+			configured++
+		}
+	}
+	fmt.Printf("ReloadToolbelt: %d/%d services configured\n", configured, len(status))
+
+	return nil
 }

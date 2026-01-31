@@ -243,6 +243,13 @@ func (s *Server) handleSetupComplete(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "Anthropic key not set")
 	}
 
+	// Reload toolbelt from secrets.json so API clients are available
+	// This is necessary because the server started before keys were entered
+	if err := s.ReloadToolbelt(); err != nil {
+		fmt.Printf("Warning: failed to reload toolbelt: %v\n", err)
+		// Continue - toolbelt will be loaded on next server restart
+	}
+
 	// Create workspace repo if it doesn't exist and git service is configured
 	workspacePath := filepath.Join(dataDir, "repos", "dex-workspace")
 	if s.gitService != nil && !s.gitService.RepoExists(workspacePath) {
