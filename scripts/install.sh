@@ -307,7 +307,8 @@ start_quick_tunnel() {
         sleep 1
         attempts=$((attempts + 1))
         if [ -f "$tunnel_log" ]; then
-            temp_url=$(grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' "$tunnel_log" 2>/dev/null | head -1 || true)
+            # Extract URL, stripping any ANSI codes that might be in the log
+            temp_url=$(grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' "$tunnel_log" 2>/dev/null | head -1 | sed 's/\x1b\[[0-9;]*m//g' | tr -d '[:space:]' || true)
         fi
     done
 
