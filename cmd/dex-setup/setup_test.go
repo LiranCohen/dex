@@ -63,14 +63,8 @@ func TestSetupHandler(t *testing.T) {
 			t.Errorf("Unexpected error: %s", resp.Error)
 		}
 
-		if resp.Passphrase == "" {
-			t.Error("Expected passphrase in response")
-		}
-
-		// Verify it's a 24-word BIP39 mnemonic
-		words := strings.Fields(resp.Passphrase)
-		if len(words) != 24 {
-			t.Errorf("Expected 24 words, got %d", len(words))
+		if !resp.Success {
+			t.Error("Expected success in response")
 		}
 
 		// Verify secrets file was created
@@ -89,9 +83,6 @@ func TestSetupHandler(t *testing.T) {
 		}
 		if secrets.GitHub != body.GitHub {
 			t.Errorf("GitHub token mismatch")
-		}
-		if secrets.Passphrase != resp.Passphrase {
-			t.Errorf("Passphrase mismatch")
 		}
 	})
 

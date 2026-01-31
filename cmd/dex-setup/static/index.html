@@ -124,30 +124,9 @@
             box-shadow: none;
             transform: none;
         }
-        .passphrase-container {
-            margin: 24px 0;
-        }
-        .passphrase-box {
-            background: #000;
-            border: 2px solid #4CAF50;
-            border-radius: 12px;
-            padding: 20px;
-            font-family: 'SF Mono', 'Menlo', 'Monaco', monospace;
-            font-size: 15px;
-            line-height: 2;
-            word-spacing: 8px;
-            text-align: center;
-        }
-        .passphrase-box .word {
-            display: inline-block;
-            background: rgba(76, 175, 80, 0.1);
-            padding: 4px 8px;
-            border-radius: 6px;
-            margin: 4px;
-        }
-        .warning {
-            background: rgba(255, 152, 0, 0.15);
-            border: 1px solid rgba(255, 152, 0, 0.5);
+        .info-box {
+            background: rgba(33, 150, 243, 0.15);
+            border: 1px solid rgba(33, 150, 243, 0.5);
             border-radius: 12px;
             padding: 16px;
             margin: 20px 0;
@@ -156,7 +135,7 @@
             align-items: flex-start;
             gap: 12px;
         }
-        .warning-icon {
+        .info-icon {
             font-size: 24px;
             flex-shrink: 0;
         }
@@ -183,6 +162,13 @@
             color: #4CAF50;
             word-break: break-all;
         }
+        .success-url a {
+            color: #4CAF50;
+            text-decoration: none;
+        }
+        .success-url a:hover {
+            text-decoration: underline;
+        }
         .hidden { display: none; }
         .loading {
             display: inline-block;
@@ -196,38 +182,13 @@
             margin-right: 8px;
         }
         @keyframes spin { to { transform: rotate(360deg); } }
-        .btn-secondary {
-            background: linear-gradient(135deg, #2196F3, #1976D2);
-            box-shadow: 0 4px 15px rgba(33, 150, 243, 0.3);
-            margin-top: 16px;
-        }
-        .btn-secondary:hover {
-            box-shadow: 0 6px 20px rgba(33, 150, 243, 0.4);
-        }
-        .copy-feedback {
-            position: fixed;
-            bottom: 100px;
-            left: 50%;
-            transform: translateX(-50%);
-            background: #4CAF50;
-            color: white;
-            padding: 12px 24px;
-            border-radius: 8px;
-            font-weight: 600;
-            opacity: 0;
-            transition: opacity 0.3s;
-            pointer-events: none;
-        }
-        .copy-feedback.show {
-            opacity: 1;
-        }
     </style>
 </head>
 <body>
     <div class="container">
         <!-- Step 1: Enter API Keys -->
         <div id="setup-form">
-            <h1>🤓 Poindexter</h1>
+            <h1>Poindexter</h1>
             <p class="subtitle">AI Orchestration Platform Setup</p>
 
             <div class="step">
@@ -238,7 +199,7 @@
                 <label for="anthropic">Powers all AI sessions</label>
                 <input type="password" id="anthropic" placeholder="sk-ant-api03-..." autocomplete="off" autocapitalize="off" spellcheck="false">
                 <p class="help-text">
-                    <a href="https://console.anthropic.com/settings/keys" target="_blank">Get your key →</a>
+                    <a href="https://console.anthropic.com/settings/keys" target="_blank">Get your key</a>
                 </p>
             </div>
 
@@ -250,53 +211,38 @@
                 <label for="github">For repository and PR management</label>
                 <input type="password" id="github" placeholder="ghp_..." autocomplete="off" autocapitalize="off" spellcheck="false">
                 <p class="help-text">
-                    <a href="https://github.com/settings/tokens/new?scopes=repo&description=Poindexter" target="_blank">Create token with repo scope →</a>
+                    <a href="https://github.com/settings/tokens/new?scopes=repo&description=Poindexter" target="_blank">Create token with repo scope</a>
                 </p>
             </div>
 
-            <button id="submit-btn" onclick="submitSetup()">Generate Passphrase</button>
-        </div>
-
-        <!-- Step 2: Show Passphrase -->
-        <div id="passphrase-screen" class="hidden">
-            <h1>🔐 Your Passphrase</h1>
-            <p class="subtitle">This is your master key to Poindexter</p>
-
-            <div class="warning">
-                <span class="warning-icon">⚠️</span>
+            <div class="info-box">
+                <span class="info-icon">&#x1F511;</span>
                 <div>
-                    <strong>Save this now!</strong><br>
-                    Write it down or save to your password manager. This is your only way to authenticate. There is no recovery.
+                    <strong>Passkey Authentication</strong><br>
+                    After setup, you'll register a passkey (Face ID, Touch ID, or security key) to securely access Poindexter.
                 </div>
             </div>
 
-            <div class="passphrase-container">
-                <div class="passphrase-box" id="passphrase-words"></div>
-            </div>
-
-            <button onclick="copyPassphrase()">📋 Copy to Clipboard</button>
-            <button class="btn-secondary" onclick="confirmSaved()">I've Saved It Securely ✓</button>
+            <button id="submit-btn" onclick="submitSetup()">Continue</button>
         </div>
 
-        <!-- Step 3: Success -->
+        <!-- Step 2: Success -->
         <div id="success-screen" class="hidden">
             <div class="success">
-                <div class="success-icon">🎉</div>
+                <div class="success-icon">&#x1F389;</div>
                 <h2>Setup Complete!</h2>
-                <p style="color: #888;">Poindexter is now running and accessible from any device on your Tailscale network.</p>
-                <div class="success-url" id="dex-url"></div>
+                <p style="color: #888;">Poindexter is now running. Click below to register your passkey and start using it.</p>
+                <div class="success-url">
+                    <a id="dex-url" href="#" target="_blank"></a>
+                </div>
                 <p style="margin-top: 20px; color: #666; font-size: 14px;">
-                    You can close this page now.
+                    You'll set up a passkey on your first visit.
                 </p>
             </div>
         </div>
     </div>
 
-    <div class="copy-feedback" id="copy-feedback">Copied to clipboard!</div>
-
     <script>
-        let passphrase = '';
-
         async function submitSetup() {
             const btn = document.getElementById('submit-btn');
             const anthropic = document.getElementById('anthropic').value.trim();
@@ -314,7 +260,7 @@
             }
 
             btn.disabled = true;
-            btn.innerHTML = '<span class="loading"></span>Generating...';
+            btn.innerHTML = '<span class="loading"></span>Saving...';
 
             try {
                 const res = await fetch('/api/setup', {
@@ -328,51 +274,20 @@
                 if (data.error) {
                     alert('Error: ' + data.error);
                     btn.disabled = false;
-                    btn.textContent = 'Generate Passphrase';
+                    btn.textContent = 'Continue';
                     return;
                 }
 
-                passphrase = data.passphrase;
-                displayPassphrase(passphrase);
-                document.getElementById('setup-form').classList.add('hidden');
-                document.getElementById('passphrase-screen').classList.remove('hidden');
+                // Setup saved, now complete
+                await completeSetup();
             } catch (e) {
                 alert('Setup failed: ' + e.message);
                 btn.disabled = false;
-                btn.textContent = 'Generate Passphrase';
+                btn.textContent = 'Continue';
             }
         }
 
-        function displayPassphrase(phrase) {
-            const words = phrase.split(' ');
-            const container = document.getElementById('passphrase-words');
-            container.innerHTML = words.map((word, i) =>
-                `<span class="word">${i + 1}. ${word}</span>`
-            ).join(' ');
-        }
-
-        async function copyPassphrase() {
-            try {
-                await navigator.clipboard.writeText(passphrase);
-                const feedback = document.getElementById('copy-feedback');
-                feedback.classList.add('show');
-                setTimeout(() => feedback.classList.remove('show'), 2000);
-            } catch (e) {
-                // Fallback for older browsers
-                const textarea = document.createElement('textarea');
-                textarea.value = passphrase;
-                document.body.appendChild(textarea);
-                textarea.select();
-                document.execCommand('copy');
-                document.body.removeChild(textarea);
-
-                const feedback = document.getElementById('copy-feedback');
-                feedback.classList.add('show');
-                setTimeout(() => feedback.classList.remove('show'), 2000);
-            }
-        }
-
-        async function confirmSaved() {
+        async function completeSetup() {
             try {
                 const res = await fetch('/api/complete', { method: 'POST' });
                 const data = await res.json();
@@ -382,24 +297,15 @@
                     return;
                 }
 
-                document.getElementById('dex-url').textContent = data.url;
-                document.getElementById('passphrase-screen').classList.add('hidden');
+                const urlElement = document.getElementById('dex-url');
+                urlElement.textContent = data.url;
+                urlElement.href = data.url;
+                document.getElementById('setup-form').classList.add('hidden');
                 document.getElementById('success-screen').classList.remove('hidden');
             } catch (e) {
                 alert('Error completing setup: ' + e.message);
             }
         }
-
-        // Prevent accidental navigation
-        window.onbeforeunload = function() {
-            if (!document.getElementById('success-screen').classList.contains('hidden')) {
-                return null; // Allow navigation after success
-            }
-            if (!document.getElementById('passphrase-screen').classList.contains('hidden')) {
-                return 'Have you saved your passphrase? You cannot recover it later!';
-            }
-            return null;
-        };
     </script>
 </body>
 </html>

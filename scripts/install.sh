@@ -7,8 +7,9 @@
 #
 # Flow:
 #   1. Shows QR code → scan to join Tailscale (or login)
-#   2. Shows QR code → scan to enter API keys & get passphrase
+#   2. Shows QR code → scan to enter API keys
 #   3. Done! Dex is running at https://dex.your-tailnet.ts.net
+#   4. Visit the URL to register a passkey for secure authentication
 #
 set -euo pipefail
 
@@ -341,7 +342,7 @@ run_setup_wizard() {
     fi
 
     show_qr "$setup_url" "SCAN TO COMPLETE SETUP"
-    echo -e "  ${YELLOW}Enter your API keys and save your passphrase...${NC}"
+    echo -e "  ${YELLOW}Enter your API keys to continue...${NC}"
 
     # Wait for completion
     while [ ! -f "$done_file" ]; do

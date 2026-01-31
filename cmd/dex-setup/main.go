@@ -1,13 +1,12 @@
-// dex-setup is a temporary setup wizard that collects API keys and generates a BIP39 passphrase.
+// dex-setup is a temporary setup wizard that collects API keys.
 // It's designed to run once during installation, served via tailscale serve.
+// Authentication is handled via passkeys in the main application.
 package main
 
 import (
-	"crypto/rand"
 	"embed"
 	"encoding/json"
 	"flag"
-	"fmt"
 	"io/fs"
 	"log"
 	"net/http"
@@ -17,8 +16,6 @@ import (
 	"strings"
 	"sync"
 	"syscall"
-
-	"github.com/tyler-smith/go-bip39"
 )
 
 //go:embed static/*
@@ -32,16 +29,14 @@ var (
 )
 
 type SetupServer struct {
-	mu         sync.Mutex
-	secrets    *Secrets
-	passphrase string
-	done       chan struct{}
+	mu      sync.Mutex
+	secrets *Secrets
+	done    chan struct{}
 }
 
 type Secrets struct {
-	Anthropic  string `json:"anthropic"`
-	GitHub     string `json:"github"`
-	Passphrase string `json:"passphrase"`
+	Anthropic string `json:"anthropic"`
+	GitHub    string `json:"github"`
 }
 
 type SetupRequest struct {
@@ -50,8 +45,8 @@ type SetupRequest struct {
 }
 
 type SetupResponse struct {
-	Passphrase string `json:"passphrase,omitempty"`
-	Error      string `json:"error,omitempty"`
+	Success bool   `json:"success,omitempty"`
+	Error   string `json:"error,omitempty"`
 }
 
 type CompleteResponse struct {
@@ -133,26 +128,11 @@ func (s *SetupServer) handleSetup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Generate BIP39 passphrase
-	entropy, err := bip39.NewEntropy(256) // 24 words
-	if err != nil {
-		sendJSON(w, http.StatusInternalServerError, SetupResponse{Error: "Failed to generate entropy"})
-		return
-	}
-
-	passphrase, err := bip39.NewMnemonic(entropy)
-	if err != nil {
-		sendJSON(w, http.StatusInternalServerError, SetupResponse{Error: "Failed to generate passphrase"})
-		return
-	}
-
 	s.mu.Lock()
 	s.secrets = &Secrets{
-		Anthropic:  req.Anthropic,
-		GitHub:     req.GitHub,
-		Passphrase: passphrase,
+		Anthropic: req.Anthropic,
+		GitHub:    req.GitHub,
 	}
-	s.passphrase = passphrase
 	s.mu.Unlock()
 
 	// Save to file for installer to pick up
@@ -161,7 +141,7 @@ func (s *SetupServer) handleSetup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sendJSON(w, http.StatusOK, SetupResponse{Passphrase: passphrase})
+	sendJSON(w, http.StatusOK, SetupResponse{Success: true})
 }
 
 func (s *SetupServer) handleComplete(w http.ResponseWriter, r *http.Request) {
@@ -194,7 +174,7 @@ func (s *SetupServer) saveSecrets() error {
 	defer s.mu.Unlock()
 
 	if s.secrets == nil {
-		return fmt.Errorf("no secrets to save")
+		return os.ErrInvalid
 	}
 
 	data, err := json.MarshalIndent(s.secrets, "", "  ")
@@ -220,11 +200,4 @@ func sendJSON(w http.ResponseWriter, status int, v interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(v)
-}
-
-// generateSecureToken creates a random token for CSRF protection
-func generateSecureToken() string {
-	b := make([]byte, 32)
-	rand.Read(b)
-	return fmt.Sprintf("%x", b)
 }

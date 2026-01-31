@@ -68,14 +68,15 @@ function LoginPage() {
 
     try {
       // 1. Begin registration - get options from server
+      // go-webauthn wraps the options in a "publicKey" field
       const beginResponse = await api.post<{
         session_id: string;
         user_id: string;
-        options: PublicKeyCredentialCreationOptions;
+        options: { publicKey: PublicKeyCredentialCreationOptions };
       }>('/auth/passkey/register/begin');
 
       // 2. Convert base64url fields to ArrayBuffer for WebAuthn API
-      const options = beginResponse.options;
+      const options = beginResponse.options.publicKey;
       const publicKeyOptions: PublicKeyCredentialCreationOptions = {
         ...options,
         challenge: base64urlToBuffer(options.challenge as unknown as string),
@@ -134,14 +135,15 @@ function LoginPage() {
 
     try {
       // 1. Begin login - get options from server
+      // go-webauthn wraps the options in a "publicKey" field
       const beginResponse = await api.post<{
         session_id: string;
         user_id: string;
-        options: PublicKeyCredentialRequestOptions;
+        options: { publicKey: PublicKeyCredentialRequestOptions };
       }>('/auth/passkey/login/begin');
 
       // 2. Convert base64url fields to ArrayBuffer for WebAuthn API
-      const options = beginResponse.options;
+      const options = beginResponse.options.publicKey;
       const publicKeyOptions: PublicKeyCredentialRequestOptions = {
         ...options,
         challenge: base64urlToBuffer(options.challenge as unknown as string),
