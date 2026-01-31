@@ -44,7 +44,7 @@ This task is **COMPLETE** when all of these are true:
 ```
 [ ] go build ./cmd/dex && go test ./... → PASS
 [ ] Frontend builds: cd frontend && bun run build → PASS
-[ ] Can authenticate via BIP39 passphrase from mobile
+[ ] Can authenticate via passkey (WebAuthn) from mobile
 [ ] Can create a task via API and it appears in UI
 [ ] Can start a task and see a session running Ralph loop
 [ ] Session completes...

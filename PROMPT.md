@@ -9,7 +9,7 @@ This task is **COMPLETE** when all of these are true:
 ```
 [ ] go build ./cmd/dex && go test ./... → PASS
 [ ] Frontend builds: cd frontend && bun run build → PASS
-[ ] Can authenticate via BIP39 passphrase from mobile
+[ ] Can authenticate via passkey (WebAuthn) from mobile
 [ ] Can create a task via API and it appears in UI
 [ ] Can start a task and see a session running Ralph loop
 [ ] Session completes and creates a PR on GitHub
@@ -55,7 +55,7 @@ Before any phase can be marked complete:
 
 - Never use external services for Dex's own state — SQLite only
 - Never modify main repos directly — always use worktrees
-- Never store private keys — derive from passphrase
+- Never store secrets in code — use passkeys for auth, env vars for API keys
 - Never auto-merge conflicts — always require user approval
 - Never ignore budget limits — always pause and ask
 - Never expose to public internet — Tailscale only
@@ -70,7 +70,7 @@ Before any phase can be marked complete:
 **What EXISTS and WORKS (✅):**
 - Go module initialized with all dependencies
 - SQLite database with 7 migrations (users, projects, tasks, dependencies, sessions, checkpoints, approvals)
-- BIP39 + Ed25519 + JWT authentication system (core logic)
+- WebAuthn/Passkey + JWT authentication system (core logic)
 - All 11 toolbelt clients (GitHub, Fly, Cloudflare, Neon, Upstash, Resend, BetterStack, Doppler, MoneyDevKit, Anthropic, fal.ai)
 - Task CRUD with state machine and dependency graph
 - Git worktree management (create, remove, list, status)
@@ -81,7 +81,7 @@ Before any phase can be marked complete:
 - 9 hat prompt templates
 - WebSocket hub infrastructure (`internal/api/websocket/`)
 - Hat transition validation (`internal/orchestrator/transitions.go`)
-- Frontend login page with BIP39 crypto
+- Frontend login page with passkey authentication
 
 **What is PARTIALLY DONE (⚠️):**
 - Auth API endpoints (exist but need verification)

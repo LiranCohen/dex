@@ -22,7 +22,7 @@ cp toolbelt.yaml.example toolbelt.yaml
 ./dex -static ./frontend/dist -toolbelt toolbelt.yaml
 ```
 
-Open http://localhost:8080 and generate your BIP39 passphrase.
+Open http://localhost:8080 and register a passkey (Face ID, Touch ID, or security key).
 
 ## Documentation
 
@@ -49,7 +49,7 @@ export GITHUB_TOKEN="ghp_..."           # For repo operations
 ┌─────────────────────────────────────────────────────────────┐
 │  Frontend (React)  ←──WebSocket──→  API (Go/Echo)          │
 │       ↓                                    ↓                │
-│  Auth (BIP39/JWT)              SQLite │ Git Worktrees      │
+│  Auth (Passkey/JWT)            SQLite │ Git Worktrees      │
 │                                        │       ↓            │
 │                                 Orchestrator (Ralph Loop)   │
 │                                        ↓                    │

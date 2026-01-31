@@ -120,38 +120,34 @@ The database initializes automatically on first run:
 
 This creates `dex.db` with all required tables.
 
-## Step 4: Generate Your BIP39 Passphrase
+## Step 4: Register Your Passkey
 
-Poindexter uses a 24-word passphrase for authentication. This is your master credential - **store it securely**.
+Poindexter uses passkeys (WebAuthn) for authentication. This is more secure than passwords and easier to use.
 
-### Option A: Generate via UI (Recommended)
+### First-Time Setup
 1. Open http://localhost:8080 in your browser
-2. Click "Generate New Passphrase"
-3. **Write down all 24 words in order**
-4. Store them securely (password manager, safe, etc.)
-
-### Option B: Generate via CLI
-```bash
-# Using bip39 tool (if installed)
-bip39 generate 24
-
-# Or use the dex utility
-./dex generate-passphrase
-```
+2. Click "Set up Passkey"
+3. Your browser/device will prompt for biometric authentication:
+   - **Face ID** (iPhone, iPad, Mac with Face ID)
+   - **Touch ID** (Mac, older iPhones)
+   - **Windows Hello** (Windows devices)
+   - **Security Key** (YubiKey, etc.)
+4. You're now registered and logged in!
 
 ### Security Notes
-- This passphrase is your **only** authentication method
-- Anyone with this phrase can access your dex instance
-- There is no password reset - lose it and you're locked out
-- Consider using a hardware wallet or secure vault for storage
+- Passkeys are phishing-resistant (bound to the specific domain)
+- Credentials are stored securely on your device
+- No passwords to remember, type, or have stolen
+- Works across devices if you use iCloud Keychain, Google Password Manager, etc.
 
-## Step 5: First Login
+## Step 5: Subsequent Logins
 
 1. Open http://localhost:8080
-2. Enter your 24-word passphrase
-3. You're now authenticated!
+2. Click "Sign in with Passkey"
+3. Authenticate with your biometric
+4. You're logged in!
 
-The passphrase derives an Ed25519 keypair client-side. Only the public key is sent to the server.
+The passkey authentication issues a JWT token for the session.
 
 ## Step 6: Verify Services
 

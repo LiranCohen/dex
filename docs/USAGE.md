@@ -116,14 +116,15 @@ Approvals appear in the UI and can be:
 
 ### Authentication
 
+Authentication is handled via passkeys (WebAuthn) in the browser UI:
+
+1. **First visit**: Click "Set up Passkey" and authenticate with Face ID/Touch ID/security key
+2. **Subsequent visits**: Click "Sign in with Passkey"
+
+This returns a JWT token that's stored in localStorage. The token is automatically included in all API requests.
+
 ```bash
-# 1. Get a challenge
-CHALLENGE=$(curl -s http://localhost:8080/api/v1/auth/challenge | jq -r .challenge)
-
-# 2. Sign with your passphrase (done in UI/client)
-# Returns JWT token
-
-# 3. Use token for all requests
+# For programmatic access, use the token from the browser session:
 curl -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v1/tasks
 ```
 

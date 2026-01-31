@@ -74,8 +74,7 @@ The second QR code opens a setup wizard running on the server. Because your phon
 The wizard:
 1. Collects your **Anthropic API key** (for AI sessions)
 2. Collects your **GitHub token** (for repo/PR management)
-3. Generates your **24-word BIP39 passphrase** (your master key)
-4. **Save the passphrase!** There's no recovery.
+3. Redirects you to register a **passkey** (Face ID, Touch ID, or security key)
 
 ### After Setup
 
@@ -119,8 +118,8 @@ The installer runs `dex-setup`, a Go binary that:
 - Serves a mobile-friendly web UI on localhost:9999
 - Uses [Tailscale Serve](https://tailscale.com/kb/1312/serve) to expose it with HTTPS
 - Collects API keys via the web form
-- Generates a BIP39 passphrase using proper entropy
 - Writes secrets to disk and signals completion
+- Redirects to the main app for passkey registration
 
 Because you authenticated in Step 1, your phone is on the tailnet and can reach `https://dex.your-tailnet.ts.net`.
 
@@ -199,19 +198,20 @@ tailscale status
 2. Is the server connected? `tailscale status`
 3. Try the IP directly: `https://100.x.y.z`
 
-### "Passphrase not working"
+### "Passkey not working"
 
-- Check for typos (all lowercase, spaces between words)
-- Make sure you saved all 24 words in order
-- The passphrase is case-sensitive
+- Make sure you're using the same device/browser you registered with
+- Try removing and re-adding the passkey in your device's settings
+- If using iCloud Keychain, ensure it's synced
+- Check that the domain in the URL matches exactly
 
 ## Security Model
 
 - **Network isolation**: Dex is only accessible via Tailscale, not the public internet
 - **Encrypted transport**: All traffic is WireGuard-encrypted
 - **Identity verification**: [Tailscale identity headers](https://tailscale.com/kb/1312/serve#identity-headers) pass through user info
-- **Passphrase auth**: BIP39 + Ed25519 for cryptographic authentication
-- **No stored passwords**: Keys derived from passphrase each time
+- **Passkey auth**: WebAuthn/FIDO2 for phishing-resistant authentication
+- **No passwords**: Credentials bound to device biometrics, nothing to remember or steal
 
 ## Uninstall
 

@@ -791,6 +791,92 @@ func (s *Server) handleDeleteProject(c echo.Context) error {
 	return c.NoContent(http.StatusNoContent)
 }
 
+// TaskResponse is the JSON response format for tasks
+// This properly handles sql.Null* types for JSON serialization
+type TaskResponse struct {
+	ID                string   `json:"ID"`
+	ProjectID         string   `json:"ProjectID"`
+	GitHubIssueNumber *int64   `json:"GitHubIssueNumber"`
+	Title             string   `json:"Title"`
+	Description       *string  `json:"Description"`
+	ParentID          *string  `json:"ParentID"`
+	Type              string   `json:"Type"`
+	Hat               *string  `json:"Hat"`
+	Priority          int      `json:"Priority"`
+	AutonomyLevel     int      `json:"AutonomyLevel"`
+	Status            string   `json:"Status"`
+	BaseBranch        string   `json:"BaseBranch"`
+	WorktreePath      *string  `json:"WorktreePath"`
+	BranchName        *string  `json:"BranchName"`
+	PRNumber          *int64   `json:"PRNumber"`
+	TokenBudget       *int64   `json:"TokenBudget"`
+	TokenUsed         int64    `json:"TokenUsed"`
+	TimeBudgetMin     *int64   `json:"TimeBudgetMin"`
+	TimeUsedMin       int64    `json:"TimeUsedMin"`
+	DollarBudget      *float64 `json:"DollarBudget"`
+	DollarUsed        float64  `json:"DollarUsed"`
+	CreatedAt         string   `json:"CreatedAt"`
+	StartedAt         *string  `json:"StartedAt"`
+	CompletedAt       *string  `json:"CompletedAt"`
+}
+
+// toTaskResponse converts a db.Task to TaskResponse for clean JSON
+func toTaskResponse(t *db.Task) TaskResponse {
+	resp := TaskResponse{
+		ID:            t.ID,
+		ProjectID:     t.ProjectID,
+		Title:         t.Title,
+		Type:          t.Type,
+		Priority:      t.Priority,
+		AutonomyLevel: t.AutonomyLevel,
+		Status:        t.Status,
+		BaseBranch:    t.BaseBranch,
+		TokenUsed:     t.TokenUsed,
+		TimeUsedMin:   t.TimeUsedMin,
+		DollarUsed:    t.DollarUsed,
+		CreatedAt:     t.CreatedAt.Format(time.RFC3339),
+	}
+	if t.GitHubIssueNumber.Valid {
+		resp.GitHubIssueNumber = &t.GitHubIssueNumber.Int64
+	}
+	if t.Description.Valid {
+		resp.Description = &t.Description.String
+	}
+	if t.ParentID.Valid {
+		resp.ParentID = &t.ParentID.String
+	}
+	if t.Hat.Valid {
+		resp.Hat = &t.Hat.String
+	}
+	if t.WorktreePath.Valid {
+		resp.WorktreePath = &t.WorktreePath.String
+	}
+	if t.BranchName.Valid {
+		resp.BranchName = &t.BranchName.String
+	}
+	if t.PRNumber.Valid {
+		resp.PRNumber = &t.PRNumber.Int64
+	}
+	if t.TokenBudget.Valid {
+		resp.TokenBudget = &t.TokenBudget.Int64
+	}
+	if t.TimeBudgetMin.Valid {
+		resp.TimeBudgetMin = &t.TimeBudgetMin.Int64
+	}
+	if t.DollarBudget.Valid {
+		resp.DollarBudget = &t.DollarBudget.Float64
+	}
+	if t.StartedAt.Valid {
+		s := t.StartedAt.Time.Format(time.RFC3339)
+		resp.StartedAt = &s
+	}
+	if t.CompletedAt.Valid {
+		s := t.CompletedAt.Time.Format(time.RFC3339)
+		resp.CompletedAt = &s
+	}
+	return resp
+}
+
 // ApprovalResponse is the JSON response format for approvals
 type ApprovalResponse struct {
 	ID          string          `json:"id"`

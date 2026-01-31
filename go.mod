@@ -2,13 +2,13 @@ module github.com/lirancohen/dex
 
 go 1.24.3
 
-require github.com/tyler-smith/go-bip39 v1.1.0
-
-require golang.org/x/crypto v0.47.0
+require golang.org/x/crypto v0.47.0 // indirect
 
 require (
+	github.com/go-webauthn/webauthn v0.15.0
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/go-github/v68 v68.0.0
+	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/labstack/echo/v4 v4.13.4
 	gopkg.in/yaml.v3 v3.0.1
@@ -18,13 +18,10 @@ require (
 require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/fxamacker/cbor/v2 v2.9.0 // indirect
-	github.com/fxamacker/webauthn v0.6.1 // indirect
 	github.com/go-viper/mapstructure/v2 v2.4.0 // indirect
-	github.com/go-webauthn/webauthn v0.15.0 // indirect
 	github.com/go-webauthn/x v0.1.26 // indirect
 	github.com/google/go-querystring v1.1.0 // indirect
 	github.com/google/go-tpm v0.9.6 // indirect
-	github.com/google/uuid v1.6.0 // indirect
 	github.com/labstack/gommon v0.4.2 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
