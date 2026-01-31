@@ -192,6 +192,11 @@ func StartTailscaleAuth(hostname string) (authURL string, checkConnected func() 
 	go scanPipe(stdoutPipe)
 	go scanPipe(stderrPipe)
 
+	// Goroutine to wait on the command and prevent zombies
+	go func() {
+		cmd.Wait()
+	}()
+
 	// Wait for URL with timeout
 	select {
 	case url := <-urlChan:
