@@ -432,8 +432,14 @@ func (s *Server) handleListTasks(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 
+	// Convert to response format with proper null handling
+	taskResponses := make([]TaskResponse, len(tasks))
+	for i, t := range tasks {
+		taskResponses[i] = toTaskResponse(t)
+	}
+
 	return c.JSON(http.StatusOK, map[string]any{
-		"tasks": tasks,
+		"tasks": taskResponses,
 		"count": len(tasks),
 	})
 }
@@ -471,7 +477,7 @@ func (s *Server) handleCreateTask(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 
-	return c.JSON(http.StatusCreated, t)
+	return c.JSON(http.StatusCreated, toTaskResponse(t))
 }
 
 // handleGetTask returns a single task by ID
@@ -483,7 +489,7 @@ func (s *Server) handleGetTask(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusNotFound, err.Error())
 	}
 
-	return c.JSON(http.StatusOK, t)
+	return c.JSON(http.StatusOK, toTaskResponse(t))
 }
 
 // handleUpdateTask updates a task
@@ -500,7 +506,7 @@ func (s *Server) handleUpdateTask(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 
-	return c.JSON(http.StatusOK, updated)
+	return c.JSON(http.StatusOK, toTaskResponse(updated))
 }
 
 // handleDeleteTask removes a task
