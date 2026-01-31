@@ -336,6 +336,262 @@ install_tailscale() {
     success "Tailscale installed"
 }
 
+# Install all major programming language tools for AI sessions
+install_language_tools() {
+    log "Installing programming language tools..."
+    echo ""
+
+    # Node.js (LTS) with npm
+    install_nodejs
+
+    # Python3 with pip
+    install_python
+
+    # Rust with cargo
+    install_rust
+
+    # Ruby with gems
+    install_ruby
+
+    # PHP
+    install_php
+
+    # Java (OpenJDK)
+    install_java
+
+    # .NET SDK
+    install_dotnet
+
+    echo ""
+    success "All programming language tools installed"
+}
+
+install_nodejs() {
+    if command -v node &>/dev/null; then
+        success "Node.js already installed: $(node --version)"
+        return
+    fi
+    log "Installing Node.js (LTS)..."
+
+    case "$OS" in
+        darwin)
+            if command -v brew &>/dev/null; then
+                brew install node >/dev/null 2>&1
+            else
+                # Use fnm or direct download
+                curl -fsSL https://fnm.vercel.app/install | bash -s -- --skip-shell
+                export PATH="$HOME/.local/share/fnm:$PATH"
+                eval "$(fnm env)"
+                fnm install --lts
+            fi
+            ;;
+        linux)
+            # Use NodeSource for latest LTS
+            if command -v apt-get &>/dev/null; then
+                curl -fsSL https://deb.nodesource.com/setup_lts.x | bash -
+                apt-get install -y nodejs >/dev/null
+            elif command -v yum &>/dev/null; then
+                curl -fsSL https://rpm.nodesource.com/setup_lts.x | bash -
+                yum install -y nodejs >/dev/null
+            elif command -v pacman &>/dev/null; then
+                pacman -Sy --noconfirm nodejs npm >/dev/null
+            fi
+            ;;
+    esac
+
+    if command -v node &>/dev/null; then
+        success "Node.js installed: $(node --version)"
+    else
+        warn "Node.js installation failed - AI sessions may install it when needed"
+    fi
+}
+
+install_python() {
+    if command -v python3 &>/dev/null && command -v pip3 &>/dev/null; then
+        success "Python3 already installed: $(python3 --version)"
+        return
+    fi
+    log "Installing Python3 with pip..."
+
+    case "$OS" in
+        darwin)
+            if command -v brew &>/dev/null; then
+                brew install python3 >/dev/null 2>&1
+            fi
+            ;;
+        linux)
+            if command -v apt-get &>/dev/null; then
+                apt-get install -y python3 python3-pip python3-venv >/dev/null
+            elif command -v yum &>/dev/null; then
+                yum install -y python3 python3-pip >/dev/null
+            elif command -v pacman &>/dev/null; then
+                pacman -Sy --noconfirm python python-pip >/dev/null
+            fi
+            ;;
+    esac
+
+    if command -v python3 &>/dev/null; then
+        success "Python3 installed: $(python3 --version)"
+    else
+        warn "Python3 installation failed - AI sessions may install it when needed"
+    fi
+}
+
+install_rust() {
+    if command -v rustc &>/dev/null && command -v cargo &>/dev/null; then
+        success "Rust already installed: $(rustc --version)"
+        return
+    fi
+    log "Installing Rust with cargo..."
+
+    # Rust uses rustup for all platforms
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path >/dev/null 2>&1
+
+    # Add to path for current session
+    export PATH="$HOME/.cargo/bin:$PATH"
+
+    # Also add for root user if running as root
+    if [ "$EUID" -eq 0 ]; then
+        export PATH="/root/.cargo/bin:$PATH"
+    fi
+
+    if command -v rustc &>/dev/null; then
+        success "Rust installed: $(rustc --version)"
+    else
+        warn "Rust installation failed - AI sessions may install it when needed"
+    fi
+}
+
+install_ruby() {
+    if command -v ruby &>/dev/null; then
+        success "Ruby already installed: $(ruby --version | head -1)"
+        return
+    fi
+    log "Installing Ruby..."
+
+    case "$OS" in
+        darwin)
+            # macOS comes with Ruby, but install latest via brew if available
+            if command -v brew &>/dev/null; then
+                brew install ruby >/dev/null 2>&1
+            fi
+            ;;
+        linux)
+            if command -v apt-get &>/dev/null; then
+                apt-get install -y ruby ruby-dev >/dev/null
+            elif command -v yum &>/dev/null; then
+                yum install -y ruby ruby-devel >/dev/null
+            elif command -v pacman &>/dev/null; then
+                pacman -Sy --noconfirm ruby >/dev/null
+            fi
+            ;;
+    esac
+
+    if command -v ruby &>/dev/null; then
+        success "Ruby installed: $(ruby --version | head -1)"
+    else
+        warn "Ruby installation failed - AI sessions may install it when needed"
+    fi
+}
+
+install_php() {
+    if command -v php &>/dev/null; then
+        success "PHP already installed: $(php --version | head -1)"
+        return
+    fi
+    log "Installing PHP..."
+
+    case "$OS" in
+        darwin)
+            if command -v brew &>/dev/null; then
+                brew install php >/dev/null 2>&1
+            fi
+            ;;
+        linux)
+            if command -v apt-get &>/dev/null; then
+                apt-get install -y php-cli php-common >/dev/null
+            elif command -v yum &>/dev/null; then
+                yum install -y php-cli >/dev/null
+            elif command -v pacman &>/dev/null; then
+                pacman -Sy --noconfirm php >/dev/null
+            fi
+            ;;
+    esac
+
+    if command -v php &>/dev/null; then
+        success "PHP installed: $(php --version | head -1)"
+    else
+        warn "PHP installation failed - AI sessions may install it when needed"
+    fi
+}
+
+install_java() {
+    if command -v java &>/dev/null; then
+        success "Java already installed: $(java -version 2>&1 | head -1)"
+        return
+    fi
+    log "Installing Java (OpenJDK)..."
+
+    case "$OS" in
+        darwin)
+            if command -v brew &>/dev/null; then
+                brew install openjdk >/dev/null 2>&1
+                # Symlink for macOS
+                ln -sfn /opt/homebrew/opt/openjdk/libexec/openjdk.jdk /Library/Java/JavaVirtualMachines/openjdk.jdk 2>/dev/null || true
+            fi
+            ;;
+        linux)
+            if command -v apt-get &>/dev/null; then
+                apt-get install -y default-jdk >/dev/null
+            elif command -v yum &>/dev/null; then
+                yum install -y java-17-openjdk java-17-openjdk-devel >/dev/null
+            elif command -v pacman &>/dev/null; then
+                pacman -Sy --noconfirm jdk-openjdk >/dev/null
+            fi
+            ;;
+    esac
+
+    if command -v java &>/dev/null; then
+        success "Java installed: $(java -version 2>&1 | head -1)"
+    else
+        warn "Java installation failed - AI sessions may install it when needed"
+    fi
+}
+
+install_dotnet() {
+    if command -v dotnet &>/dev/null; then
+        success ".NET SDK already installed: $(dotnet --version)"
+        return
+    fi
+    log "Installing .NET SDK..."
+
+    case "$OS" in
+        darwin)
+            if command -v brew &>/dev/null; then
+                brew install --cask dotnet-sdk >/dev/null 2>&1
+            else
+                # Use official install script
+                curl -fsSL https://dot.net/v1/dotnet-install.sh | bash -s -- --channel LTS >/dev/null 2>&1
+                export PATH="$HOME/.dotnet:$PATH"
+            fi
+            ;;
+        linux)
+            # Use official Microsoft install script for broader compatibility
+            curl -fsSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh
+            chmod +x /tmp/dotnet-install.sh
+            /tmp/dotnet-install.sh --channel LTS --install-dir /usr/share/dotnet >/dev/null 2>&1
+            ln -sf /usr/share/dotnet/dotnet /usr/local/bin/dotnet 2>/dev/null || true
+            rm -f /tmp/dotnet-install.sh
+            ;;
+    esac
+
+    if command -v dotnet &>/dev/null; then
+        success ".NET SDK installed: $(dotnet --version)"
+    else
+        warn ".NET SDK installation failed - AI sessions may install it when needed"
+    fi
+}
+
 build_dex() {
     log "Building dex from source..."
 
@@ -744,6 +1000,7 @@ main() {
     install_go
     install_cloudflared
     install_tailscale
+    install_language_tools
 
     if [ "$FRESH_INSTALL" = false ] && is_configured; then
         echo -e "${CYAN}Existing installation detected. Running upgrade...${NC}"
