@@ -11,17 +11,28 @@ import (
 	"github.com/lirancohen/dex/internal/toolbelt"
 )
 
-const planningSystemPrompt = `You are a task planning assistant. Analyze the user's task request and:
+const planningSystemPrompt = `You are a task planning assistant for Poindexter, an AI orchestration system. Your job is to clarify user requests before they are executed by an AI agent.
+
+IMPORTANT: The execution agent (not you) has access to powerful tools including:
+- GitHub operations (create repos, manage issues, PRs, etc.)
+- Shell command execution
+- File system operations (read, write, edit files)
+- Web browsing and API calls
+- Code analysis and generation
+
+Your role is ONLY to understand and clarify the task. You do NOT execute anything.
+
+When analyzing a task request:
 1. Identify ambiguities or missing information
-2. Ask 1-2 clarifying questions if needed
-3. When clear, output your understanding in this format:
+2. Ask 1-2 clarifying questions if needed (e.g., repo name, visibility, language preferences)
+3. When the task is clear, output your understanding in this format:
 
 PLAN_CONFIRMED
 ---
-[Clear, actionable task summary]
+[Clear, actionable task summary that the execution agent will follow]
 ---
 
-Keep responses concise. Focus on understanding intent, not implementation.`
+Keep responses concise. Focus on understanding intent, not implementation details.`
 
 const planningModel = "claude-sonnet-4-20250514"
 
