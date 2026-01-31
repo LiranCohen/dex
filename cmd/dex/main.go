@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"flag"
 	"fmt"
 	"os"
@@ -10,6 +12,7 @@ import (
 	"time"
 
 	"github.com/lirancohen/dex/internal/api"
+	"github.com/lirancohen/dex/internal/auth"
 	"github.com/lirancohen/dex/internal/db"
 	"github.com/lirancohen/dex/internal/toolbelt"
 )
@@ -25,6 +28,7 @@ func main() {
 	staticDir := flag.String("static", "", "Path to frontend static files (e.g., ./frontend/dist)")
 	toolbeltConfig := flag.String("toolbelt", "", "Path to toolbelt.yaml config file (optional)")
 	worktreeBase := flag.String("worktree-base", "", "Base directory for git worktrees (e.g., ~/src/worktrees)")
+	jwtSecret := flag.String("jwt-secret", "", "JWT signing secret (auto-generated if not provided)")
 	showVersion := flag.Bool("version", false, "Show version and exit")
 	flag.Parse()
 
@@ -74,6 +78,24 @@ func main() {
 		}
 	}
 
+	// Set up JWT token configuration with ED25519 keys
+	// Generate new keys on each startup (tokens won't survive restarts)
+	// For persistence, keys should be loaded from a file
+	pubKey, privKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error generating JWT keys: %v\n", err)
+		os.Exit(1)
+	}
+
+	tokenConfig := &auth.TokenConfig{
+		Issuer:       "poindexter",
+		ExpiryHours:  24 * 7, // 1 week
+		RefreshHours: 24,     // Can refresh within 24 hours of expiry
+		SigningKey:   privKey,
+		VerifyingKey: pubKey,
+	}
+	_ = *jwtSecret // Reserved for future use (loading keys from file)
+
 	// Create API server
 	server := api.NewServer(database, api.Config{
 		Addr:         *addr,
@@ -82,6 +104,7 @@ func main() {
 		StaticDir:    *staticDir,
 		Toolbelt:     tb,
 		WorktreeBase: *worktreeBase,
+		TokenConfig:  tokenConfig,
 	})
 
 	// Start server in goroutine
