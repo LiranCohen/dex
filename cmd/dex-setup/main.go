@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -246,21 +247,42 @@ func (s *SetupServer) handleTailscaleStatus(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// Check connection status
-	connected, _ := IsTailscaleConnected()
+	// Get full status for debugging
+	status, err := GetTailscaleStatus()
+	if err != nil {
+		log.Printf("Tailscale status error: %v", err)
+		sendJSON(w, http.StatusOK, map[string]any{
+			"installed":     true,
+			"connected":     false,
+			"error":         err.Error(),
+			"backend_state": "unknown",
+		})
+		return
+	}
 
-	// Get DNS name if connected
+	// Log for debugging
+	log.Printf("Tailscale status: BackendState=%s, DNSName=%s, Online=%v",
+		status.BackendState, status.Self.DNSName, status.Self.Online)
+
+	// Check connection status - Running means connected
+	connected := status.BackendState == "Running"
+
+	// Get DNS name and serve URL if connected
 	var dnsName, serveURL string
 	if connected {
-		dnsName, _ = GetTailscaleDNSName()
-		serveURL, _ = GetTailscaleServeURL(443)
+		dnsName = strings.TrimSuffix(status.Self.DNSName, ".")
+		if dnsName != "" {
+			serveURL = fmt.Sprintf("https://%s", dnsName)
+		}
 	}
 
 	sendJSON(w, http.StatusOK, map[string]any{
-		"installed":  true,
-		"connected":  connected,
-		"dns_name":   dnsName,
-		"serve_url":  serveURL,
+		"installed":     true,
+		"connected":     connected,
+		"backend_state": status.BackendState,
+		"dns_name":      dnsName,
+		"serve_url":     serveURL,
+		"online":        status.Self.Online,
 	})
 }
 

@@ -378,7 +378,7 @@
 
                     <div class="status">
                         <div class="status-dot waiting"></div>
-                        <span>Waiting for connection...</span>
+                        <span id="ts-status-text">Waiting for connection...</span>
                     </div>
                 </div>
 
@@ -642,6 +642,12 @@
                     document.getElementById('ts-need-auth').classList.add('hidden');
                     document.getElementById('ts-connected').classList.add('hidden');
                     return;
+                }
+
+                // Update status text with backend state for debugging
+                const statusText = document.getElementById('ts-status-text');
+                if (statusText && status.backend_state) {
+                    statusText.textContent = `Status: ${status.backend_state}`;
                 }
 
                 if (status.connected) {
