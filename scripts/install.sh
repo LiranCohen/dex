@@ -205,11 +205,6 @@ install_tailscale() {
 }
 
 build_dex() {
-    if [ -f "$DEX_INSTALL_DIR/dex" ] && [ -f "$DEX_INSTALL_DIR/dex-setup" ]; then
-        success "Dex already installed at $DEX_INSTALL_DIR"
-        return
-    fi
-
     log "Building dex from source..."
 
     export PATH="$PATH:/usr/local/go/bin"
@@ -232,12 +227,7 @@ build_dex() {
 }
 
 install_frontend() {
-    if [ -d "$DEX_INSTALL_DIR/frontend" ] && [ -f "$DEX_INSTALL_DIR/frontend/index.html" ]; then
-        success "Frontend already installed"
-        return
-    fi
-
-    log "Installing frontend..."
+    log "Building frontend..."
 
     if ! command -v bun &>/dev/null; then
         log "Installing bun..."
@@ -255,10 +245,12 @@ install_frontend() {
     cd - >/dev/null
 
     mkdir -p "$DEX_INSTALL_DIR"
+    # Remove old frontend but preserve all other files (db, config, etc)
+    rm -rf "$DEX_INSTALL_DIR/frontend"
     cp -r "$tmp_repo/frontend/dist" "$DEX_INSTALL_DIR/frontend"
     rm -rf "$tmp_repo"
 
-    success "Frontend installed"
+    success "Frontend built and installed"
 }
 
 generate_pin() {
@@ -533,11 +525,16 @@ configure_tailscale_serve() {
 print_success() {
     local permanent_url
     permanent_url=$(cat "$DEX_INSTALL_DIR/permanent-url" 2>/dev/null || echo "")
+    local is_upgrade="${1:-false}"
 
     echo ""
     echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
-    echo -e "  ${GREEN}${BOLD}✓ POINDEXTER IS READY${NC}"
+    if [ "$is_upgrade" = "true" ]; then
+        echo -e "  ${GREEN}${BOLD}✓ POINDEXTER UPGRADED SUCCESSFULLY${NC}"
+    else
+        echo -e "  ${GREEN}${BOLD}✓ POINDEXTER IS READY${NC}"
+    fi
     echo ""
 
     if [ -n "$permanent_url" ]; then
@@ -562,10 +559,32 @@ print_success() {
 }
 
 is_configured() {
-    # Check if dex is already fully configured
+    # Check if dex is already fully configured (has completed setup)
     [ -f "$DEX_INSTALL_DIR/setup-complete" ] && \
-    [ -f "$DEX_INSTALL_DIR/dex" ] && \
-    [ -d "$DEX_INSTALL_DIR/frontend" ]
+    [ -f "$DEX_INSTALL_DIR/dex.db" ]
+}
+
+upgrade_dex() {
+    log "Upgrading Poindexter..."
+    echo ""
+
+    # Stop the service before upgrading
+    if command -v systemctl &>/dev/null; then
+        log "Stopping dex service..."
+        systemctl stop dex 2>/dev/null || true
+    fi
+
+    # Rebuild binaries and frontend (state files are preserved)
+    build_dex
+    install_frontend
+
+    # Recreate/update systemd service
+    create_systemd_service
+
+    # Configure tailscale serve if using tailscale
+    configure_tailscale_serve
+
+    success "Upgrade complete!"
 }
 
 main() {
@@ -577,23 +596,22 @@ main() {
     install_go
     install_cloudflared
     install_tailscale
-    build_dex
-    install_frontend
 
     if is_configured; then
-        success "Dex is already configured"
-        if command -v systemctl &>/dev/null; then
-            systemctl start dex 2>/dev/null || true
-        fi
-        configure_tailscale_serve
+        echo -e "${CYAN}Existing installation detected. Running upgrade...${NC}"
+        echo ""
+        upgrade_dex
+        print_success true
     else
+        # Fresh install
+        build_dex
+        install_frontend
         run_setup_phase1
         create_systemd_service
         configure_tailscale_serve
         wait_for_full_setup
+        print_success false
     fi
-
-    print_success
 }
 
 main "$@"
