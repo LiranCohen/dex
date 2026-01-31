@@ -173,8 +173,9 @@ func (s *Server) handlePasskeyRegisterFinish(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "registration failed: "+err.Error())
 	}
 
-	// Create user in database
-	dbUser, err := s.db.CreateUser("") // Empty public key for passkey-only user
+	// Create user in database with the SAME ID used for WebAuthn registration
+	// This is critical - the userHandle in the credential must match the user ID
+	dbUser, err := s.db.CreateUserWithID(userID, "") // Empty public key for passkey-only user
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create user")
 	}

@@ -22,10 +22,15 @@ func NewPrefixedID(prefix string) string {
 	return prefix + "-" + NewID()
 }
 
-// CreateUser inserts a new user into the database
+// CreateUser inserts a new user into the database with auto-generated ID
 func (db *DB) CreateUser(publicKey string) (*User, error) {
+	return db.CreateUserWithID(NewPrefixedID("user"), publicKey)
+}
+
+// CreateUserWithID inserts a new user with a specific ID
+func (db *DB) CreateUserWithID(id, publicKey string) (*User, error) {
 	user := &User{
-		ID:        NewPrefixedID("user"),
+		ID:        id,
 		PublicKey: publicKey,
 		CreatedAt: time.Now(),
 	}
