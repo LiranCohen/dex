@@ -131,7 +131,8 @@ export type ActivityEventType =
   | 'tool_call'
   | 'tool_result'
   | 'completion_signal'
-  | 'hat_transition';
+  | 'hat_transition'
+  | 'debug_log';
 
 // Activity event from API
 export interface Activity {
@@ -159,6 +160,13 @@ export interface ToolResultContent {
 export interface HatTransitionContent {
   from_hat: string;
   to_hat: string;
+}
+
+export interface DebugLogContent {
+  level: 'info' | 'warn' | 'error';
+  message: string;
+  duration_ms?: number;
+  details?: unknown;
 }
 
 // API response for activity

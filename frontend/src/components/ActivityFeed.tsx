@@ -13,6 +13,7 @@ export function ActivityFeed({ taskId, isRunning }: ActivityFeedProps) {
   const [activities, setActivities] = useState<Activity[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [showDebugLogs, setShowDebugLogs] = useState(false);
   const [summary, setSummary] = useState<{
     total_iterations: number;
     total_tokens: number;
@@ -134,11 +135,19 @@ export function ActivityFeed({ taskId, isRunning }: ActivityFeedProps) {
     );
   }
 
+  // Filter activities based on debug toggle
+  const filteredActivities = showDebugLogs
+    ? activities
+    : activities.filter((a) => a.event_type !== 'debug_log');
+
+  // Count debug logs for badge
+  const debugLogCount = activities.filter((a) => a.event_type === 'debug_log').length;
+
   // Group activities by iteration for visual separation
   const groupedActivities: { iteration: number; items: Activity[] }[] = [];
   let currentIteration = -1;
 
-  for (const activity of activities) {
+  for (const activity of filteredActivities) {
     if (activity.iteration !== currentIteration) {
       currentIteration = activity.iteration;
       groupedActivities.push({ iteration: currentIteration, items: [] });
@@ -148,17 +157,32 @@ export function ActivityFeed({ taskId, isRunning }: ActivityFeedProps) {
 
   return (
     <div className="space-y-4">
-      {/* Summary stats */}
-      {summary && (summary.total_iterations > 0 || summary.total_tokens > 0) && (
-        <div className="flex gap-4 text-xs text-gray-500 pb-2 border-b border-gray-700">
-          {summary.total_iterations > 0 && (
+      {/* Summary stats and controls */}
+      <div className="flex items-center justify-between pb-2 border-b border-gray-700">
+        <div className="flex gap-4 text-xs text-gray-500">
+          {summary && summary.total_iterations > 0 && (
             <span>Iterations: {summary.total_iterations}</span>
           )}
-          {summary.total_tokens > 0 && (
+          {summary && summary.total_tokens > 0 && (
             <span>Tokens: {summary.total_tokens.toLocaleString()}</span>
           )}
         </div>
-      )}
+        {debugLogCount > 0 && (
+          <button
+            onClick={() => setShowDebugLogs(!showDebugLogs)}
+            className={`flex items-center gap-1.5 text-xs px-2 py-1 rounded transition-colors ${
+              showDebugLogs
+                ? 'bg-gray-600 text-gray-200'
+                : 'bg-gray-700/50 text-gray-400 hover:bg-gray-700'
+            }`}
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
+            </svg>
+            Debug ({debugLogCount})
+          </button>
+        )}
+      </div>
 
       {/* Activity list */}
       <div

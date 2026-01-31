@@ -132,11 +132,19 @@ func (r *RalphLoop) Run(ctx context.Context) error {
 
 		// 3. Send to Claude
 		fmt.Printf("RalphLoop.Run: iteration %d - sending message to Claude\n", r.session.IterationCount+1)
+		r.activity.Debug(r.session.IterationCount+1, fmt.Sprintf("Sending API request (iteration %d, %d messages)", r.session.IterationCount+1, len(r.messages)))
+
+		apiStart := time.Now()
 		response, err := r.sendMessage(ctx, systemPrompt)
+		apiDuration := time.Since(apiStart).Milliseconds()
+
 		if err != nil {
 			fmt.Printf("RalphLoop.Run: ERROR - Claude API call failed: %v\n", err)
+			r.activity.DebugError(r.session.IterationCount+1, fmt.Sprintf("API call failed after %dms", apiDuration), map[string]any{"error": err.Error()})
 			return fmt.Errorf("claude API error: %w", err)
 		}
+
+		r.activity.DebugWithDuration(r.session.IterationCount+1, fmt.Sprintf("API response received (in:%d out:%d tokens, stop:%s)", response.Usage.InputTokens, response.Usage.OutputTokens, response.StopReason), apiDuration)
 		fmt.Printf("RalphLoop.Run: received response (input tokens: %d, output tokens: %d)\n", response.Usage.InputTokens, response.Usage.OutputTokens)
 
 		// 4. Update usage tracking
@@ -154,6 +162,9 @@ func (r *RalphLoop) Run(ctx context.Context) error {
 
 		// 5. Handle tool use if requested
 		if response.HasToolUse() {
+			toolBlocks := response.ToolUseBlocks()
+			r.activity.Debug(r.session.IterationCount, fmt.Sprintf("Processing %d tool calls", len(toolBlocks)))
+
 			// Add assistant message with tool_use blocks
 			r.messages = append(r.messages, toolbelt.AnthropicMessage{
 				Role:    "assistant",
@@ -173,8 +184,9 @@ func (r *RalphLoop) Run(ctx context.Context) error {
 
 			// Execute tools and collect results
 			var results []toolbelt.ContentBlock
-			for _, block := range response.ToolUseBlocks() {
+			for i, block := range toolBlocks {
 				fmt.Printf("RalphLoop.Run: executing tool %s\n", block.Name)
+				r.activity.Debug(r.session.IterationCount, fmt.Sprintf("Executing tool %d/%d: %s", i+1, len(toolBlocks), block.Name))
 
 				// Record tool call
 				if err := r.activity.RecordToolCall(r.session.IterationCount, block.Name, block.Input); err != nil {
@@ -182,6 +194,7 @@ func (r *RalphLoop) Run(ctx context.Context) error {
 				}
 
 				// Execute the tool
+				toolStart := time.Now()
 				var result ToolResult
 				if r.executor != nil {
 					result = r.executor.Execute(ctx, block.Name, block.Input)
@@ -190,11 +203,19 @@ func (r *RalphLoop) Run(ctx context.Context) error {
 						Output:  "Tool executor not initialized",
 						IsError: true,
 					}
+					r.activity.DebugError(r.session.IterationCount, "Tool executor not initialized", nil)
 				}
+				toolDuration := time.Since(toolStart).Milliseconds()
 
 				// Record tool result
 				if err := r.activity.RecordToolResult(r.session.IterationCount, block.Name, result); err != nil {
 					fmt.Printf("RalphLoop.Run: warning - failed to record tool result: %v\n", err)
+				}
+
+				if result.IsError {
+					r.activity.DebugError(r.session.IterationCount, fmt.Sprintf("Tool %s failed after %dms", block.Name, toolDuration), map[string]any{"output": truncateOutput(result.Output, 500)})
+				} else {
+					r.activity.DebugWithDuration(r.session.IterationCount, fmt.Sprintf("Tool %s completed (%d bytes output)", block.Name, len(result.Output)), toolDuration)
 				}
 
 				fmt.Printf("RalphLoop.Run: tool %s result (error=%v): %s\n", block.Name, result.IsError, truncateOutput(result.Output, 200))
@@ -212,6 +233,8 @@ func (r *RalphLoop) Run(ctx context.Context) error {
 				Role:    "user",
 				Content: results,
 			})
+
+			r.activity.Debug(r.session.IterationCount, fmt.Sprintf("All tools complete, continuing to next iteration"))
 
 			// Continue loop without adding continuation prompt
 			continue

@@ -1,4 +1,4 @@
-import type { Activity, ToolCallContent, ToolResultContent, HatTransitionContent } from '../lib/types';
+import type { Activity, ToolCallContent, ToolResultContent, HatTransitionContent, DebugLogContent } from '../lib/types';
 import { CollapsibleContent } from './CollapsibleContent';
 
 interface ActivityItemProps {
@@ -55,6 +55,14 @@ function HatIcon() {
   );
 }
 
+function DebugIcon() {
+  return (
+    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
+    </svg>
+  );
+}
+
 // Style configurations per event type
 const eventStyles: Record<string, { border: string; bg: string; icon: React.ReactNode; label: string }> = {
   user_message: {
@@ -93,6 +101,12 @@ const eventStyles: Record<string, { border: string; bg: string; icon: React.Reac
     icon: <HatIcon />,
     label: 'Hat Transition',
   },
+  debug_log: {
+    border: 'border-l-gray-600',
+    bg: 'bg-gray-900/30',
+    icon: <DebugIcon />,
+    label: 'Debug',
+  },
 };
 
 function formatTime(dateString: string): string {
@@ -122,6 +136,14 @@ function parseToolResultContent(content: string): ToolResultContent | null {
 function parseHatTransitionContent(content: string): HatTransitionContent | null {
   try {
     return JSON.parse(content) as HatTransitionContent;
+  } catch {
+    return null;
+  }
+}
+
+function parseDebugLogContent(content: string): DebugLogContent | null {
+  try {
+    return JSON.parse(content) as DebugLogContent;
   } catch {
     return null;
   }
@@ -233,6 +255,35 @@ export function ActivityItem({ activity }: ActivityItemProps) {
               </>
             ) : (
               activity.content || 'Hat changed'
+            )}
+          </div>
+        );
+      }
+
+      case 'debug_log': {
+        const log = parseDebugLogContent(activity.content || '{}');
+        if (!log) return null;
+
+        const levelColors = {
+          info: 'text-gray-400',
+          warn: 'text-yellow-400',
+          error: 'text-red-400',
+        };
+
+        return (
+          <div className="space-y-1">
+            <div className={`text-xs font-mono ${levelColors[log.level] || 'text-gray-400'}`}>
+              {log.message}
+              {log.duration_ms !== undefined && log.duration_ms > 0 && (
+                <span className="ml-2 text-gray-500">({log.duration_ms}ms)</span>
+              )}
+            </div>
+            {log.details !== undefined && log.details !== null && (
+              <CollapsibleContent
+                content={JSON.stringify(log.details)}
+                isJson
+                maxLength={150}
+              />
             )}
           </div>
         );

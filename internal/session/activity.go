@@ -193,3 +193,54 @@ func (r *ActivityRecorder) RecordHatTransition(iteration int, fromHat, toHat str
 	r.broadcastActivity(activity)
 	return nil
 }
+
+// DebugLogData represents a debug log entry
+type DebugLogData struct {
+	Level      string `json:"level"`       // "info", "warn", "error"
+	Message    string `json:"message"`
+	DurationMs int64  `json:"duration_ms,omitempty"`
+	Details    any    `json:"details,omitempty"`
+}
+
+// RecordDebugLog records a debug-level log entry
+func (r *ActivityRecorder) RecordDebugLog(iteration int, level, message string, durationMs int64, details any) error {
+	data := DebugLogData{
+		Level:      level,
+		Message:    message,
+		DurationMs: durationMs,
+		Details:    details,
+	}
+	content, err := json.Marshal(data)
+	if err != nil {
+		return fmt.Errorf("failed to marshal debug log: %w", err)
+	}
+
+	activity, err := r.db.CreateSessionActivity(
+		r.sessionID,
+		iteration,
+		db.ActivityTypeDebugLog,
+		string(content),
+		nil,
+		nil,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to record debug log: %w", err)
+	}
+	r.broadcastActivity(activity)
+	return nil
+}
+
+// Debug is a convenience method for info-level debug logs
+func (r *ActivityRecorder) Debug(iteration int, message string) {
+	_ = r.RecordDebugLog(iteration, "info", message, 0, nil)
+}
+
+// DebugWithDuration logs with timing information
+func (r *ActivityRecorder) DebugWithDuration(iteration int, message string, durationMs int64) {
+	_ = r.RecordDebugLog(iteration, "info", message, durationMs, nil)
+}
+
+// DebugError logs an error-level debug message
+func (r *ActivityRecorder) DebugError(iteration int, message string, details any) {
+	_ = r.RecordDebugLog(iteration, "error", message, 0, details)
+}

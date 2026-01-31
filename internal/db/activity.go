@@ -27,6 +27,7 @@ const (
 	ActivityTypeToolResult        = "tool_result"
 	ActivityTypeCompletion        = "completion_signal"
 	ActivityTypeHatTransition     = "hat_transition"
+	ActivityTypeDebugLog          = "debug_log"
 )
 
 // CreateSessionActivity inserts a new activity record
