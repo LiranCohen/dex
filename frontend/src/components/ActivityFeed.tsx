@@ -30,7 +30,13 @@ export function ActivityFeed({ taskId, isRunning }: ActivityFeedProps) {
       setSummary(data.summary);
       setError(null);
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to load activity';
+      let message = 'Failed to load activity';
+      if (err instanceof Error) {
+        message = err.message;
+      } else if (err && typeof err === 'object' && 'message' in err) {
+        const apiErr = err as { message: unknown };
+        message = typeof apiErr.message === 'string' ? apiErr.message : 'Failed to load activity';
+      }
       setError(message);
     }
   }, [taskId]);

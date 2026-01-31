@@ -31,6 +31,20 @@ func (r *ActivityRecorder) broadcastActivity(activity *db.SessionActivity) {
 	if r.broadcast == nil {
 		return
 	}
+
+	// Extract values from nullable types to avoid serializing as {String, Valid} objects
+	var content *string
+	if activity.Content.Valid {
+		content = &activity.Content.String
+	}
+	var tokensInput, tokensOutput *int64
+	if activity.TokensInput.Valid {
+		tokensInput = &activity.TokensInput.Int64
+	}
+	if activity.TokensOutput.Valid {
+		tokensOutput = &activity.TokensOutput.Int64
+	}
+
 	r.broadcast("activity.new", map[string]any{
 		"task_id":    r.taskID,
 		"session_id": r.sessionID,
@@ -39,9 +53,9 @@ func (r *ActivityRecorder) broadcastActivity(activity *db.SessionActivity) {
 			"session_id":    activity.SessionID,
 			"iteration":     activity.Iteration,
 			"event_type":    activity.EventType,
-			"content":       activity.Content,
-			"tokens_input":  activity.TokensInput,
-			"tokens_output": activity.TokensOutput,
+			"content":       content,
+			"tokens_input":  tokensInput,
+			"tokens_output": tokensOutput,
 			"created_at":    activity.CreatedAt,
 		},
 	})

@@ -37,7 +37,9 @@ class ApiClient {
       };
       try {
         const data = await response.json();
-        error.message = data.message || data.error || response.statusText;
+        const msg = data.message || data.error;
+        // Ensure message is always a string (prevent React error #310 if object is passed)
+        error.message = typeof msg === 'string' ? msg : (msg ? JSON.stringify(msg) : response.statusText);
       } catch {
         // Use default statusText
       }

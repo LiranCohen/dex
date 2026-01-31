@@ -64,7 +64,9 @@ export class ErrorBoundary extends Component<Props, State> {
                 <h2 className="text-sm font-semibold text-gray-400 mb-2">Error</h2>
                 <div className="bg-red-900/30 border border-red-700 rounded p-3">
                   <code className="text-red-300 text-sm font-mono break-all">
-                    {this.state.error.message}
+                    {typeof this.state.error.message === 'string'
+                      ? this.state.error.message
+                      : JSON.stringify(this.state.error.message)}
                   </code>
                 </div>
               </div>

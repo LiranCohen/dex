@@ -30,7 +30,20 @@ export function PlanningPanel({ taskId, onPlanAccepted, onPlanSkipped }: Plannin
       setMessages(data.messages);
       setError(null);
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to load planning';
+      // Extract message from Error or ApiError, ensuring it's always a string
+      let message = 'Failed to load planning';
+      if (err instanceof Error) {
+        message = err.message;
+      } else if (err && typeof err === 'object' && 'message' in err) {
+        const apiErr = err as { message: unknown; status?: number };
+        message = typeof apiErr.message === 'string' ? apiErr.message : 'Failed to load planning';
+        // Also check status code for 404
+        if (apiErr.status === 404) {
+          setSession(null);
+          setMessages([]);
+          return;
+        }
+      }
       // Don't show error if no planning session exists
       if (message.includes('not found') || message.includes('404')) {
         setSession(null);
@@ -87,7 +100,13 @@ export function PlanningPanel({ taskId, onPlanAccepted, onPlanSkipped }: Plannin
       setResponse('');
       setError(null);
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to send response';
+      let message = 'Failed to send response';
+      if (err instanceof Error) {
+        message = err.message;
+      } else if (err && typeof err === 'object' && 'message' in err) {
+        const apiErr = err as { message: unknown };
+        message = typeof apiErr.message === 'string' ? apiErr.message : 'Failed to send response';
+      }
       setError(message);
     } finally {
       setSubmitting(false);
@@ -101,7 +120,13 @@ export function PlanningPanel({ taskId, onPlanAccepted, onPlanSkipped }: Plannin
       await acceptPlan(taskId);
       onPlanAccepted?.();
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to accept plan';
+      let message = 'Failed to accept plan';
+      if (err instanceof Error) {
+        message = err.message;
+      } else if (err && typeof err === 'object' && 'message' in err) {
+        const apiErr = err as { message: unknown };
+        message = typeof apiErr.message === 'string' ? apiErr.message : 'Failed to accept plan';
+      }
       setError(message);
     } finally {
       setAccepting(false);
@@ -115,7 +140,13 @@ export function PlanningPanel({ taskId, onPlanAccepted, onPlanSkipped }: Plannin
       await skipPlanning(taskId);
       onPlanSkipped?.();
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to skip planning';
+      let message = 'Failed to skip planning';
+      if (err instanceof Error) {
+        message = err.message;
+      } else if (err && typeof err === 'object' && 'message' in err) {
+        const apiErr = err as { message: unknown };
+        message = typeof apiErr.message === 'string' ? apiErr.message : 'Failed to skip planning';
+      }
       setError(message);
     } finally {
       setSkipping(false);
