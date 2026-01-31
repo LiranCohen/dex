@@ -24,9 +24,15 @@ var (
 
 // TailscaleStatus represents the status of Tailscale
 type TailscaleStatus struct {
-	BackendState string   `json:"BackendState"`
-	Self         SelfInfo `json:"Self"`
-	TailnetName  string   `json:"CurrentTailnet,omitempty"`
+	BackendState   string         `json:"BackendState"`
+	Self           SelfInfo       `json:"Self"`
+	CurrentTailnet *TailnetInfo   `json:"CurrentTailnet,omitempty"`
+}
+
+// TailnetInfo contains information about the current tailnet
+type TailnetInfo struct {
+	Name           string `json:"Name"`
+	MagicDNSSuffix string `json:"MagicDNSSuffix"`
 }
 
 // SelfInfo contains information about the current node
