@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"sync"
 
+	"github.com/go-webauthn/webauthn/protocol"
 	"github.com/go-webauthn/webauthn/webauthn"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
@@ -155,8 +156,14 @@ func (s *Server) handlePasskeyRegisterFinish(c echo.Context) error {
 	// Create user for verification
 	user := auth.NewWebAuthnUser(userID, "owner", nil)
 
-	// Finish registration - body contains the credential response
-	credential, err := wa.FinishRegistration(user, *session, c.Request())
+	// Parse the credential from request body
+	parsedCredential, err := protocol.ParseCredentialCreationResponseBody(c.Request().Body)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "failed to parse credential: "+err.Error())
+	}
+
+	// Finish registration using CreateCredential
+	credential, err := wa.CreateCredential(user, *session, parsedCredential)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "registration failed: "+err.Error())
 	}
@@ -278,8 +285,14 @@ func (s *Server) handlePasskeyLoginFinish(c echo.Context) error {
 	// Create WebAuthn user
 	waUser := auth.NewWebAuthnUser(user.ID, "owner", credentials)
 
-	// Finish login
-	credential, err := wa.FinishLogin(waUser, *session, c.Request())
+	// Parse the credential assertion from request body
+	parsedAssertion, err := protocol.ParseCredentialRequestResponseBody(c.Request().Body)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "failed to parse credential: "+err.Error())
+	}
+
+	// Finish login using ValidateLogin
+	credential, err := wa.ValidateLogin(waUser, *session, parsedAssertion)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusUnauthorized, "authentication failed: "+err.Error())
 	}
