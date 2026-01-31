@@ -561,8 +561,9 @@ create_systemd_service() {
     local access_method
     access_method=$(cat "$DEX_INSTALL_DIR/access-method" 2>/dev/null || echo "tailscale")
 
-    # Create worktree directory
+    # Create worktree and repos directories
     mkdir -p ${DEX_INSTALL_DIR}/worktrees
+    mkdir -p ${DEX_INSTALL_DIR}/repos
 
     # Create the main service
     cat > /etc/systemd/system/dex.service << EOF
@@ -579,7 +580,8 @@ ExecStart=${DEX_INSTALL_DIR}/dex \\
     -db ${DEX_INSTALL_DIR}/dex.db \\
     -static ${DEX_INSTALL_DIR}/frontend \\
     -addr 127.0.0.1:${DEX_PORT} \\
-    -worktree-base ${DEX_INSTALL_DIR}/worktrees
+    -worktree-base ${DEX_INSTALL_DIR}/worktrees \\
+    -repos-dir ${DEX_INSTALL_DIR}/repos
 Restart=always
 RestartSec=5
 Environment=DEX_DATA_DIR=${DEX_INSTALL_DIR}

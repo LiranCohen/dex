@@ -44,6 +44,7 @@ type Server struct {
 	keyFile        string
 	tokenConfig    *auth.TokenConfig
 	staticDir      string
+	reposDir       string
 	challenges     map[string]challengeEntry // challenge -> expiry
 	challengesMu   sync.RWMutex
 }
@@ -57,6 +58,7 @@ type Config struct {
 	StaticDir    string             // Path to frontend static files (e.g., "./frontend/dist")
 	Toolbelt     *toolbelt.Toolbelt // Toolbelt for external service integrations (optional)
 	WorktreeBase string             // Base directory for git worktrees (optional)
+	ReposDir     string             // Base directory for git repositories (optional)
 }
 
 // NewServer creates a new API server
@@ -85,12 +87,13 @@ func NewServer(database *db.DB, cfg Config) *Server {
 		keyFile:     cfg.KeyFile,
 		tokenConfig: cfg.TokenConfig,
 		staticDir:   cfg.StaticDir,
+		reposDir:    cfg.ReposDir,
 		challenges:  make(map[string]challengeEntry),
 	}
 
 	// Setup git service if worktree base is configured
 	if cfg.WorktreeBase != "" {
-		s.gitService = git.NewService(database, cfg.WorktreeBase)
+		s.gitService = git.NewService(database, cfg.WorktreeBase, cfg.ReposDir)
 	}
 
 	// Create scheduler for session management
@@ -686,8 +689,22 @@ func (s *Server) handleListProjects(c echo.Context) error {
 // handleCreateProject creates a new project
 func (s *Server) handleCreateProject(c echo.Context) error {
 	var req struct {
-		Name     string `json:"name"`
-		RepoPath string `json:"repo_path"`
+		Name string `json:"name"`
+
+		// Option 1: Use existing repo
+		RepoPath string `json:"repo_path,omitempty"`
+
+		// Option 2: Create new repo
+		CreateRepo bool `json:"create_repo,omitempty"`
+
+		// Option 3: Clone from URL
+		CloneURL string `json:"clone_url,omitempty"`
+
+		// GitHub options (when create_repo=true)
+		GitHubCreate  bool `json:"github_create,omitempty"`
+		GitHubPrivate bool `json:"github_private,omitempty"`
+
+		Description string `json:"description,omitempty"`
 	}
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
@@ -696,11 +713,61 @@ func (s *Server) handleCreateProject(c echo.Context) error {
 	if req.Name == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "name is required")
 	}
-	if req.RepoPath == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "repo_path is required")
+
+	var repoPath string
+
+	if req.CreateRepo {
+		// Create new local repository
+		if s.gitService == nil {
+			return echo.NewHTTPError(http.StatusServiceUnavailable, "git service not configured")
+		}
+
+		var err error
+		repoPath, err = s.gitService.CreateRepo(git.CreateOptions{
+			Name:          req.Name,
+			Description:   req.Description,
+			InitialCommit: true,
+		})
+		if err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("failed to create repository: %v", err))
+		}
+
+		// Optionally create on GitHub
+		if req.GitHubCreate && s.toolbelt != nil && s.toolbelt.GitHub != nil {
+			ghRepo, err := s.toolbelt.GitHub.CreateRepo(c.Request().Context(), toolbelt.CreateRepoOptions{
+				Name:        req.Name,
+				Description: req.Description,
+				Private:     req.GitHubPrivate,
+			})
+			if err != nil {
+				// Log but don't fail - local repo was created successfully
+				fmt.Printf("warning: failed to create GitHub repo: %v\n", err)
+			} else if ghRepo != nil && ghRepo.CloneURL != nil && *ghRepo.CloneURL != "" {
+				if err := s.gitService.SetRepoRemote(repoPath, *ghRepo.CloneURL); err != nil {
+					fmt.Printf("warning: failed to set remote: %v\n", err)
+				}
+			}
+		}
+	} else if req.CloneURL != "" {
+		// Clone from URL
+		if s.gitService == nil {
+			return echo.NewHTTPError(http.StatusServiceUnavailable, "git service not configured")
+		}
+
+		var err error
+		repoPath, err = s.gitService.CloneRepo(req.CloneURL, req.Name)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("failed to clone repository: %v", err))
+		}
+	} else {
+		// Use existing repo path
+		if req.RepoPath == "" {
+			return echo.NewHTTPError(http.StatusBadRequest, "repo_path is required when not creating or cloning a repo")
+		}
+		repoPath = req.RepoPath
 	}
 
-	project, err := s.db.CreateProject(req.Name, req.RepoPath)
+	project, err := s.db.CreateProject(req.Name, repoPath)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}

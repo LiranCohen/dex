@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -22,6 +23,8 @@ type SetupStatus struct {
 	SetupComplete     bool   `json:"setup_complete"`
 	AccessMethod      string `json:"access_method,omitempty"` // "tailscale" or "cloudflare"
 	PermanentURL      string `json:"permanent_url,omitempty"`
+	WorkspaceReady    bool   `json:"workspace_ready"`
+	WorkspacePath     string `json:"workspace_path,omitempty"`
 }
 
 // SetupConfig holds the setup configuration file paths
@@ -84,6 +87,13 @@ func (s *Server) handleSetupStatus(c echo.Context) error {
 	// Check if setup is complete
 	if _, err := os.Stat(filepath.Join(dataDir, "setup-complete")); err == nil {
 		status.SetupComplete = true
+	}
+
+	// Check workspace status
+	workspacePath := filepath.Join(dataDir, "repos", "dex-workspace")
+	if _, err := os.Stat(filepath.Join(workspacePath, ".git")); err == nil {
+		status.WorkspaceReady = true
+		status.WorkspacePath = workspacePath
 	}
 
 	return c.JSON(http.StatusOK, status)
@@ -233,6 +243,35 @@ func (s *Server) handleSetupComplete(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "Anthropic key not set")
 	}
 
+	// Create workspace repo if it doesn't exist and git service is configured
+	workspacePath := filepath.Join(dataDir, "repos", "dex-workspace")
+	if s.gitService != nil && !s.gitService.RepoExists(workspacePath) {
+		// Ensure repos directory exists
+		reposDir := filepath.Join(dataDir, "repos")
+		if err := os.MkdirAll(reposDir, 0755); err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("failed to create repos directory: %v", err))
+		}
+
+		// Create workspace repo using git init directly since we may not have RepoManager
+		// configured with the right base path
+		if err := initWorkspaceRepo(workspacePath); err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("failed to create workspace: %v", err))
+		}
+	}
+
+	// Update default project to point to workspace
+	project, err := s.db.GetOrCreateDefaultProject()
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("failed to get default project: %v", err))
+	}
+
+	// Only update if repo_path is currently "." (the invalid default)
+	if project.RepoPath == "." {
+		if err := s.db.UpdateProject(project.ID, "Dex Workspace", workspacePath, "main"); err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("failed to update project: %v", err))
+		}
+	}
+
 	// Write completion file
 	completeFile := filepath.Join(dataDir, "setup-complete")
 	if err := os.WriteFile(completeFile, []byte(time.Now().Format(time.RFC3339)), 0644); err != nil {
@@ -240,9 +279,55 @@ func (s *Server) handleSetupComplete(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, map[string]any{
-		"success": true,
-		"message": "Setup complete!",
+		"success":        true,
+		"message":        "Setup complete!",
+		"workspace_path": workspacePath,
 	})
+}
+
+// initWorkspaceRepo initializes the dex-workspace git repository
+func initWorkspaceRepo(repoPath string) error {
+	// Create directory
+	if err := os.MkdirAll(repoPath, 0755); err != nil {
+		return fmt.Errorf("failed to create directory: %w", err)
+	}
+
+	// Initialize git repo
+	cmd := exec.Command("git", "init", "-b", "main")
+	cmd.Dir = repoPath
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git init failed: %w\n%s", err, output)
+	}
+
+	// Create README
+	readme := `# Dex Workspace
+
+This is the default workspace repository for Dex tasks.
+`
+	if err := os.WriteFile(filepath.Join(repoPath, "README.md"), []byte(readme), 0644); err != nil {
+		return fmt.Errorf("failed to create README: %w", err)
+	}
+
+	// Stage and commit
+	cmd = exec.Command("git", "add", "README.md")
+	cmd.Dir = repoPath
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git add failed: %w\n%s", err, output)
+	}
+
+	cmd = exec.Command("git", "commit", "-m", "Initial commit")
+	cmd.Dir = repoPath
+	cmd.Env = append(os.Environ(),
+		"GIT_AUTHOR_NAME=Dex",
+		"GIT_AUTHOR_EMAIL=dex@local",
+		"GIT_COMMITTER_NAME=Dex",
+		"GIT_COMMITTER_EMAIL=dex@local",
+	)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git commit failed: %w\n%s", err, output)
+	}
+
+	return nil
 }
 
 // getDataDir returns the data directory path

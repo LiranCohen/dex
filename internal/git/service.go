@@ -12,15 +12,20 @@ type Service struct {
 	db         *db.DB
 	worktrees  *WorktreeManager
 	operations *Operations
+	repos      *RepoManager
 }
 
 // NewService creates a git service
-func NewService(database *db.DB, worktreeBase string) *Service {
-	return &Service{
+func NewService(database *db.DB, worktreeBase, reposBase string) *Service {
+	s := &Service{
 		db:         database,
 		worktrees:  NewWorktreeManager(worktreeBase),
 		operations: NewOperations(),
 	}
+	if reposBase != "" {
+		s.repos = NewRepoManager(reposBase)
+	}
+	return s
 }
 
 // SetupTaskWorktree creates a worktree for a task and updates the task record
@@ -130,4 +135,44 @@ func (s *Service) WorktreeExists(worktreePath string) bool {
 // Operations returns the git operations helper for direct git commands
 func (s *Service) Operations() *Operations {
 	return s.operations
+}
+
+// CreateRepo creates a new git repository
+func (s *Service) CreateRepo(opts CreateOptions) (string, error) {
+	if s.repos == nil {
+		return "", fmt.Errorf("repository manager not configured")
+	}
+	return s.repos.Create(opts)
+}
+
+// RepoExists checks if a git repository exists at the given path
+func (s *Service) RepoExists(repoPath string) bool {
+	if s.repos == nil {
+		return false
+	}
+	return s.repos.Exists(repoPath)
+}
+
+// SetRepoRemote adds or updates the origin remote on a repository
+func (s *Service) SetRepoRemote(repoPath, remoteURL string) error {
+	if s.repos == nil {
+		return fmt.Errorf("repository manager not configured")
+	}
+	return s.repos.SetRemote(repoPath, remoteURL)
+}
+
+// CloneRepo clones a repository from a URL
+func (s *Service) CloneRepo(cloneURL, name string) (string, error) {
+	if s.repos == nil {
+		return "", fmt.Errorf("repository manager not configured")
+	}
+	return s.repos.Clone(cloneURL, name)
+}
+
+// GetRepoPath returns the full path for a repository name
+func (s *Service) GetRepoPath(name string) string {
+	if s.repos == nil {
+		return ""
+	}
+	return s.repos.GetPath(name)
 }

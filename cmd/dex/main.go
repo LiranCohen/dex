@@ -28,6 +28,7 @@ func main() {
 	staticDir := flag.String("static", "", "Path to frontend static files (e.g., ./frontend/dist)")
 	toolbeltConfig := flag.String("toolbelt", "", "Path to toolbelt.yaml config file (optional)")
 	worktreeBase := flag.String("worktree-base", "", "Base directory for git worktrees (e.g., ~/src/worktrees)")
+	reposDir := flag.String("repos-dir", "", "Base directory for git repositories (e.g., /opt/dex/repos)")
 	jwtSecret := flag.String("jwt-secret", "", "JWT signing secret (auto-generated if not provided)")
 	showVersion := flag.Bool("version", false, "Show version and exit")
 	flag.Parse()
@@ -104,6 +105,7 @@ func main() {
 		StaticDir:    *staticDir,
 		Toolbelt:     tb,
 		WorktreeBase: *worktreeBase,
+		ReposDir:     *reposDir,
 		TokenConfig:  tokenConfig,
 	})
 
