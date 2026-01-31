@@ -211,6 +211,12 @@ func (s *Server) registerRoutes() {
 	v1.POST("/tasks/:id/planning/accept", s.handlePlanningAccept)
 	v1.POST("/tasks/:id/planning/skip", s.handlePlanningSkip)
 
+	// Checklist endpoints
+	v1.GET("/tasks/:id/checklist", s.handleGetChecklist)
+	v1.PUT("/tasks/:id/checklist/items/:itemId", s.handleUpdateChecklistItem)
+	v1.POST("/tasks/:id/checklist/accept", s.handleAcceptChecklist)
+	v1.POST("/tasks/:id/remediate", s.handleCreateRemediation)
+
 	// Session management endpoints
 	v1.GET("/sessions", s.handleListSessions)
 	v1.GET("/sessions/:id", s.handleGetSession)
@@ -1791,5 +1797,302 @@ func (s *Server) handlePlanningSkip(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]any{
 		"message": "planning skipped",
 		"task_id": taskID,
+	})
+}
+
+// ChecklistItemResponse is the JSON response format for checklist items
+type ChecklistItemResponse struct {
+	ID                string  `json:"id"`
+	ChecklistID       string  `json:"checklist_id"`
+	ParentID          *string `json:"parent_id,omitempty"`
+	Description       string  `json:"description"`
+	Category          string  `json:"category"`
+	Selected          bool    `json:"selected"`
+	Status            string  `json:"status"`
+	VerificationNotes *string `json:"verification_notes,omitempty"`
+	CompletedAt       *string `json:"completed_at,omitempty"`
+	SortOrder         int     `json:"sort_order"`
+}
+
+// toChecklistItemResponse converts a db.ChecklistItem to ChecklistItemResponse
+func toChecklistItemResponse(item *db.ChecklistItem) ChecklistItemResponse {
+	resp := ChecklistItemResponse{
+		ID:          item.ID,
+		ChecklistID: item.ChecklistID,
+		Description: item.Description,
+		Category:    item.Category,
+		Selected:    item.Selected,
+		Status:      item.Status,
+		SortOrder:   item.SortOrder,
+	}
+	if item.ParentID.Valid {
+		resp.ParentID = &item.ParentID.String
+	}
+	if item.VerificationNotes.Valid {
+		resp.VerificationNotes = &item.VerificationNotes.String
+	}
+	if item.CompletedAt.Valid {
+		s := item.CompletedAt.Time.Format(time.RFC3339)
+		resp.CompletedAt = &s
+	}
+	return resp
+}
+
+// handleGetChecklist returns the checklist and items for a task
+func (s *Server) handleGetChecklist(c echo.Context) error {
+	taskID := c.Param("id")
+
+	// Get the checklist
+	checklist, err := s.db.GetChecklistByTaskID(taskID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	if checklist == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "no checklist for task")
+	}
+
+	// Get the items
+	items, err := s.db.GetChecklistItems(checklist.ID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+
+	// Convert items to response format
+	itemResponses := make([]ChecklistItemResponse, len(items))
+	for i, item := range items {
+		itemResponses[i] = toChecklistItemResponse(item)
+	}
+
+	// Calculate summary
+	mustHaveCount := 0
+	mustHaveDone := 0
+	optionalCount := 0
+	optionalDone := 0
+	for _, item := range items {
+		if item.Category == db.ChecklistCategoryMustHave {
+			mustHaveCount++
+			if item.Status == db.ChecklistItemStatusDone {
+				mustHaveDone++
+			}
+		} else if item.Category == db.ChecklistCategoryOptional && item.Selected {
+			optionalCount++
+			if item.Status == db.ChecklistItemStatusDone {
+				optionalDone++
+			}
+		}
+	}
+
+	return c.JSON(http.StatusOK, map[string]any{
+		"checklist": map[string]any{
+			"id":         checklist.ID,
+			"task_id":    checklist.TaskID,
+			"created_at": checklist.CreatedAt.Format(time.RFC3339),
+		},
+		"items": itemResponses,
+		"summary": map[string]any{
+			"must_have_total":    mustHaveCount,
+			"must_have_done":     mustHaveDone,
+			"optional_total":     optionalCount,
+			"optional_done":      optionalDone,
+			"all_required_done":  mustHaveDone == mustHaveCount,
+			"all_selected_done":  mustHaveDone == mustHaveCount && optionalDone == optionalCount,
+		},
+	})
+}
+
+// handleUpdateChecklistItem updates a checklist item (select/deselect or status)
+func (s *Server) handleUpdateChecklistItem(c echo.Context) error {
+	taskID := c.Param("id")
+	itemID := c.Param("itemId")
+
+	// Verify task and checklist exist
+	checklist, err := s.db.GetChecklistByTaskID(taskID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	if checklist == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "no checklist for task")
+	}
+
+	// Get the item
+	item, err := s.db.GetChecklistItem(itemID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	if item == nil || item.ChecklistID != checklist.ID {
+		return echo.NewHTTPError(http.StatusNotFound, "checklist item not found")
+	}
+
+	var req struct {
+		Selected          *bool   `json:"selected"`
+		Status            *string `json:"status"`
+		VerificationNotes *string `json:"verification_notes"`
+	}
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
+	}
+
+	// Update selected if provided (only for optional items)
+	if req.Selected != nil {
+		if item.Category != db.ChecklistCategoryOptional {
+			return echo.NewHTTPError(http.StatusBadRequest, "cannot change selection for must-have items")
+		}
+		if err := s.db.UpdateChecklistItemSelected(itemID, *req.Selected); err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		}
+	}
+
+	// Update status if provided
+	if req.Status != nil {
+		notes := ""
+		if req.VerificationNotes != nil {
+			notes = *req.VerificationNotes
+		}
+		if err := s.db.UpdateChecklistItemStatus(itemID, *req.Status, notes); err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		}
+	}
+
+	// Get updated item
+	updatedItem, err := s.db.GetChecklistItem(itemID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+
+	// Broadcast checklist update
+	s.hub.Broadcast(websocket.Message{
+		Type: "checklist.updated",
+		Payload: map[string]any{
+			"task_id":     taskID,
+			"checklist_id": checklist.ID,
+			"item":        toChecklistItemResponse(updatedItem),
+		},
+	})
+
+	return c.JSON(http.StatusOK, toChecklistItemResponse(updatedItem))
+}
+
+// handleAcceptChecklist accepts the checklist selections and transitions task to ready
+func (s *Server) handleAcceptChecklist(c echo.Context) error {
+	taskID := c.Param("id")
+
+	// Verify checklist exists
+	checklist, err := s.db.GetChecklistByTaskID(taskID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	if checklist == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "no checklist for task")
+	}
+
+	// Optionally update selections from request body
+	var req struct {
+		SelectedItems []string `json:"selected_items"`
+	}
+	if err := c.Bind(&req); err == nil && len(req.SelectedItems) > 0 {
+		// Get all items
+		items, err := s.db.GetChecklistItems(checklist.ID)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		}
+
+		// Create a set of selected IDs
+		selectedSet := make(map[string]bool)
+		for _, id := range req.SelectedItems {
+			selectedSet[id] = true
+		}
+
+		// Update optional items based on selection
+		for _, item := range items {
+			if item.Category == db.ChecklistCategoryOptional {
+				selected := selectedSet[item.ID]
+				if item.Selected != selected {
+					if err := s.db.UpdateChecklistItemSelected(item.ID, selected); err != nil {
+						return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+					}
+				}
+			}
+		}
+	}
+
+	// Transition task to ready
+	if err := s.taskService.UpdateStatus(taskID, db.TaskStatusReady); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+
+	// Broadcast task updated event
+	s.hub.Broadcast(websocket.Message{
+		Type: "task.updated",
+		Payload: map[string]any{
+			"task_id": taskID,
+			"status":  db.TaskStatusReady,
+		},
+	})
+
+	return c.JSON(http.StatusOK, map[string]any{
+		"message": "checklist accepted",
+		"task_id": taskID,
+	})
+}
+
+// handleCreateRemediation creates a new task to remediate failed checklist items
+func (s *Server) handleCreateRemediation(c echo.Context) error {
+	taskID := c.Param("id")
+
+	// Get the original task
+	originalTask, err := s.taskService.Get(taskID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusNotFound, err.Error())
+	}
+
+	// Get the checklist
+	checklist, err := s.db.GetChecklistByTaskID(taskID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	if checklist == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "no checklist for task")
+	}
+
+	// Get issues
+	issues, err := s.db.GetChecklistIssues(checklist.ID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	if len(issues) == 0 {
+		return echo.NewHTTPError(http.StatusBadRequest, "no issues to remediate")
+	}
+
+	// Build remediation description
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("Remediation for task %s:\n\n", taskID))
+	sb.WriteString("The following items need to be addressed:\n\n")
+	for _, issue := range issues {
+		sb.WriteString(fmt.Sprintf("- %s\n", issue.Description))
+		if issue.Notes != "" {
+			sb.WriteString(fmt.Sprintf("  Previous attempt failed: %q\n", issue.Notes))
+		}
+	}
+
+	// Create the remediation task
+	title := fmt.Sprintf("Fix: %s", originalTask.Title)
+	newTask, err := s.taskService.Create(originalTask.ProjectID, title, originalTask.Type, originalTask.Priority)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+
+	// Update description
+	description := sb.String()
+	updates := task.TaskUpdates{Description: &description}
+	newTask, err = s.taskService.Update(newTask.ID, updates)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+
+	return c.JSON(http.StatusCreated, map[string]any{
+		"message":          "remediation task created",
+		"task":             toTaskResponse(newTask),
+		"original_task_id": taskID,
+		"issues_count":     len(issues),
 	})
 }

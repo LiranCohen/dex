@@ -36,6 +36,7 @@ export type TaskStatus =
   | 'paused'
   | 'quarantined'
   | 'completed'
+  | 'completed_with_issues'
   | 'cancelled';
 
 export interface Session {
@@ -133,7 +134,8 @@ export type ActivityEventType =
   | 'tool_result'
   | 'completion_signal'
   | 'hat_transition'
-  | 'debug_log';
+  | 'debug_log'
+  | 'checklist_update';
 
 // Activity event from API
 export interface Activity {
@@ -203,4 +205,61 @@ export interface PlanningMessage {
 export interface PlanningResponse {
   session: PlanningSession;
   messages: PlanningMessage[];
+}
+
+// Checklist types
+export type ChecklistCategory = 'must_have' | 'optional';
+
+export type ChecklistItemStatus = 'pending' | 'in_progress' | 'done' | 'failed' | 'skipped';
+
+export interface ChecklistItem {
+  id: string;
+  checklist_id: string;
+  parent_id?: string;
+  description: string;
+  category: ChecklistCategory;
+  selected: boolean;
+  status: ChecklistItemStatus;
+  verification_notes?: string;
+  completed_at?: string;
+  sort_order: number;
+}
+
+export interface Checklist {
+  id: string;
+  task_id: string;
+  created_at: string;
+}
+
+export interface ChecklistSummary {
+  must_have_total: number;
+  must_have_done: number;
+  optional_total: number;
+  optional_done: number;
+  all_required_done: boolean;
+  all_selected_done: boolean;
+}
+
+export interface ChecklistResponse {
+  checklist: Checklist;
+  items: ChecklistItem[];
+  summary: ChecklistSummary;
+}
+
+// Checklist WebSocket event
+export interface ChecklistEvent extends WebSocketEvent {
+  type: 'checklist.updated';
+  payload: {
+    task_id: string;
+    checklist_id: string;
+    item: ChecklistItem;
+  };
+}
+
+// Activity event type for checklist updates
+export interface ChecklistUpdateContent {
+  item_id: string;
+  description: string;
+  status: ChecklistItemStatus;
+  notes?: string;
 }

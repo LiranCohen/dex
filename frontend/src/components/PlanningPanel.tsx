@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { fetchPlanning, sendPlanningResponse, acceptPlan, skipPlanning } from '../lib/api';
-import type { PlanningMessage, PlanningSession, WebSocketEvent } from '../lib/types';
+import { fetchPlanning, sendPlanningResponse, acceptPlan, skipPlanning, fetchChecklist, acceptChecklist, updateChecklistItem } from '../lib/api';
+import type { PlanningMessage, PlanningSession, WebSocketEvent, ChecklistItem, ChecklistSummary } from '../lib/types';
 import { useWebSocket } from '../hooks/useWebSocket';
+import { ChecklistDisplay } from './ChecklistDisplay';
 
 // Safely convert any value to a renderable string
 function safeString(value: unknown): string {
@@ -25,6 +26,9 @@ interface PlanningPanelProps {
 export function PlanningPanel({ taskId, readOnly = false, onPlanAccepted, onPlanSkipped }: PlanningPanelProps) {
   const [session, setSession] = useState<PlanningSession | null>(null);
   const [messages, setMessages] = useState<PlanningMessage[]>([]);
+  const [checklistItems, setChecklistItems] = useState<ChecklistItem[]>([]);
+  const [checklistSummary, setChecklistSummary] = useState<ChecklistSummary | null>(null);
+  const [hasChecklist, setHasChecklist] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [response, setResponse] = useState('');
@@ -35,13 +39,26 @@ export function PlanningPanel({ taskId, readOnly = false, onPlanAccepted, onPlan
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const { subscribe } = useWebSocket();
 
-  // Load planning data
+  // Load planning data and checklist
   const loadPlanning = useCallback(async () => {
     try {
       const data = await fetchPlanning(taskId);
       setSession(data.session);
       setMessages(data.messages);
       setError(null);
+
+      // If planning is completed, try to fetch checklist
+      if (data.session.status === 'completed') {
+        try {
+          const checklistData = await fetchChecklist(taskId);
+          setChecklistItems(checklistData.items);
+          setChecklistSummary(checklistData.summary);
+          setHasChecklist(true);
+        } catch {
+          // No checklist exists, that's fine
+          setHasChecklist(false);
+        }
+      }
     } catch (err) {
       // Extract message from Error or ApiError, ensuring it's always a string
       let message = 'Failed to load planning';
@@ -126,11 +143,42 @@ export function PlanningPanel({ taskId, readOnly = false, onPlanAccepted, onPlan
     }
   };
 
+  // Handle toggling optional items in the checklist
+  const handleItemToggle = async (itemId: string, selected: boolean) => {
+    try {
+      await updateChecklistItem(taskId, itemId, { selected });
+      // Update local state
+      setChecklistItems((items) =>
+        items.map((item) =>
+          item.id === itemId ? { ...item, selected } : item
+        )
+      );
+    } catch (err) {
+      let message = 'Failed to update item';
+      if (err instanceof Error) {
+        message = err.message;
+      } else if (err && typeof err === 'object' && 'message' in err) {
+        const apiErr = err as { message: unknown };
+        message = typeof apiErr.message === 'string' ? apiErr.message : 'Failed to update item';
+      }
+      setError(message);
+    }
+  };
+
   // Handle accepting the plan
   const handleAccept = async () => {
     setAccepting(true);
     try {
-      await acceptPlan(taskId);
+      if (hasChecklist) {
+        // Use checklist accept endpoint with selected items
+        const selectedItems = checklistItems
+          .filter((item) => item.selected)
+          .map((item) => item.id);
+        await acceptChecklist(taskId, selectedItems);
+      } else {
+        // Use regular plan accept
+        await acceptPlan(taskId);
+      }
       onPlanAccepted?.();
     } catch (err) {
       let message = 'Failed to accept plan';
@@ -229,29 +277,48 @@ export function PlanningPanel({ taskId, readOnly = false, onPlanAccepted, onPlan
         </div>
       </div>
 
-      {/* Messages */}
-      <div className="p-4 max-h-[400px] overflow-y-auto space-y-4">
-        {messages.map((msg) => (
-          <div
-            key={msg.id}
-            className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
-          >
+      {/* Messages - only show if no checklist or in read-only mode */}
+      {(!hasChecklist || readOnly) && (
+        <div className="p-4 max-h-[400px] overflow-y-auto space-y-4">
+          {messages.map((msg) => (
             <div
-              className={`max-w-[80%] rounded-lg px-4 py-3 ${
-                msg.role === 'user'
-                  ? 'bg-purple-600/40 text-purple-100'
-                  : 'bg-gray-700/50 text-gray-200'
-              }`}
+              key={msg.id}
+              className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
             >
-              <div className="text-xs text-gray-400 mb-1">
-                {msg.role === 'user' ? 'You' : 'Planning Assistant'}
+              <div
+                className={`max-w-[80%] rounded-lg px-4 py-3 ${
+                  msg.role === 'user'
+                    ? 'bg-purple-600/40 text-purple-100'
+                    : 'bg-gray-700/50 text-gray-200'
+                }`}
+              >
+                <div className="text-xs text-gray-400 mb-1">
+                  {msg.role === 'user' ? 'You' : 'Planning Assistant'}
+                </div>
+                <div className="whitespace-pre-wrap text-sm">{safeString(msg.content)}</div>
               </div>
-              <div className="whitespace-pre-wrap text-sm">{safeString(msg.content)}</div>
             </div>
+          ))}
+          <div ref={messagesEndRef} />
+        </div>
+      )}
+
+      {/* Checklist display - show when planning is complete and has checklist */}
+      {hasChecklist && isCompleted && (
+        <div className="p-4 border-t border-purple-600/30">
+          <div className="mb-4">
+            <p className="text-sm text-gray-400">
+              Review the plan below. Required items will be completed. You can select which optional items to include.
+            </p>
           </div>
-        ))}
-        <div ref={messagesEndRef} />
-      </div>
+          <ChecklistDisplay
+            items={checklistItems}
+            summary={checklistSummary || undefined}
+            editable={!readOnly}
+            onItemToggle={handleItemToggle}
+          />
+        </div>
+      )}
 
       {/* Error display */}
       {error && (

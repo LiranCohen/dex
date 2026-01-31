@@ -112,4 +112,30 @@ export async function skipPlanning(taskId: string): Promise<{ message: string; t
   return api.post(`/tasks/${taskId}/planning/skip`);
 }
 
+// Checklist API functions
+export async function fetchChecklist(taskId: string): Promise<import('./types').ChecklistResponse> {
+  return api.get(`/tasks/${taskId}/checklist`);
+}
+
+export async function updateChecklistItem(
+  taskId: string,
+  itemId: string,
+  updates: { selected?: boolean; status?: string; verification_notes?: string }
+): Promise<import('./types').ChecklistItem> {
+  return api.put(`/tasks/${taskId}/checklist/items/${itemId}`, updates);
+}
+
+export async function acceptChecklist(
+  taskId: string,
+  selectedItems?: string[]
+): Promise<{ message: string; task_id: string }> {
+  return api.post(`/tasks/${taskId}/checklist/accept`, { selected_items: selectedItems });
+}
+
+export async function createRemediation(
+  taskId: string
+): Promise<{ message: string; task: import('./types').Task; original_task_id: string; issues_count: number }> {
+  return api.post(`/tasks/${taskId}/remediate`);
+}
+
 export type { ApiError };

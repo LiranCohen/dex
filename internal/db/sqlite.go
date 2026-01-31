@@ -56,6 +56,8 @@ func (db *DB) Migrate() error {
 		migrationSessionActivity,
 		migrationPlanningSessions,
 		migrationPlanningMessages,
+		migrationTaskChecklists,
+		migrationChecklistItems,
 	}
 
 	for i, migration := range migrations {
@@ -268,4 +270,36 @@ CREATE TABLE IF NOT EXISTS planning_messages (
 );
 
 CREATE INDEX IF NOT EXISTS idx_planning_messages_session ON planning_messages(planning_session_id);
+`
+
+const migrationTaskChecklists = `
+CREATE TABLE IF NOT EXISTS task_checklists (
+	id TEXT PRIMARY KEY,
+	task_id TEXT NOT NULL UNIQUE,
+	created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+	FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_task_checklists_task ON task_checklists(task_id);
+`
+
+const migrationChecklistItems = `
+CREATE TABLE IF NOT EXISTS checklist_items (
+	id TEXT PRIMARY KEY,
+	checklist_id TEXT NOT NULL,
+	parent_id TEXT,
+	description TEXT NOT NULL,
+	category TEXT NOT NULL,
+	selected INTEGER DEFAULT 1,
+	status TEXT DEFAULT 'pending',
+	verification_notes TEXT,
+	completed_at DATETIME,
+	sort_order INTEGER DEFAULT 0,
+	FOREIGN KEY (checklist_id) REFERENCES task_checklists(id) ON DELETE CASCADE,
+	FOREIGN KEY (parent_id) REFERENCES checklist_items(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_checklist_items_checklist ON checklist_items(checklist_id);
+CREATE INDEX IF NOT EXISTS idx_checklist_items_parent ON checklist_items(parent_id);
+CREATE INDEX IF NOT EXISTS idx_checklist_items_status ON checklist_items(status);
 `

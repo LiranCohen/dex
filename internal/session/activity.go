@@ -258,3 +258,60 @@ func (r *ActivityRecorder) DebugWithDuration(iteration int, message string, dura
 func (r *ActivityRecorder) DebugError(iteration int, message string, details any) {
 	_ = r.RecordDebugLog(iteration, "error", message, 0, details)
 }
+
+// ChecklistUpdateData represents a checklist item update for activity recording
+type ChecklistUpdateData struct {
+	ItemID      string `json:"item_id"`
+	Description string `json:"description,omitempty"`
+	Status      string `json:"status"`
+	Notes       string `json:"notes,omitempty"`
+}
+
+// RecordChecklistUpdate records a checklist item status change
+func (r *ActivityRecorder) RecordChecklistUpdate(iteration int, itemID, status, notes string) error {
+	// Try to get item description from DB
+	var description string
+	if r.db != nil {
+		if item, err := r.db.GetChecklistItem(itemID); err == nil && item != nil {
+			description = item.Description
+		}
+	}
+
+	data := ChecklistUpdateData{
+		ItemID:      itemID,
+		Description: description,
+		Status:      status,
+		Notes:       notes,
+	}
+	content, err := json.Marshal(data)
+	if err != nil {
+		return fmt.Errorf("failed to marshal checklist update: %w", err)
+	}
+
+	activity, err := r.db.CreateSessionActivity(
+		r.sessionID,
+		iteration,
+		db.ActivityTypeChecklistUpdate,
+		string(content),
+		nil,
+		nil,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to record checklist update: %w", err)
+	}
+
+	r.broadcastActivity(activity)
+
+	// Also broadcast a specific checklist event for real-time UI updates
+	if r.broadcast != nil {
+		r.broadcast("checklist.item_updated", map[string]any{
+			"task_id":     r.taskID,
+			"item_id":     itemID,
+			"description": description,
+			"status":      status,
+			"notes":       notes,
+		})
+	}
+
+	return nil
+}

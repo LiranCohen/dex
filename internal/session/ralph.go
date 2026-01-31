@@ -17,9 +17,11 @@ import (
 
 // Completion/transition signals that Ralph looks for in responses
 const (
-	SignalTaskComplete = "TASK_COMPLETE"
-	SignalHatComplete  = "HAT_COMPLETE"
-	SignalHatTransition = "HAT_TRANSITION:"
+	SignalTaskComplete    = "TASK_COMPLETE"
+	SignalHatComplete     = "HAT_COMPLETE"
+	SignalHatTransition   = "HAT_TRANSITION:"
+	SignalChecklistDone   = "CHECKLIST_DONE:"
+	SignalChecklistFailed = "CHECKLIST_FAILED:"
 )
 
 // Budget limit errors
@@ -101,9 +103,16 @@ func (r *RalphLoop) Run(ctx context.Context) error {
 	})
 
 	// Initialize conversation with context message
-	// Check if there's a refined prompt from the planning phase
+	// Check if there's a checklist or refined prompt from the planning phase
 	initialMessage := "Begin working on the task. Follow your hat instructions and report progress."
-	if planningSession, err := r.db.GetPlanningSessionByTaskID(r.session.TaskID); err == nil && planningSession != nil {
+
+	// Check for checklist first
+	if checklist, err := r.db.GetChecklistByTaskID(r.session.TaskID); err == nil && checklist != nil {
+		if items, err := r.db.GetSelectedChecklistItems(checklist.ID); err == nil && len(items) > 0 {
+			initialMessage = r.buildChecklistPrompt(items)
+			fmt.Printf("RalphLoop.Run: using checklist context (%d selected items)\n", len(items))
+		}
+	} else if planningSession, err := r.db.GetPlanningSessionByTaskID(r.session.TaskID); err == nil && planningSession != nil {
 		if planningSession.RefinedPrompt.Valid && planningSession.RefinedPrompt.String != "" {
 			initialMessage = fmt.Sprintf("## Task Instructions (from planning phase)\n\n%s\n\n---\n\nBegin working on this task. Follow your hat instructions and report progress.", planningSession.RefinedPrompt.String)
 			fmt.Printf("RalphLoop.Run: using refined prompt from planning phase\n")
@@ -267,17 +276,32 @@ func (r *RalphLoop) Run(ctx context.Context) error {
 			fmt.Printf("RalphLoop.Run: warning - failed to record assistant response: %v\n", err)
 		}
 
+		// 7.5. Process checklist signals
+		r.processChecklistSignals(responseText)
+
 		// 8. Check for task completion
 		if r.detectCompletion(responseText) {
+			// Verify checklist completion
+			allComplete, issues := r.verifyChecklist()
+
+			// Determine outcome
+			outcome := "completed"
+			if !allComplete {
+				outcome = "completed_with_issues"
+				fmt.Printf("RalphLoop.Run: task completed with %d checklist issues\n", len(issues))
+			}
+
 			// Record completion signal
 			if err := r.activity.RecordCompletion(r.session.IterationCount, SignalTaskComplete); err != nil {
 				fmt.Printf("RalphLoop.Run: warning - failed to record completion: %v\n", err)
 			}
 
 			r.broadcastEvent(websocket.EventSessionCompleted, map[string]any{
-				"session_id": r.session.ID,
-				"outcome":    "completed",
-				"iterations": r.session.IterationCount,
+				"session_id":   r.session.ID,
+				"outcome":      outcome,
+				"iterations":   r.session.IterationCount,
+				"has_issues":   !allComplete,
+				"issues_count": len(issues),
 			})
 			return nil
 		}
@@ -507,4 +531,129 @@ func (r *RalphLoop) RestoreFromCheckpoint(checkpoint *db.SessionCheckpoint) erro
 	r.messages = state.Messages
 
 	return nil
+}
+
+// buildChecklistPrompt creates the initial prompt with checklist context
+// Note: All items passed here are already selected - the must-have vs optional
+// distinction is only relevant during planning, not execution.
+func (r *RalphLoop) buildChecklistPrompt(items []*db.ChecklistItem) string {
+	var sb strings.Builder
+
+	sb.WriteString("## Task Checklist\n\n")
+	sb.WriteString("Complete these items and report status for each:\n\n")
+
+	for _, item := range items {
+		sb.WriteString(fmt.Sprintf("- [ ] %s (id: %s)\n", item.Description, item.ID))
+	}
+
+	sb.WriteString("\n---\n\n")
+	sb.WriteString("When completing an item, output: CHECKLIST_DONE:<item_id>\n")
+	sb.WriteString("If an item cannot be completed, output: CHECKLIST_FAILED:<item_id>:<reason>\n\n")
+	sb.WriteString("When all items are addressed, output TASK_COMPLETE.\n\n")
+	sb.WriteString("Begin working on the task. Follow your hat instructions and report progress.")
+
+	return sb.String()
+}
+
+// processChecklistSignals detects and processes checklist update signals
+func (r *RalphLoop) processChecklistSignals(response string) {
+	// Process CHECKLIST_DONE signals
+	for {
+		idx := strings.Index(response, SignalChecklistDone)
+		if idx == -1 {
+			break
+		}
+
+		// Extract item ID
+		remaining := response[idx+len(SignalChecklistDone):]
+		endIdx := strings.IndexAny(remaining, " \t\n\r")
+		if endIdx == -1 {
+			endIdx = len(remaining)
+		}
+		itemID := strings.TrimSpace(remaining[:endIdx])
+
+		if itemID != "" {
+			// Update item status in DB
+			if err := r.db.UpdateChecklistItemStatus(itemID, db.ChecklistItemStatusDone, ""); err != nil {
+				fmt.Printf("RalphLoop: warning - failed to update checklist item %s: %v\n", itemID, err)
+			} else {
+				// Record activity
+				if r.activity != nil {
+					r.activity.RecordChecklistUpdate(r.session.IterationCount, itemID, db.ChecklistItemStatusDone, "")
+				}
+				fmt.Printf("RalphLoop: marked checklist item %s as done\n", itemID)
+			}
+		}
+
+		// Move past this signal for next search
+		response = remaining[endIdx:]
+	}
+
+	// Process CHECKLIST_FAILED signals
+	response = response // Reset for second pass
+	for {
+		idx := strings.Index(response, SignalChecklistFailed)
+		if idx == -1 {
+			break
+		}
+
+		// Extract item ID and reason
+		remaining := response[idx+len(SignalChecklistFailed):]
+
+		// Format: CHECKLIST_FAILED:<item_id>:<reason>
+		parts := strings.SplitN(remaining, ":", 2)
+		if len(parts) >= 1 {
+			// Get item ID (may have trailing content)
+			itemPart := parts[0]
+			endIdx := strings.IndexAny(itemPart, " \t\n\r")
+			if endIdx == -1 {
+				endIdx = len(itemPart)
+			}
+			itemID := strings.TrimSpace(itemPart[:endIdx])
+
+			reason := ""
+			if len(parts) >= 2 {
+				reasonPart := parts[1]
+				endIdx := strings.IndexAny(reasonPart, "\n\r")
+				if endIdx == -1 {
+					endIdx = len(reasonPart)
+				}
+				reason = strings.TrimSpace(reasonPart[:endIdx])
+			}
+
+			if itemID != "" {
+				// Update item status in DB
+				if err := r.db.UpdateChecklistItemStatus(itemID, db.ChecklistItemStatusFailed, reason); err != nil {
+					fmt.Printf("RalphLoop: warning - failed to update checklist item %s: %v\n", itemID, err)
+				} else {
+					// Record activity
+					if r.activity != nil {
+						r.activity.RecordChecklistUpdate(r.session.IterationCount, itemID, db.ChecklistItemStatusFailed, reason)
+					}
+					fmt.Printf("RalphLoop: marked checklist item %s as failed: %s\n", itemID, reason)
+				}
+			}
+		}
+
+		// Move past this signal
+		response = remaining
+	}
+}
+
+// verifyChecklist checks if all selected checklist items are completed
+// Returns true if all done, false if there are issues
+func (r *RalphLoop) verifyChecklist() (bool, []db.ChecklistIssue) {
+	checklist, err := r.db.GetChecklistByTaskID(r.session.TaskID)
+	if err != nil || checklist == nil {
+		// No checklist, consider it complete
+		return true, nil
+	}
+
+	issues, err := r.db.GetChecklistIssues(checklist.ID)
+	if err != nil {
+		fmt.Printf("RalphLoop: warning - failed to get checklist issues: %v\n", err)
+		return true, nil
+	}
+
+	return len(issues) == 0, issues
 }

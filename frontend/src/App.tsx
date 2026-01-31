@@ -359,6 +359,7 @@ function StatusBadge({ status }: { status: TaskStatus }) {
     paused: 'bg-orange-600',
     quarantined: 'bg-red-600',
     completed: 'bg-emerald-600',
+    completed_with_issues: 'bg-amber-600',
     cancelled: 'bg-gray-500',
   };
 

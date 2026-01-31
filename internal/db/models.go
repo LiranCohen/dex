@@ -150,6 +150,43 @@ type PlanningMessage struct {
 	CreatedAt         time.Time
 }
 
+// TaskChecklist represents a structured checklist for a task
+type TaskChecklist struct {
+	ID        string
+	TaskID    string
+	CreatedAt time.Time
+}
+
+// ChecklistItem represents an individual item in a checklist
+type ChecklistItem struct {
+	ID                string
+	ChecklistID       string
+	ParentID          sql.NullString
+	Description       string
+	Category          string // must_have, optional
+	Selected          bool
+	Status            string // pending, in_progress, done, failed, skipped
+	VerificationNotes sql.NullString
+	CompletedAt       sql.NullTime
+	SortOrder         int
+}
+
+// GetParentID returns the parent ID string, or empty if null
+func (c *ChecklistItem) GetParentID() string {
+	if c.ParentID.Valid {
+		return c.ParentID.String
+	}
+	return ""
+}
+
+// GetVerificationNotes returns the verification notes string, or empty if null
+func (c *ChecklistItem) GetVerificationNotes() string {
+	if c.VerificationNotes.Valid {
+		return c.VerificationNotes.String
+	}
+	return ""
+}
+
 // Task status constants
 const (
 	TaskStatusPending     = "pending"
@@ -204,6 +241,24 @@ const (
 	PlanningStatusCompleted        = "completed"
 	PlanningStatusSkipped          = "skipped"
 )
+
+// Checklist item category constants
+const (
+	ChecklistCategoryMustHave = "must_have"
+	ChecklistCategoryOptional = "optional"
+)
+
+// Checklist item status constants
+const (
+	ChecklistItemStatusPending    = "pending"
+	ChecklistItemStatusInProgress = "in_progress"
+	ChecklistItemStatusDone       = "done"
+	ChecklistItemStatusFailed     = "failed"
+	ChecklistItemStatusSkipped    = "skipped"
+)
+
+// Task status for completed with issues
+const TaskStatusCompletedWithIssues = "completed_with_issues"
 
 // GetDescription returns the description string, or empty if null
 func (t *Task) GetDescription() string {
