@@ -117,19 +117,11 @@ export async function fetchChecklist(taskId: string): Promise<import('./types').
   return api.get(`/tasks/${taskId}/checklist`);
 }
 
-export async function updateChecklistItem(
-  taskId: string,
-  itemId: string,
-  updates: { selected?: boolean; status?: string; verification_notes?: string }
-): Promise<import('./types').ChecklistItem> {
-  return api.put(`/tasks/${taskId}/checklist/items/${itemId}`, updates);
-}
-
 export async function acceptChecklist(
   taskId: string,
-  selectedItems?: string[]
+  selectedOptional: number[]
 ): Promise<{ message: string; task_id: string }> {
-  return api.post(`/tasks/${taskId}/checklist/accept`, { selected_items: selectedItems });
+  return api.post(`/tasks/${taskId}/checklist/accept`, { selected_optional: selectedOptional });
 }
 
 export async function createRemediation(

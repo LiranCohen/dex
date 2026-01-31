@@ -192,6 +192,7 @@ export interface PlanningSession {
   status: PlanningStatus;
   original_prompt: string;
   refined_prompt?: string;
+  pending_checklist?: PendingChecklist;
   created_at: string;
 }
 
@@ -208,17 +209,20 @@ export interface PlanningResponse {
 }
 
 // Checklist types
-export type ChecklistCategory = 'must_have' | 'optional';
-
 export type ChecklistItemStatus = 'pending' | 'in_progress' | 'done' | 'failed' | 'skipped';
 
+// Pending checklist during planning (before acceptance)
+export interface PendingChecklist {
+  must_have: string[];
+  optional: string[];
+}
+
+// Checklist item after acceptance (no category/selected - all items are equally required)
 export interface ChecklistItem {
   id: string;
   checklist_id: string;
   parent_id?: string;
   description: string;
-  category: ChecklistCategory;
-  selected: boolean;
   status: ChecklistItemStatus;
   verification_notes?: string;
   completed_at?: string;
@@ -232,12 +236,11 @@ export interface Checklist {
 }
 
 export interface ChecklistSummary {
-  must_have_total: number;
-  must_have_done: number;
-  optional_total: number;
-  optional_done: number;
-  all_required_done: boolean;
-  all_selected_done: boolean;
+  total: number;
+  done: number;
+  failed: number;
+  pending: number;
+  all_done: boolean;
 }
 
 export interface ChecklistResponse {

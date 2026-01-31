@@ -250,6 +250,7 @@ CREATE TABLE IF NOT EXISTS planning_sessions (
 	status TEXT NOT NULL DEFAULT 'processing',
 	refined_prompt TEXT,
 	original_prompt TEXT NOT NULL,
+	pending_checklist TEXT,
 	created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 	completed_at DATETIME,
 	FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
@@ -289,8 +290,6 @@ CREATE TABLE IF NOT EXISTS checklist_items (
 	checklist_id TEXT NOT NULL,
 	parent_id TEXT,
 	description TEXT NOT NULL,
-	category TEXT NOT NULL,
-	selected INTEGER DEFAULT 1,
 	status TEXT DEFAULT 'pending',
 	verification_notes TEXT,
 	completed_at DATETIME,

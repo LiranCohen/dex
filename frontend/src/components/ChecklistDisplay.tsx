@@ -1,11 +1,16 @@
-import type { ChecklistItem, ChecklistSummary, ChecklistItemStatus } from '../lib/types';
+import type { ChecklistItem, ChecklistSummary, ChecklistItemStatus, PendingChecklist } from '../lib/types';
 
+// Props for displaying a pending checklist during planning (before acceptance)
+interface PendingChecklistDisplayProps {
+  pendingChecklist: PendingChecklist;
+  selectedOptional: number[];
+  onOptionalToggle: (index: number, selected: boolean) => void;
+}
+
+// Props for displaying an accepted checklist (during/after execution)
 interface ChecklistDisplayProps {
   items: ChecklistItem[];
   summary?: ChecklistSummary;
-  editable?: boolean;
-  onItemToggle?: (itemId: string, selected: boolean) => void;
-  onItemStatusChange?: (itemId: string, status: ChecklistItemStatus) => void;
 }
 
 // Status icons
@@ -82,18 +87,8 @@ function getStatusBadge(status: ChecklistItemStatus) {
   );
 }
 
-function ChecklistItemRow({
-  item,
-  editable,
-  showCategory,
-  onToggle,
-}: {
-  item: ChecklistItem;
-  editable?: boolean;
-  showCategory?: boolean;
-  onToggle?: (selected: boolean) => void;
-}) {
-  const isMustHave = item.category === 'must_have';
+// Row for accepted checklist items (during/after execution)
+function ChecklistItemRow({ item }: { item: ChecklistItem }) {
   const isCompleted = item.status === 'done' || item.status === 'skipped';
 
   return (
@@ -106,24 +101,8 @@ function ChecklistItemRow({
           : 'border-gray-700 bg-gray-800/50'
       }`}
     >
-      {/* Checkbox or status icon */}
-      {editable && !isMustHave ? (
-        <input
-          type="checkbox"
-          checked={item.selected}
-          onChange={(e) => onToggle?.(e.target.checked)}
-          className="mt-1 w-5 h-5 rounded border-gray-600 bg-gray-700 text-blue-500 focus:ring-blue-500 focus:ring-offset-gray-900"
-        />
-      ) : editable && isMustHave ? (
-        <input
-          type="checkbox"
-          checked={true}
-          disabled
-          className="mt-1 w-5 h-5 rounded border-gray-600 bg-gray-700 text-blue-500 opacity-50"
-        />
-      ) : (
-        <div className="mt-0.5">{getStatusIcon(item.status)}</div>
-      )}
+      {/* Status icon */}
+      <div className="mt-0.5">{getStatusIcon(item.status)}</div>
 
       {/* Content */}
       <div className="flex-1 min-w-0">
@@ -135,12 +114,7 @@ function ChecklistItemRow({
           >
             {item.description}
           </span>
-          {showCategory && isMustHave && (
-            <span className="text-xs px-1.5 py-0.5 rounded bg-amber-900/50 text-amber-300">
-              required
-            </span>
-          )}
-          {!editable && item.status !== 'pending' && getStatusBadge(item.status)}
+          {item.status !== 'pending' && getStatusBadge(item.status)}
         </div>
 
         {/* Verification notes */}
@@ -154,63 +128,16 @@ function ChecklistItemRow({
   );
 }
 
-export function ChecklistDisplay({
-  items,
-  summary,
-  editable = false,
-  onItemToggle,
-}: ChecklistDisplayProps) {
-  const mustHaveItems = items.filter((item) => item.category === 'must_have');
-  const optionalItems = items.filter((item) => item.category === 'optional');
-  // For non-editable view, only show selected items as a flat list
-  const selectedItems = items.filter((item) => item.selected);
-
-  // Non-editable mode: show as flat list without category distinction
-  if (!editable) {
-    return (
-      <div className="space-y-4">
-        {/* Summary bar */}
-        {summary && (
-          <div className="flex items-center gap-2 text-sm">
-            <span className="text-gray-400">Progress:</span>
-            <span
-              className={
-                summary.all_selected_done ? 'text-green-400' : 'text-gray-300'
-              }
-            >
-              {summary.must_have_done + summary.optional_done}/
-              {summary.must_have_total + summary.optional_total} completed
-            </span>
-          </div>
-        )}
-
-        {/* Flat list of all selected items */}
-        <div className="space-y-2">
-          {selectedItems.map((item) => (
-            <ChecklistItemRow
-              key={item.id}
-              item={item}
-              editable={false}
-              showCategory={false}
-            />
-          ))}
-        </div>
-
-        {/* Empty state */}
-        {selectedItems.length === 0 && (
-          <div className="text-center py-8 text-gray-500">
-            No checklist items
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  // Editable mode: show with category sections for planning phase
+// Display for pending checklist during planning phase
+export function PendingChecklistDisplay({
+  pendingChecklist,
+  selectedOptional,
+  onOptionalToggle,
+}: PendingChecklistDisplayProps) {
   return (
     <div className="space-y-6">
       {/* Must-have section */}
-      {mustHaveItems.length > 0 && (
+      {pendingChecklist.must_have.length > 0 && (
         <div>
           <h4 className="text-sm font-medium text-gray-400 mb-3 flex items-center gap-2">
             <svg className="w-4 h-4 text-amber-400" fill="currentColor" viewBox="0 0 20 20">
@@ -219,20 +146,26 @@ export function ChecklistDisplay({
             Required Steps
           </h4>
           <div className="space-y-2">
-            {mustHaveItems.map((item) => (
-              <ChecklistItemRow
-                key={item.id}
-                item={item}
-                editable={true}
-                showCategory={false}
-              />
+            {pendingChecklist.must_have.map((description, index) => (
+              <div
+                key={`must-have-${index}`}
+                className="flex items-start gap-3 p-3 rounded-lg border border-gray-700 bg-gray-800/50"
+              >
+                <input
+                  type="checkbox"
+                  checked={true}
+                  disabled
+                  className="mt-1 w-5 h-5 rounded border-gray-600 bg-gray-700 text-blue-500 opacity-50"
+                />
+                <span className="text-gray-200">{description}</span>
+              </div>
             ))}
           </div>
         </div>
       )}
 
       {/* Optional section */}
-      {optionalItems.length > 0 && (
+      {pendingChecklist.optional.length > 0 && (
         <div>
           <h4 className="text-sm font-medium text-gray-400 mb-3 flex items-center gap-2">
             <svg className="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -241,18 +174,57 @@ export function ChecklistDisplay({
             Optional Enhancements
           </h4>
           <div className="space-y-2">
-            {optionalItems.map((item) => (
-              <ChecklistItemRow
-                key={item.id}
-                item={item}
-                editable={true}
-                showCategory={false}
-                onToggle={(selected) => onItemToggle?.(item.id, selected)}
-              />
+            {pendingChecklist.optional.map((description, index) => (
+              <div
+                key={`optional-${index}`}
+                className="flex items-start gap-3 p-3 rounded-lg border border-gray-700 bg-gray-800/50"
+              >
+                <input
+                  type="checkbox"
+                  checked={selectedOptional.includes(index)}
+                  onChange={(e) => onOptionalToggle(index, e.target.checked)}
+                  className="mt-1 w-5 h-5 rounded border-gray-600 bg-gray-700 text-blue-500 focus:ring-blue-500 focus:ring-offset-gray-900"
+                />
+                <span className="text-gray-200">{description}</span>
+              </div>
             ))}
           </div>
         </div>
       )}
+
+      {/* Empty state */}
+      {pendingChecklist.must_have.length === 0 && pendingChecklist.optional.length === 0 && (
+        <div className="text-center py-8 text-gray-500">
+          No checklist items
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Display for accepted checklist (during/after execution)
+export function ChecklistDisplay({ items, summary }: ChecklistDisplayProps) {
+  return (
+    <div className="space-y-4">
+      {/* Summary bar */}
+      {summary && (
+        <div className="flex items-center gap-2 text-sm">
+          <span className="text-gray-400">Progress:</span>
+          <span className={summary.all_done ? 'text-green-400' : 'text-gray-300'}>
+            {summary.done}/{summary.total} completed
+          </span>
+          {summary.failed > 0 && (
+            <span className="text-red-400">({summary.failed} failed)</span>
+          )}
+        </div>
+      )}
+
+      {/* Flat list of items */}
+      <div className="space-y-2">
+        {items.map((item) => (
+          <ChecklistItemRow key={item.id} item={item} />
+        ))}
+      </div>
 
       {/* Empty state */}
       {items.length === 0 && (
@@ -266,8 +238,8 @@ export function ChecklistDisplay({
 
 // Compact version for inline display
 export function ChecklistSummaryBadge({ summary }: { summary: ChecklistSummary }) {
-  const allDone = summary.all_selected_done;
-  const hasIssues = !summary.all_required_done;
+  const allDone = summary.all_done;
+  const hasIssues = summary.failed > 0;
 
   return (
     <div
@@ -279,16 +251,9 @@ export function ChecklistSummaryBadge({ summary }: { summary: ChecklistSummary }
           : 'bg-gray-700 text-gray-300'
       }`}
     >
-      {allDone ? (
-        <DoneIcon />
-      ) : hasIssues ? (
-        <FailedIcon />
-      ) : (
-        <PendingIcon />
-      )}
+      {allDone ? <DoneIcon /> : hasIssues ? <FailedIcon /> : <PendingIcon />}
       <span>
-        {summary.must_have_done + summary.optional_done}/
-        {summary.must_have_total + summary.optional_total}
+        {summary.done}/{summary.total}
       </span>
     </div>
   );

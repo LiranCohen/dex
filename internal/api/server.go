@@ -1646,15 +1646,23 @@ func (s *Server) handleGetPlanning(c echo.Context) error {
 		}
 	}
 
+	// Build session response
+	sessionResp := map[string]any{
+		"id":              session.ID,
+		"task_id":         session.TaskID,
+		"status":          session.Status,
+		"original_prompt": session.OriginalPrompt,
+		"refined_prompt":  session.RefinedPrompt.String,
+		"created_at":      session.CreatedAt.Format(time.RFC3339),
+	}
+
+	// Include pending checklist if present
+	if pendingChecklist := session.GetPendingChecklist(); pendingChecklist != nil {
+		sessionResp["pending_checklist"] = pendingChecklist
+	}
+
 	return c.JSON(http.StatusOK, map[string]any{
-		"session": map[string]any{
-			"id":              session.ID,
-			"task_id":         session.TaskID,
-			"status":          session.Status,
-			"original_prompt": session.OriginalPrompt,
-			"refined_prompt":  session.RefinedPrompt.String,
-			"created_at":      session.CreatedAt.Format(time.RFC3339),
-		},
+		"session":  sessionResp,
 		"messages": msgResponses,
 	})
 }
@@ -1806,8 +1814,6 @@ type ChecklistItemResponse struct {
 	ChecklistID       string  `json:"checklist_id"`
 	ParentID          *string `json:"parent_id,omitempty"`
 	Description       string  `json:"description"`
-	Category          string  `json:"category"`
-	Selected          bool    `json:"selected"`
 	Status            string  `json:"status"`
 	VerificationNotes *string `json:"verification_notes,omitempty"`
 	CompletedAt       *string `json:"completed_at,omitempty"`
@@ -1820,8 +1826,6 @@ func toChecklistItemResponse(item *db.ChecklistItem) ChecklistItemResponse {
 		ID:          item.ID,
 		ChecklistID: item.ChecklistID,
 		Description: item.Description,
-		Category:    item.Category,
-		Selected:    item.Selected,
 		Status:      item.Status,
 		SortOrder:   item.SortOrder,
 	}
@@ -1864,21 +1868,18 @@ func (s *Server) handleGetChecklist(c echo.Context) error {
 	}
 
 	// Calculate summary
-	mustHaveCount := 0
-	mustHaveDone := 0
-	optionalCount := 0
-	optionalDone := 0
+	totalCount := len(items)
+	doneCount := 0
+	failedCount := 0
+	pendingCount := 0
 	for _, item := range items {
-		if item.Category == db.ChecklistCategoryMustHave {
-			mustHaveCount++
-			if item.Status == db.ChecklistItemStatusDone {
-				mustHaveDone++
-			}
-		} else if item.Category == db.ChecklistCategoryOptional && item.Selected {
-			optionalCount++
-			if item.Status == db.ChecklistItemStatusDone {
-				optionalDone++
-			}
+		switch item.Status {
+		case db.ChecklistItemStatusDone:
+			doneCount++
+		case db.ChecklistItemStatusFailed:
+			failedCount++
+		case db.ChecklistItemStatusPending, db.ChecklistItemStatusInProgress:
+			pendingCount++
 		}
 	}
 
@@ -1890,17 +1891,16 @@ func (s *Server) handleGetChecklist(c echo.Context) error {
 		},
 		"items": itemResponses,
 		"summary": map[string]any{
-			"must_have_total":    mustHaveCount,
-			"must_have_done":     mustHaveDone,
-			"optional_total":     optionalCount,
-			"optional_done":      optionalDone,
-			"all_required_done":  mustHaveDone == mustHaveCount,
-			"all_selected_done":  mustHaveDone == mustHaveCount && optionalDone == optionalCount,
+			"total":    totalCount,
+			"done":     doneCount,
+			"failed":   failedCount,
+			"pending":  pendingCount,
+			"all_done": doneCount == totalCount,
 		},
 	})
 }
 
-// handleUpdateChecklistItem updates a checklist item (select/deselect or status)
+// handleUpdateChecklistItem updates a checklist item status
 func (s *Server) handleUpdateChecklistItem(c echo.Context) error {
 	taskID := c.Param("id")
 	itemID := c.Param("itemId")
@@ -1924,22 +1924,11 @@ func (s *Server) handleUpdateChecklistItem(c echo.Context) error {
 	}
 
 	var req struct {
-		Selected          *bool   `json:"selected"`
 		Status            *string `json:"status"`
 		VerificationNotes *string `json:"verification_notes"`
 	}
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
-	}
-
-	// Update selected if provided (only for optional items)
-	if req.Selected != nil {
-		if item.Category != db.ChecklistCategoryOptional {
-			return echo.NewHTTPError(http.StatusBadRequest, "cannot change selection for must-have items")
-		}
-		if err := s.db.UpdateChecklistItemSelected(itemID, *req.Selected); err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-		}
 	}
 
 	// Update status if provided
@@ -1963,55 +1952,82 @@ func (s *Server) handleUpdateChecklistItem(c echo.Context) error {
 	s.hub.Broadcast(websocket.Message{
 		Type: "checklist.updated",
 		Payload: map[string]any{
-			"task_id":     taskID,
+			"task_id":      taskID,
 			"checklist_id": checklist.ID,
-			"item":        toChecklistItemResponse(updatedItem),
+			"item":         toChecklistItemResponse(updatedItem),
 		},
 	})
 
 	return c.JSON(http.StatusOK, toChecklistItemResponse(updatedItem))
 }
 
-// handleAcceptChecklist accepts the checklist selections and transitions task to ready
+// handleAcceptChecklist creates checklist items from pending checklist and transitions task to ready
 func (s *Server) handleAcceptChecklist(c echo.Context) error {
 	taskID := c.Param("id")
 
-	// Verify checklist exists
-	checklist, err := s.db.GetChecklistByTaskID(taskID)
+	// Get the planning session to access pending checklist
+	planningSession, err := s.db.GetPlanningSessionByTaskID(taskID)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
-	if checklist == nil {
-		return echo.NewHTTPError(http.StatusNotFound, "no checklist for task")
+	if planningSession == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "no planning session for task")
 	}
 
-	// Optionally update selections from request body
-	var req struct {
-		SelectedItems []string `json:"selected_items"`
-	}
-	if err := c.Bind(&req); err == nil && len(req.SelectedItems) > 0 {
-		// Get all items
-		items, err := s.db.GetChecklistItems(checklist.ID)
-		if err != nil {
+	pendingChecklist := planningSession.GetPendingChecklist()
+	if pendingChecklist == nil {
+		// No checklist - just transition to ready
+		if err := s.taskService.UpdateStatus(taskID, db.TaskStatusReady); err != nil {
 			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 		}
+		s.hub.Broadcast(websocket.Message{
+			Type: "task.updated",
+			Payload: map[string]any{
+				"task_id": taskID,
+				"status":  db.TaskStatusReady,
+			},
+		})
+		return c.JSON(http.StatusOK, map[string]any{
+			"message": "plan accepted (no checklist)",
+			"task_id": taskID,
+		})
+	}
 
-		// Create a set of selected IDs
-		selectedSet := make(map[string]bool)
-		for _, id := range req.SelectedItems {
-			selectedSet[id] = true
+	// Parse request for selected optional items
+	var req struct {
+		SelectedOptional []int `json:"selected_optional"` // Indices of selected optional items
+	}
+	c.Bind(&req) // Ignore error - defaults to empty
+
+	// Create a set of selected optional indices
+	selectedOptionalSet := make(map[int]bool)
+	for _, idx := range req.SelectedOptional {
+		selectedOptionalSet[idx] = true
+	}
+
+	// Create the checklist
+	checklist, err := s.db.CreateTaskChecklist(taskID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+
+	sortOrder := 0
+
+	// Add all must-have items
+	for _, desc := range pendingChecklist.MustHave {
+		if _, err := s.db.CreateChecklistItem(checklist.ID, desc, sortOrder); err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 		}
+		sortOrder++
+	}
 
-		// Update optional items based on selection
-		for _, item := range items {
-			if item.Category == db.ChecklistCategoryOptional {
-				selected := selectedSet[item.ID]
-				if item.Selected != selected {
-					if err := s.db.UpdateChecklistItemSelected(item.ID, selected); err != nil {
-						return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-					}
-				}
+	// Add selected optional items
+	for idx, desc := range pendingChecklist.Optional {
+		if selectedOptionalSet[idx] {
+			if _, err := s.db.CreateChecklistItem(checklist.ID, desc, sortOrder); err != nil {
+				return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 			}
+			sortOrder++
 		}
 	}
 
@@ -2030,8 +2046,10 @@ func (s *Server) handleAcceptChecklist(c echo.Context) error {
 	})
 
 	return c.JSON(http.StatusOK, map[string]any{
-		"message": "checklist accepted",
-		"task_id": taskID,
+		"message":      "checklist accepted",
+		"task_id":      taskID,
+		"checklist_id": checklist.ID,
+		"items_count":  sortOrder,
 	})
 }
 

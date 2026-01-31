@@ -3,6 +3,7 @@ package planning
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -116,8 +117,9 @@ func (p *Planner) StartPlanning(ctx context.Context, taskID, prompt string) (*db
 	// Check if plan has a checklist or is confirmed
 	if isPlanChecklist(assistantMsg) {
 		checklist := parseChecklist(assistantMsg)
-		if err := p.createChecklistItems(taskID, checklist); err != nil {
-			return nil, fmt.Errorf("failed to create checklist items: %w", err)
+		// Store checklist as pending - items will be created on acceptance
+		if err := p.storePendingChecklist(session.ID, checklist); err != nil {
+			return nil, fmt.Errorf("failed to store pending checklist: %w", err)
 		}
 		refinedPrompt := buildRefinedPromptFromChecklist(checklist)
 		if err := p.db.CompletePlanningSession(session.ID, refinedPrompt); err != nil {
@@ -210,8 +212,9 @@ func (p *Planner) ProcessResponse(ctx context.Context, sessionID, response strin
 	// Check if plan has a checklist or is confirmed
 	if isPlanChecklist(assistantMsg) {
 		checklist := parseChecklist(assistantMsg)
-		if err := p.createChecklistItems(session.TaskID, checklist); err != nil {
-			return nil, fmt.Errorf("failed to create checklist items: %w", err)
+		// Store checklist as pending - items will be created on acceptance
+		if err := p.storePendingChecklist(session.ID, checklist); err != nil {
+			return nil, fmt.Errorf("failed to store pending checklist: %w", err)
 		}
 		refinedPrompt := buildRefinedPromptFromChecklist(checklist)
 		if err := p.db.CompletePlanningSession(session.ID, refinedPrompt); err != nil {
@@ -478,32 +481,19 @@ func buildRefinedPromptFromChecklist(checklist *ParsedChecklist) string {
 	return strings.TrimSpace(sb.String())
 }
 
-// createChecklistItems creates checklist items in the database from the parsed checklist
-func (p *Planner) createChecklistItems(taskID string, checklist *ParsedChecklist) error {
-	// Create the task checklist
-	taskChecklist, err := p.db.CreateTaskChecklist(taskID)
+// storePendingChecklist stores the parsed checklist as JSON in the planning session
+// The checklist items are not created until acceptance
+func (p *Planner) storePendingChecklist(sessionID string, checklist *ParsedChecklist) error {
+	checklistJSON, err := json.Marshal(db.PendingChecklistData{
+		MustHave: checklist.MustHave,
+		Optional: checklist.Optional,
+	})
 	if err != nil {
-		return fmt.Errorf("failed to create task checklist: %w", err)
+		return fmt.Errorf("failed to marshal checklist: %w", err)
 	}
 
-	sortOrder := 0
-
-	// Create must-have items
-	for _, item := range checklist.MustHave {
-		_, err := p.db.CreateChecklistItem(taskChecklist.ID, item, db.ChecklistCategoryMustHave, sortOrder)
-		if err != nil {
-			return fmt.Errorf("failed to create must-have item: %w", err)
-		}
-		sortOrder++
-	}
-
-	// Create optional items
-	for _, item := range checklist.Optional {
-		_, err := p.db.CreateChecklistItem(taskChecklist.ID, item, db.ChecklistCategoryOptional, sortOrder)
-		if err != nil {
-			return fmt.Errorf("failed to create optional item: %w", err)
-		}
-		sortOrder++
+	if err := p.db.SetPendingChecklist(sessionID, string(checklistJSON)); err != nil {
+		return fmt.Errorf("failed to store pending checklist: %w", err)
 	}
 
 	return nil

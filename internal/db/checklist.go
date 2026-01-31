@@ -81,49 +81,22 @@ func (db *DB) DeleteTaskChecklist(id string) error {
 }
 
 // CreateChecklistItem creates a new item in a checklist
-func (db *DB) CreateChecklistItem(checklistID, description, category string, sortOrder int) (*ChecklistItem, error) {
+func (db *DB) CreateChecklistItem(checklistID, description string, sortOrder int) (*ChecklistItem, error) {
 	item := &ChecklistItem{
 		ID:          NewPrefixedID("citm"),
 		ChecklistID: checklistID,
 		Description: description,
-		Category:    category,
-		Selected:    true,
 		Status:      ChecklistItemStatusPending,
 		SortOrder:   sortOrder,
 	}
 
 	_, err := db.Exec(
-		`INSERT INTO checklist_items (id, checklist_id, description, category, selected, status, sort_order)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		item.ID, item.ChecklistID, item.Description, item.Category, item.Selected, item.Status, item.SortOrder,
+		`INSERT INTO checklist_items (id, checklist_id, description, status, sort_order)
+		 VALUES (?, ?, ?, ?, ?)`,
+		item.ID, item.ChecklistID, item.Description, item.Status, item.SortOrder,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create checklist item: %w", err)
-	}
-
-	return item, nil
-}
-
-// CreateChecklistItemWithParent creates a new nested item in a checklist
-func (db *DB) CreateChecklistItemWithParent(checklistID, parentID, description, category string, sortOrder int) (*ChecklistItem, error) {
-	item := &ChecklistItem{
-		ID:          NewPrefixedID("citm"),
-		ChecklistID: checklistID,
-		ParentID:    sql.NullString{String: parentID, Valid: true},
-		Description: description,
-		Category:    category,
-		Selected:    true,
-		Status:      ChecklistItemStatusPending,
-		SortOrder:   sortOrder,
-	}
-
-	_, err := db.Exec(
-		`INSERT INTO checklist_items (id, checklist_id, parent_id, description, category, selected, status, sort_order)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		item.ID, item.ChecklistID, item.ParentID, item.Description, item.Category, item.Selected, item.Status, item.SortOrder,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create checklist item with parent: %w", err)
 	}
 
 	return item, nil
@@ -134,12 +107,12 @@ func (db *DB) GetChecklistItem(id string) (*ChecklistItem, error) {
 	item := &ChecklistItem{}
 
 	err := db.QueryRow(
-		`SELECT id, checklist_id, parent_id, description, category, selected, status, verification_notes, completed_at, sort_order
+		`SELECT id, checklist_id, parent_id, description, status, verification_notes, completed_at, sort_order
 		 FROM checklist_items WHERE id = ?`,
 		id,
 	).Scan(
-		&item.ID, &item.ChecklistID, &item.ParentID, &item.Description, &item.Category,
-		&item.Selected, &item.Status, &item.VerificationNotes, &item.CompletedAt, &item.SortOrder,
+		&item.ID, &item.ChecklistID, &item.ParentID, &item.Description,
+		&item.Status, &item.VerificationNotes, &item.CompletedAt, &item.SortOrder,
 	)
 
 	if err == sql.ErrNoRows {
@@ -155,7 +128,7 @@ func (db *DB) GetChecklistItem(id string) (*ChecklistItem, error) {
 // GetChecklistItems retrieves all items for a checklist ordered by sort_order
 func (db *DB) GetChecklistItems(checklistID string) ([]*ChecklistItem, error) {
 	rows, err := db.Query(
-		`SELECT id, checklist_id, parent_id, description, category, selected, status, verification_notes, completed_at, sort_order
+		`SELECT id, checklist_id, parent_id, description, status, verification_notes, completed_at, sort_order
 		 FROM checklist_items WHERE checklist_id = ? ORDER BY sort_order ASC`,
 		checklistID,
 	)
@@ -168,8 +141,8 @@ func (db *DB) GetChecklistItems(checklistID string) ([]*ChecklistItem, error) {
 	for rows.Next() {
 		item := &ChecklistItem{}
 		err := rows.Scan(
-			&item.ID, &item.ChecklistID, &item.ParentID, &item.Description, &item.Category,
-			&item.Selected, &item.Status, &item.VerificationNotes, &item.CompletedAt, &item.SortOrder,
+			&item.ID, &item.ChecklistID, &item.ParentID, &item.Description,
+			&item.Status, &item.VerificationNotes, &item.CompletedAt, &item.SortOrder,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan checklist item: %w", err)
@@ -182,56 +155,6 @@ func (db *DB) GetChecklistItems(checklistID string) ([]*ChecklistItem, error) {
 	}
 
 	return items, nil
-}
-
-// GetSelectedChecklistItems retrieves all selected items for a checklist (must-have are always selected, optional based on user choice)
-func (db *DB) GetSelectedChecklistItems(checklistID string) ([]*ChecklistItem, error) {
-	rows, err := db.Query(
-		`SELECT id, checklist_id, parent_id, description, category, selected, status, verification_notes, completed_at, sort_order
-		 FROM checklist_items WHERE checklist_id = ? AND selected = 1 ORDER BY sort_order ASC`,
-		checklistID,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get selected checklist items: %w", err)
-	}
-	defer rows.Close()
-
-	var items []*ChecklistItem
-	for rows.Next() {
-		item := &ChecklistItem{}
-		err := rows.Scan(
-			&item.ID, &item.ChecklistID, &item.ParentID, &item.Description, &item.Category,
-			&item.Selected, &item.Status, &item.VerificationNotes, &item.CompletedAt, &item.SortOrder,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("failed to scan checklist item: %w", err)
-		}
-		items = append(items, item)
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating selected checklist items: %w", err)
-	}
-
-	return items, nil
-}
-
-// UpdateChecklistItemSelected updates whether an optional item is selected
-func (db *DB) UpdateChecklistItemSelected(id string, selected bool) error {
-	result, err := db.Exec(
-		`UPDATE checklist_items SET selected = ? WHERE id = ?`,
-		selected, id,
-	)
-	if err != nil {
-		return fmt.Errorf("failed to update checklist item selection: %w", err)
-	}
-
-	rows, _ := result.RowsAffected()
-	if rows == 0 {
-		return fmt.Errorf("checklist item not found: %s", id)
-	}
-
-	return nil
 }
 
 // UpdateChecklistItemStatus updates the status of a checklist item
@@ -281,14 +204,13 @@ func (db *DB) DeleteChecklistItem(id string) error {
 type ChecklistIssue struct {
 	ItemID      string
 	Description string
-	Category    string
 	Status      string
 	Notes       string
 }
 
-// GetChecklistIssues returns all selected items that are not done
+// GetChecklistIssues returns all items that are not done
 func (db *DB) GetChecklistIssues(checklistID string) ([]ChecklistIssue, error) {
-	items, err := db.GetSelectedChecklistItems(checklistID)
+	items, err := db.GetChecklistItems(checklistID)
 	if err != nil {
 		return nil, err
 	}
@@ -299,7 +221,6 @@ func (db *DB) GetChecklistIssues(checklistID string) ([]ChecklistIssue, error) {
 			issues = append(issues, ChecklistIssue{
 				ItemID:      item.ID,
 				Description: item.Description,
-				Category:    item.Category,
 				Status:      item.Status,
 				Notes:       item.GetVerificationNotes(),
 			})
@@ -309,7 +230,7 @@ func (db *DB) GetChecklistIssues(checklistID string) ([]ChecklistIssue, error) {
 	return issues, nil
 }
 
-// HasChecklistIssues checks if a checklist has any unfinished selected items
+// HasChecklistIssues checks if a checklist has any unfinished items
 func (db *DB) HasChecklistIssues(checklistID string) (bool, error) {
 	issues, err := db.GetChecklistIssues(checklistID)
 	if err != nil {

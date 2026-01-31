@@ -108,9 +108,9 @@ func (r *RalphLoop) Run(ctx context.Context) error {
 
 	// Check for checklist first
 	if checklist, err := r.db.GetChecklistByTaskID(r.session.TaskID); err == nil && checklist != nil {
-		if items, err := r.db.GetSelectedChecklistItems(checklist.ID); err == nil && len(items) > 0 {
+		if items, err := r.db.GetChecklistItems(checklist.ID); err == nil && len(items) > 0 {
 			initialMessage = r.buildChecklistPrompt(items)
-			fmt.Printf("RalphLoop.Run: using checklist context (%d selected items)\n", len(items))
+			fmt.Printf("RalphLoop.Run: using checklist context (%d items)\n", len(items))
 		}
 	} else if planningSession, err := r.db.GetPlanningSessionByTaskID(r.session.TaskID); err == nil && planningSession != nil {
 		if planningSession.RefinedPrompt.Valid && planningSession.RefinedPrompt.String != "" {

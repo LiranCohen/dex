@@ -132,13 +132,32 @@ type Approval struct {
 
 // PlanningSession represents a planning phase for a task
 type PlanningSession struct {
-	ID             string
-	TaskID         string
-	Status         string // processing, awaiting_response, completed, skipped
-	RefinedPrompt  sql.NullString
-	OriginalPrompt string
-	CreatedAt      time.Time
-	CompletedAt    sql.NullTime
+	ID               string
+	TaskID           string
+	Status           string // processing, awaiting_response, completed, skipped
+	RefinedPrompt    sql.NullString
+	OriginalPrompt   string
+	PendingChecklist sql.NullString // JSON: transient checklist before acceptance
+	CreatedAt        time.Time
+	CompletedAt      sql.NullTime
+}
+
+// PendingChecklistData represents the transient checklist structure during planning
+type PendingChecklistData struct {
+	MustHave []string `json:"must_have"`
+	Optional []string `json:"optional"`
+}
+
+// GetPendingChecklist parses and returns the pending checklist data
+func (p *PlanningSession) GetPendingChecklist() *PendingChecklistData {
+	if !p.PendingChecklist.Valid {
+		return nil
+	}
+	var data PendingChecklistData
+	if err := json.Unmarshal([]byte(p.PendingChecklist.String), &data); err != nil {
+		return nil
+	}
+	return &data
 }
 
 // PlanningMessage represents a message in a planning session conversation
@@ -158,13 +177,12 @@ type TaskChecklist struct {
 }
 
 // ChecklistItem represents an individual item in a checklist
+// Note: Items are only created after acceptance - category distinction is transient during planning
 type ChecklistItem struct {
 	ID                string
 	ChecklistID       string
 	ParentID          sql.NullString
 	Description       string
-	Category          string // must_have, optional
-	Selected          bool
 	Status            string // pending, in_progress, done, failed, skipped
 	VerificationNotes sql.NullString
 	CompletedAt       sql.NullTime
@@ -240,12 +258,6 @@ const (
 	PlanningStatusAwaitingResponse = "awaiting_response"
 	PlanningStatusCompleted        = "completed"
 	PlanningStatusSkipped          = "skipped"
-)
-
-// Checklist item category constants
-const (
-	ChecklistCategoryMustHave = "must_have"
-	ChecklistCategoryOptional = "optional"
 )
 
 // Checklist item status constants

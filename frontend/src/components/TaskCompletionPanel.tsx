@@ -37,9 +37,9 @@ export function TaskCompletionPanel({
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const hasIssues = task.Status === 'completed_with_issues' || !checklistSummary.all_selected_done;
+  const hasIssues = task.Status === 'completed_with_issues' || !checklistSummary.all_done;
   const failedItems = checklistItems.filter(
-    (item) => item.selected && (item.status === 'failed' || item.status === 'pending')
+    (item) => item.status === 'failed' || item.status === 'pending'
   );
 
   const handleCreateRemediation = async () => {
@@ -103,7 +103,6 @@ export function TaskCompletionPanel({
         <ChecklistDisplay
           items={checklistItems}
           summary={checklistSummary}
-          editable={false}
         />
       </div>
 

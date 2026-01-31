@@ -34,12 +34,12 @@ func (db *DB) GetPlanningSessionByID(id string) (*PlanningSession, error) {
 	session := &PlanningSession{}
 
 	err := db.QueryRow(
-		`SELECT id, task_id, status, refined_prompt, original_prompt, created_at, completed_at
+		`SELECT id, task_id, status, refined_prompt, original_prompt, pending_checklist, created_at, completed_at
 		 FROM planning_sessions WHERE id = ?`,
 		id,
 	).Scan(
 		&session.ID, &session.TaskID, &session.Status,
-		&session.RefinedPrompt, &session.OriginalPrompt,
+		&session.RefinedPrompt, &session.OriginalPrompt, &session.PendingChecklist,
 		&session.CreatedAt, &session.CompletedAt,
 	)
 
@@ -58,12 +58,12 @@ func (db *DB) GetPlanningSessionByTaskID(taskID string) (*PlanningSession, error
 	session := &PlanningSession{}
 
 	err := db.QueryRow(
-		`SELECT id, task_id, status, refined_prompt, original_prompt, created_at, completed_at
+		`SELECT id, task_id, status, refined_prompt, original_prompt, pending_checklist, created_at, completed_at
 		 FROM planning_sessions WHERE task_id = ?`,
 		taskID,
 	).Scan(
 		&session.ID, &session.TaskID, &session.Status,
-		&session.RefinedPrompt, &session.OriginalPrompt,
+		&session.RefinedPrompt, &session.OriginalPrompt, &session.PendingChecklist,
 		&session.CreatedAt, &session.CompletedAt,
 	)
 
@@ -75,6 +75,24 @@ func (db *DB) GetPlanningSessionByTaskID(taskID string) (*PlanningSession, error
 	}
 
 	return session, nil
+}
+
+// SetPendingChecklist stores the pending checklist JSON in the planning session
+func (db *DB) SetPendingChecklist(id, checklistJSON string) error {
+	result, err := db.Exec(
+		`UPDATE planning_sessions SET pending_checklist = ? WHERE id = ?`,
+		checklistJSON, id,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to set pending checklist: %w", err)
+	}
+
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("planning session not found: %s", id)
+	}
+
+	return nil
 }
 
 // UpdatePlanningSessionStatus updates the status of a planning session
