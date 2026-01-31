@@ -8,7 +8,9 @@
 #   Phase 2: On permanent URL -> Register passkey -> Enter API keys
 #
 # Usage:
-#   curl -fsSL https://example.com/install.sh | bash
+#   Fresh install:  curl -fsSL https://example.com/install.sh | bash
+#   Upgrade:        (automatic if already installed)
+#   Reset:          curl -fsSL https://example.com/install.sh | bash -s -- --fresh
 #
 set -euo pipefail
 
@@ -29,12 +31,103 @@ DEX_PORT="${DEX_PORT:-8080}"
 DEX_INSTALL_DIR="${DEX_INSTALL_DIR:-/opt/dex}"
 SETUP_PORT="${SETUP_PORT:-8081}"
 
+# Flags
+FRESH_INSTALL=false
+
 # State
 CLEANUP_PIDS=()
 CLEANUP_FILES=()
 TUNNEL_PID=""
 PERMANENT_URL=""
 ACCESS_METHOD=""
+
+# Parse command line arguments
+parse_args() {
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --fresh|--reset|-f)
+                FRESH_INSTALL=true
+                shift
+                ;;
+            --help|-h)
+                echo "Poindexter Installer"
+                echo ""
+                echo "Usage: install.sh [OPTIONS]"
+                echo ""
+                echo "Options:"
+                echo "  --fresh, --reset, -f   Wipe all data and start fresh install"
+                echo "  --help, -h             Show this help message"
+                echo ""
+                echo "Without flags, the installer will:"
+                echo "  - Fresh install if no existing installation"
+                echo "  - Upgrade (preserve data) if already installed"
+                exit 0
+                ;;
+            *)
+                shift
+                ;;
+        esac
+    done
+}
+
+# Wipe all user data for fresh install
+wipe_data() {
+    echo ""
+    echo -e "${RED}${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+    echo -e "  ${RED}${BOLD}⚠️  WARNING: FRESH INSTALL REQUESTED${NC}"
+    echo ""
+    echo -e "  This will ${RED}PERMANENTLY DELETE${NC} all Poindexter data:"
+    echo ""
+    echo -e "    • Database (users, tasks, credentials)"
+    echo -e "    • Registered passkeys"
+    echo -e "    • API keys (GitHub, Anthropic)"
+    echo -e "    • All configuration"
+    echo ""
+    echo -e "  ${YELLOW}This action is IRRECOVERABLE.${NC}"
+    echo ""
+    echo -e "${RED}${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+
+    # Prompt for confirmation
+    echo -e "  Type ${BOLD}DELETE${NC} to confirm: "
+    read -r confirmation
+
+    if [ "$confirmation" != "DELETE" ]; then
+        echo ""
+        echo -e "  ${GREEN}Aborted.${NC} No data was deleted."
+        echo ""
+        exit 0
+    fi
+
+    echo ""
+    log "Stopping services..."
+    if command -v systemctl &>/dev/null; then
+        systemctl stop dex 2>/dev/null || true
+        systemctl stop dex-tunnel 2>/dev/null || true
+    fi
+
+    log "Wiping data..."
+
+    # Remove data files but keep binaries
+    rm -f "$DEX_INSTALL_DIR/dex.db" 2>/dev/null || true
+    rm -f "$DEX_INSTALL_DIR/setup-complete" 2>/dev/null || true
+    rm -f "$DEX_INSTALL_DIR/setup-pin" 2>/dev/null || true
+    rm -f "$DEX_INSTALL_DIR/permanent-url" 2>/dev/null || true
+    rm -f "$DEX_INSTALL_DIR/access-method" 2>/dev/null || true
+    rm -f "$DEX_INSTALL_DIR/cloudflare-tunnel.json" 2>/dev/null || true
+    rm -f "$DEX_INSTALL_DIR/cloudflared-creds.json" 2>/dev/null || true
+    rm -rf "$DEX_INSTALL_DIR/worktrees" 2>/dev/null || true
+    rm -rf "$DEX_INSTALL_DIR/repos" 2>/dev/null || true
+
+    # Reset tailscale serve if configured
+    if command -v tailscale &>/dev/null; then
+        tailscale serve reset 2>/dev/null || true
+    fi
+
+    success "All data wiped"
+    echo ""
+}
 
 cleanup() {
     for pid in "${CLEANUP_PIDS[@]:-}"; do
@@ -588,16 +681,25 @@ upgrade_dex() {
 }
 
 main() {
+    # Parse arguments first (before print_banner clears screen)
+    parse_args "$@"
+
     print_banner
     detect_platform
     check_root
+
+    # Handle fresh install request
+    if [ "$FRESH_INSTALL" = true ]; then
+        wipe_data
+    fi
+
     install_qrencode
     install_jq
     install_go
     install_cloudflared
     install_tailscale
 
-    if is_configured; then
+    if [ "$FRESH_INSTALL" = false ] && is_configured; then
         echo -e "${CYAN}Existing installation detected. Running upgrade...${NC}"
         echo ""
         upgrade_dex
