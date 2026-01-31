@@ -601,7 +601,8 @@ func (s *Server) handleStartTask(c echo.Context) error {
 	}
 
 	// Start the session (runs Ralph loop in background)
-	if err := s.sessionManager.Start(c.Request().Context(), session.ID); err != nil {
+	// Use background context since the session should live beyond the HTTP request
+	if err := s.sessionManager.Start(context.Background(), session.ID); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("failed to start session: %v", err))
 	}
 
