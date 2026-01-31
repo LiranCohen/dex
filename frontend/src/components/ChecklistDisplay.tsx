@@ -85,10 +85,12 @@ function getStatusBadge(status: ChecklistItemStatus) {
 function ChecklistItemRow({
   item,
   editable,
+  showCategory,
   onToggle,
 }: {
   item: ChecklistItem;
   editable?: boolean;
+  showCategory?: boolean;
   onToggle?: (selected: boolean) => void;
 }) {
   const isMustHave = item.category === 'must_have';
@@ -112,6 +114,13 @@ function ChecklistItemRow({
           onChange={(e) => onToggle?.(e.target.checked)}
           className="mt-1 w-5 h-5 rounded border-gray-600 bg-gray-700 text-blue-500 focus:ring-blue-500 focus:ring-offset-gray-900"
         />
+      ) : editable && isMustHave ? (
+        <input
+          type="checkbox"
+          checked={true}
+          disabled
+          className="mt-1 w-5 h-5 rounded border-gray-600 bg-gray-700 text-blue-500 opacity-50"
+        />
       ) : (
         <div className="mt-0.5">{getStatusIcon(item.status)}</div>
       )}
@@ -126,7 +135,7 @@ function ChecklistItemRow({
           >
             {item.description}
           </span>
-          {isMustHave && (
+          {showCategory && isMustHave && (
             <span className="text-xs px-1.5 py-0.5 rounded bg-amber-900/50 text-amber-300">
               required
             </span>
@@ -153,33 +162,53 @@ export function ChecklistDisplay({
 }: ChecklistDisplayProps) {
   const mustHaveItems = items.filter((item) => item.category === 'must_have');
   const optionalItems = items.filter((item) => item.category === 'optional');
+  // For non-editable view, only show selected items as a flat list
+  const selectedItems = items.filter((item) => item.selected);
 
-  return (
-    <div className="space-y-6">
-      {/* Summary bar */}
-      {summary && !editable && (
-        <div className="flex items-center gap-4 text-sm">
-          <div className="flex items-center gap-2">
-            <span className="text-gray-400">Required:</span>
+  // Non-editable mode: show as flat list without category distinction
+  if (!editable) {
+    return (
+      <div className="space-y-4">
+        {/* Summary bar */}
+        {summary && (
+          <div className="flex items-center gap-2 text-sm">
+            <span className="text-gray-400">Progress:</span>
             <span
               className={
-                summary.all_required_done ? 'text-green-400' : 'text-gray-300'
+                summary.all_selected_done ? 'text-green-400' : 'text-gray-300'
               }
             >
-              {summary.must_have_done}/{summary.must_have_total}
+              {summary.must_have_done + summary.optional_done}/
+              {summary.must_have_total + summary.optional_total} completed
             </span>
           </div>
-          {summary.optional_total > 0 && (
-            <div className="flex items-center gap-2">
-              <span className="text-gray-400">Optional:</span>
-              <span className="text-gray-300">
-                {summary.optional_done}/{summary.optional_total}
-              </span>
-            </div>
-          )}
-        </div>
-      )}
+        )}
 
+        {/* Flat list of all selected items */}
+        <div className="space-y-2">
+          {selectedItems.map((item) => (
+            <ChecklistItemRow
+              key={item.id}
+              item={item}
+              editable={false}
+              showCategory={false}
+            />
+          ))}
+        </div>
+
+        {/* Empty state */}
+        {selectedItems.length === 0 && (
+          <div className="text-center py-8 text-gray-500">
+            No checklist items
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // Editable mode: show with category sections for planning phase
+  return (
+    <div className="space-y-6">
       {/* Must-have section */}
       {mustHaveItems.length > 0 && (
         <div>
@@ -194,7 +223,8 @@ export function ChecklistDisplay({
               <ChecklistItemRow
                 key={item.id}
                 item={item}
-                editable={false}
+                editable={true}
+                showCategory={false}
               />
             ))}
           </div>
@@ -215,7 +245,8 @@ export function ChecklistDisplay({
               <ChecklistItemRow
                 key={item.id}
                 item={item}
-                editable={editable}
+                editable={true}
+                showCategory={false}
                 onToggle={(selected) => onItemToggle?.(item.id, selected)}
               />
             ))}

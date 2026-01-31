@@ -547,9 +547,13 @@ func (r *RalphLoop) buildChecklistPrompt(items []*db.ChecklistItem) string {
 	}
 
 	sb.WriteString("\n---\n\n")
-	sb.WriteString("When completing an item, output: CHECKLIST_DONE:<item_id>\n")
-	sb.WriteString("If an item cannot be completed, output: CHECKLIST_FAILED:<item_id>:<reason>\n\n")
-	sb.WriteString("When all items are addressed, output TASK_COMPLETE.\n\n")
+	sb.WriteString("## Reporting Checklist Status\n\n")
+	sb.WriteString("IMPORTANT: Only mark an item as done when it is FULLY and SUCCESSFULLY completed.\n\n")
+	sb.WriteString("- CHECKLIST_DONE:<item_id> - Use ONLY when the item succeeded completely\n")
+	sb.WriteString("- CHECKLIST_FAILED:<item_id>:<reason> - Use when an item failed or could not be completed\n\n")
+	sb.WriteString("If a tool returns an error or an operation fails, you MUST use CHECKLIST_FAILED, not CHECKLIST_DONE.\n")
+	sb.WriteString("Do not claim success for items that encountered errors.\n\n")
+	sb.WriteString("When all items are addressed (done or failed), output TASK_COMPLETE.\n\n")
 	sb.WriteString("Begin working on the task. Follow your hat instructions and report progress.")
 
 	return sb.String()
