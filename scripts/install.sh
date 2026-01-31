@@ -281,7 +281,7 @@ show_qr() {
     echo ""
     echo -e "  ${BOLD}📱 $title${NC}"
     echo ""
-    qrencode -t UTF8 -m 2 "$url"
+    qrencode -t ANSIUTF8 -m 2 "$url"
     echo ""
     echo -e "  ${DIM}Or open:${NC} ${CYAN}$url${NC}"
     echo ""
@@ -537,7 +537,7 @@ print_success() {
     if [ -n "$permanent_url" ]; then
         echo -e "  ${BOLD}📱 Scan to access:${NC}"
         echo ""
-        qrencode -t UTF8 -m 2 "$permanent_url"
+        qrencode -t ANSIUTF8 -m 2 "$permanent_url"
         echo ""
         echo -e "  ${CYAN}$permanent_url${NC}"
         echo ""
