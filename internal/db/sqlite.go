@@ -61,6 +61,16 @@ func (db *DB) Migrate() error {
 		}
 	}
 
+	// Run optional migrations that may fail if already applied
+	// (e.g., adding columns to existing tables)
+	optionalMigrations := []string{
+		"ALTER TABLE webauthn_credentials ADD COLUMN backup_eligible INTEGER NOT NULL DEFAULT 0",
+		"ALTER TABLE webauthn_credentials ADD COLUMN backup_state INTEGER NOT NULL DEFAULT 0",
+	}
+	for _, migration := range optionalMigrations {
+		db.Exec(migration) // Ignore errors - column may already exist
+	}
+
 	return nil
 }
 
@@ -84,11 +94,19 @@ CREATE TABLE IF NOT EXISTS webauthn_credentials (
 	attestation_type TEXT NOT NULL DEFAULT 'none',
 	aaguid BLOB,
 	sign_count INTEGER NOT NULL DEFAULT 0,
+	backup_eligible INTEGER NOT NULL DEFAULT 0,
+	backup_state INTEGER NOT NULL DEFAULT 0,
 	created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX IF NOT EXISTS idx_webauthn_credentials_user ON webauthn_credentials(user_id);
 CREATE INDEX IF NOT EXISTS idx_webauthn_credentials_cred_id ON webauthn_credentials(credential_id);
+`
+
+// Migration to add backup flags to existing tables
+const migrationWebAuthnFlags = `
+ALTER TABLE webauthn_credentials ADD COLUMN backup_eligible INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE webauthn_credentials ADD COLUMN backup_state INTEGER NOT NULL DEFAULT 0;
 `
 
 const migrationProjects = `

@@ -14,10 +14,20 @@ func (db *DB) CreateWebAuthnCredential(userID string, cred *webauthn.Credential)
 	id := uuid.New().String()
 	now := time.Now()
 
+	// Convert flags to integers for storage
+	backupEligible := 0
+	backupState := 0
+	if cred.Flags.BackupEligible {
+		backupEligible = 1
+	}
+	if cred.Flags.BackupState {
+		backupState = 1
+	}
+
 	_, err := db.Exec(`
-		INSERT INTO webauthn_credentials (id, user_id, credential_id, public_key, attestation_type, aaguid, sign_count, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-	`, id, userID, cred.ID, cred.PublicKey, cred.AttestationType, cred.Authenticator.AAGUID, cred.Authenticator.SignCount, now)
+		INSERT INTO webauthn_credentials (id, user_id, credential_id, public_key, attestation_type, aaguid, sign_count, backup_eligible, backup_state, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, id, userID, cred.ID, cred.PublicKey, cred.AttestationType, cred.Authenticator.AAGUID, cred.Authenticator.SignCount, backupEligible, backupState, now)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create credential: %w", err)
 	}
@@ -37,7 +47,7 @@ func (db *DB) CreateWebAuthnCredential(userID string, cred *webauthn.Credential)
 // GetWebAuthnCredentialsByUserID retrieves all credentials for a user
 func (db *DB) GetWebAuthnCredentialsByUserID(userID string) ([]webauthn.Credential, error) {
 	rows, err := db.Query(`
-		SELECT credential_id, public_key, attestation_type, aaguid, sign_count
+		SELECT credential_id, public_key, attestation_type, aaguid, sign_count, backup_eligible, backup_state
 		FROM webauthn_credentials
 		WHERE user_id = ?
 	`, userID)
@@ -51,8 +61,9 @@ func (db *DB) GetWebAuthnCredentialsByUserID(userID string) ([]webauthn.Credenti
 		var credID, publicKey, aaguid []byte
 		var attestationType string
 		var signCount uint32
+		var backupEligible, backupState int
 
-		if err := rows.Scan(&credID, &publicKey, &attestationType, &aaguid, &signCount); err != nil {
+		if err := rows.Scan(&credID, &publicKey, &attestationType, &aaguid, &signCount, &backupEligible, &backupState); err != nil {
 			return nil, fmt.Errorf("failed to scan credential: %w", err)
 		}
 
@@ -60,6 +71,10 @@ func (db *DB) GetWebAuthnCredentialsByUserID(userID string) ([]webauthn.Credenti
 			ID:              credID,
 			PublicKey:       publicKey,
 			AttestationType: attestationType,
+			Flags: webauthn.CredentialFlags{
+				BackupEligible: backupEligible == 1,
+				BackupState:    backupState == 1,
+			},
 			Authenticator: webauthn.Authenticator{
 				AAGUID:    aaguid,
 				SignCount: signCount,
