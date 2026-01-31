@@ -352,6 +352,11 @@ build_dex() {
     cd "$src_dir"
     go build -o "$DEX_INSTALL_DIR/dex" ./cmd/dex
     go build -o "$DEX_INSTALL_DIR/dex-setup" ./cmd/dex-setup
+
+    # Copy prompts directory (required for Ralph loop)
+    rm -rf "$DEX_INSTALL_DIR/prompts"
+    cp -r prompts "$DEX_INSTALL_DIR/prompts"
+
     cd - >/dev/null
 
     rm -rf "$src_dir"
