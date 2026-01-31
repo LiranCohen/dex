@@ -1,0 +1,6 @@
+name: debugger
+components:
+  - system
+  - environment
+  - tools
+  - hat_debugger

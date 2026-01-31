@@ -17,11 +17,12 @@ function safeString(value: unknown): string {
 
 interface PlanningPanelProps {
   taskId: string;
+  readOnly?: boolean;  // When true, show as historical record without action buttons
   onPlanAccepted?: () => void;
   onPlanSkipped?: () => void;
 }
 
-export function PlanningPanel({ taskId, onPlanAccepted, onPlanSkipped }: PlanningPanelProps) {
+export function PlanningPanel({ taskId, readOnly = false, onPlanAccepted, onPlanSkipped }: PlanningPanelProps) {
   const [session, setSession] = useState<PlanningSession | null>(null);
   const [messages, setMessages] = useState<PlanningMessage[]>([]);
   const [loading, setLoading] = useState(true);
@@ -259,8 +260,8 @@ export function PlanningPanel({ taskId, onPlanAccepted, onPlanSkipped }: Plannin
         </div>
       )}
 
-      {/* Response input (only show when awaiting response) */}
-      {isAwaitingResponse && (
+      {/* Response input (only show when awaiting response and not read-only) */}
+      {!readOnly && isAwaitingResponse && (
         <form onSubmit={handleSubmit} className="p-4 border-t border-purple-600/30">
           <textarea
             value={response}
@@ -282,25 +283,27 @@ export function PlanningPanel({ taskId, onPlanAccepted, onPlanSkipped }: Plannin
         </form>
       )}
 
-      {/* Action buttons (show when completed or can skip) */}
-      <div className="p-4 border-t border-purple-600/30 flex items-center justify-between gap-3">
-        <button
-          onClick={handleSkip}
-          disabled={skipping || accepting}
-          className="px-4 py-2 bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:text-gray-500 text-gray-200 rounded-lg text-sm font-medium transition-colors"
-        >
-          {skipping ? 'Skipping...' : 'Skip Planning'}
-        </button>
-        {(isCompleted || isAwaitingResponse) && (
+      {/* Action buttons (show when completed or can skip, but not in read-only mode) */}
+      {!readOnly && (
+        <div className="p-4 border-t border-purple-600/30 flex items-center justify-between gap-3">
           <button
-            onClick={handleAccept}
-            disabled={accepting || skipping}
-            className="px-4 py-2 bg-green-600 hover:bg-green-700 disabled:bg-green-800 disabled:text-green-400 text-white rounded-lg text-sm font-medium transition-colors"
+            onClick={handleSkip}
+            disabled={skipping || accepting}
+            className="px-4 py-2 bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:text-gray-500 text-gray-200 rounded-lg text-sm font-medium transition-colors"
           >
-            {accepting ? 'Accepting...' : 'Accept & Continue'}
+            {skipping ? 'Skipping...' : 'Skip Planning'}
           </button>
-        )}
-      </div>
+          {(isCompleted || isAwaitingResponse) && (
+            <button
+              onClick={handleAccept}
+              disabled={accepting || skipping}
+              className="px-4 py-2 bg-green-600 hover:bg-green-700 disabled:bg-green-800 disabled:text-green-400 text-white rounded-lg text-sm font-medium transition-colors"
+            >
+              {accepting ? 'Accepting...' : 'Accept & Continue'}
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }

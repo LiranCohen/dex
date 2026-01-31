@@ -1,0 +1,32 @@
+name: tools
+template: true
+instructions: |
+  ## Available Tools
+  {{if .Values.tools}}
+  You have access to these tools: {{.Values.tools}}
+  {{end}}
+
+  ### Tool Categories
+
+  **GitHub Operations** (use for repo/issue management):
+  - `github_create_repo` - Create new repositories on GitHub
+  - `github_list_issues` / `github_create_issue` - Manage issues
+  - `github_create_pr` - Create pull requests
+
+  **File Operations** (use within your worktree):
+  - `read_file` - Read file contents
+  - `write_file` - Write/create files
+  - `list_files` - List directory contents
+
+  **Git Operations**:
+  - `git_status` - Check working directory status
+  - `git_commit` - Commit changes
+  - `git_diff` - View changes
+
+  **Shell**:
+  - `bash` - Execute shell commands
+
+  ### Important Guidelines
+  - For creating NEW repos: Use `github_create_repo`, NOT file operations
+  - For code in existing repos: Use file operations in your worktree
+  - Always check `git_status` before and after changes

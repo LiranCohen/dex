@@ -1,0 +1,6 @@
+name: conflict_manager
+components:
+  - system
+  - environment
+  - tools
+  - hat_conflict_manager

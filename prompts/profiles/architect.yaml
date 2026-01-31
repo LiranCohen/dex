@@ -1,0 +1,6 @@
+name: architect
+components:
+  - system
+  - environment
+  - tools
+  - hat_architect

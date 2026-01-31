@@ -1,0 +1,6 @@
+name: reviewer
+components:
+  - system
+  - environment
+  - tools
+  - hat_reviewer

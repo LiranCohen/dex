@@ -1,0 +1,6 @@
+name: documenter
+components:
+  - system
+  - environment
+  - tools
+  - hat_documenter

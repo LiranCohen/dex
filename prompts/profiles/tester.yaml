@@ -1,0 +1,6 @@
+name: tester
+components:
+  - system
+  - environment
+  - tools
+  - hat_tester

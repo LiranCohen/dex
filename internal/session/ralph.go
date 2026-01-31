@@ -101,7 +101,14 @@ func (r *RalphLoop) Run(ctx context.Context) error {
 	})
 
 	// Initialize conversation with context message
+	// Check if there's a refined prompt from the planning phase
 	initialMessage := "Begin working on the task. Follow your hat instructions and report progress."
+	if planningSession, err := r.db.GetPlanningSessionByTaskID(r.session.TaskID); err == nil && planningSession != nil {
+		if planningSession.RefinedPrompt.Valid && planningSession.RefinedPrompt.String != "" {
+			initialMessage = fmt.Sprintf("## Task Instructions (from planning phase)\n\n%s\n\n---\n\nBegin working on this task. Follow your hat instructions and report progress.", planningSession.RefinedPrompt.String)
+			fmt.Printf("RalphLoop.Run: using refined prompt from planning phase\n")
+		}
+	}
 	r.messages = append(r.messages, toolbelt.AnthropicMessage{
 		Role:    "user",
 		Content: initialMessage,

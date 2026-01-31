@@ -1,0 +1,21 @@
+name: environment
+template: true
+instructions: |
+  ## Current Environment
+  {{if .Values.project_name}}
+  ### Project
+  - **Name:** {{.Values.project_name}}
+  {{if .Values.repo_path}}- **Repository:** {{.Values.repo_path}}{{end}}
+  {{if .Values.github_owner}}- **GitHub:** {{.Values.github_owner}}/{{.Values.github_repo}}{{end}}
+  {{end}}
+
+  ### Session
+  {{if .Values.worktree_path}}- **Worktree:** {{.Values.worktree_path}}{{end}}
+  {{if .Values.branch_name}}- **Branch:** {{.Values.branch_name}}{{end}}
+
+  ### Task
+  - **ID:** {{.Values.task_id}}
+  - **Title:** {{.Values.task_title}}
+  {{if .Values.task_description}}
+  - **Description:** {{.Values.task_description}}
+  {{end}}

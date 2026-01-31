@@ -1,24 +1,22 @@
 package session
 
 import (
-	"bytes"
 	"fmt"
 	"os"
-	"path/filepath"
 	"slices"
-	"sort"
-	"text/template"
+	"strings"
 
 	"github.com/lirancohen/dex/internal/db"
+	"github.com/lirancohen/promptloom"
 )
 
 // PromptContext provides context for rendering hat prompts
 type PromptContext struct {
-	Task        *db.Task
-	Session     *ActiveSession
-	Toolbelt    []ToolbeltService
-	Project     *ProjectContext
-	Tools       []string
+	Task     *db.Task
+	Session  *ActiveSession
+	Toolbelt []ToolbeltService
+	Project  *ProjectContext
+	Tools    []string
 }
 
 // ProjectContext provides project-level context for prompts
@@ -35,57 +33,56 @@ type ToolbeltService struct {
 	Status string
 }
 
-// PromptLoader loads and templates hat prompts
+// PromptLoader loads and assembles hat prompts using PromptLoom
 type PromptLoader struct {
 	promptsDir string
-	templates  map[string]*template.Template
+	registry   *promptloom.Registry
+	assembler  *promptloom.Assembler
 }
 
 // NewPromptLoader creates a prompt loader for the given prompts directory
 func NewPromptLoader(promptsDir string) *PromptLoader {
 	return &PromptLoader{
 		promptsDir: promptsDir,
-		templates:  make(map[string]*template.Template),
+		registry:   promptloom.NewRegistry(),
 	}
 }
 
-// LoadAll loads all hat prompt templates from the prompts directory
+// LoadAll loads all prompt components and profiles from the prompts directory
 func (p *PromptLoader) LoadAll() error {
-	hatsDir := filepath.Join(p.promptsDir, "hats")
-	fmt.Printf("PromptLoader.LoadAll: loading prompts from %s\n", hatsDir)
+	fmt.Printf("PromptLoader.LoadAll: loading prompts from %s\n", p.promptsDir)
 
-	entries, err := os.ReadDir(hatsDir)
-	if err != nil {
-		return fmt.Errorf("failed to read hats directory %s: %w", hatsDir, err)
+	// Create filesystem from the prompts directory
+	fsys := os.DirFS(p.promptsDir)
+
+	// Load components and profiles from the filesystem
+	// The root path is "." since DirFS is already rooted at promptsDir
+	if err := p.registry.LoadFromFS(fsys, "."); err != nil {
+		return fmt.Errorf("failed to load prompts: %w", err)
 	}
 
-	for _, entry := range entries {
-		if entry.IsDir() || filepath.Ext(entry.Name()) != ".md" {
-			continue
-		}
-
-		hatName := entry.Name()[:len(entry.Name())-3] // Remove .md extension
-		path := filepath.Join(hatsDir, entry.Name())
-
-		content, err := os.ReadFile(path)
-		if err != nil {
-			return fmt.Errorf("failed to read prompt %s: %w", hatName, err)
-		}
-
-		tmpl, err := template.New(hatName).Parse(string(content))
-		if err != nil {
-			return fmt.Errorf("failed to parse template %s: %w", hatName, err)
-		}
-
-		p.templates[hatName] = tmpl
+	// Validate all components and profiles
+	if err := p.registry.ValidateStrict(); err != nil {
+		return fmt.Errorf("prompt validation failed: %w", err)
 	}
 
-	fmt.Printf("PromptLoader.LoadAll: loaded %d prompt templates\n", len(p.templates))
+	// Create the assembler
+	p.assembler = promptloom.NewAssembler(p.registry)
 
-	// Validate all required hats have templates
+	// Verify all required hats have profiles
+	profiles := p.registry.ListProfiles()
+	fmt.Printf("PromptLoader.LoadAll: loaded %d profiles\n", len(profiles))
+
 	for _, hat := range ValidHats {
-		if _, exists := p.templates[hat]; !exists {
-			return fmt.Errorf("missing template for required hat: %s", hat)
+		found := false
+		for _, profile := range profiles {
+			if profile == hat {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("missing profile for required hat: %s", hat)
 		}
 	}
 
@@ -93,40 +90,90 @@ func (p *PromptLoader) LoadAll() error {
 	return nil
 }
 
-// Get returns the rendered prompt for a hat with the given context
+// Get returns the assembled prompt for a hat with the given context
 func (p *PromptLoader) Get(hatName string, ctx *PromptContext) (string, error) {
-	tmpl, exists := p.templates[hatName]
-	if !exists {
-		return "", fmt.Errorf("no prompt template for hat: %s", hatName)
+	if p.assembler == nil {
+		return "", fmt.Errorf("prompt loader not initialized - call LoadAll first")
 	}
 
-	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, ctx); err != nil {
-		return "", fmt.Errorf("failed to render prompt for %s: %w", hatName, err)
+	// Build PromptLoom context from our PromptContext
+	loomCtx := promptloom.NewContext()
+
+	// Add task context
+	if ctx.Task != nil {
+		loomCtx.SetValue("task_id", ctx.Task.ID)
+		loomCtx.SetValue("task_title", ctx.Task.Title)
+		if ctx.Task.Description.Valid {
+			loomCtx.SetValue("task_description", ctx.Task.Description.String)
+		}
+		loomCtx.SetValue("branch_name", ctx.Task.GetBranchName())
 	}
 
-	return buf.String(), nil
+	// Add session context
+	if ctx.Session != nil {
+		loomCtx.SetValue("worktree_path", ctx.Session.WorktreePath)
+		loomCtx.SetValue("session_id", ctx.Session.ID)
+	}
+
+	// Add project context
+	if ctx.Project != nil {
+		loomCtx.SetValue("project_name", ctx.Project.Name)
+		loomCtx.SetValue("repo_path", ctx.Project.RepoPath)
+		if ctx.Project.GitHubOwner != "" {
+			loomCtx.SetValue("github_owner", ctx.Project.GitHubOwner)
+			loomCtx.SetValue("github_repo", ctx.Project.GitHubRepo)
+			loomCtx.SetFlag("has_github", true)
+		}
+	}
+
+	// Add tools list
+	if len(ctx.Tools) > 0 {
+		loomCtx.SetValue("tools", strings.Join(ctx.Tools, ", "))
+	}
+
+	// Add toolbelt services
+	if len(ctx.Toolbelt) > 0 {
+		var services []string
+		for _, svc := range ctx.Toolbelt {
+			services = append(services, fmt.Sprintf("- %s: %s", svc.Name, svc.Status))
+		}
+		loomCtx.SetValue("toolbelt", strings.Join(services, "\n"))
+	}
+
+	// Assemble the prompt
+	prompt, err := p.assembler.Assemble(hatName, loomCtx)
+	if err != nil {
+		return "", fmt.Errorf("failed to assemble prompt for %s: %w", hatName, err)
+	}
+
+	return prompt, nil
 }
 
-// ListHats returns all available hat names (sorted for deterministic output)
+// ListHats returns all available hat names (from profiles)
 func (p *PromptLoader) ListHats() []string {
-	hats := make([]string, 0, len(p.templates))
-	for name := range p.templates {
-		hats = append(hats, name)
+	if p.registry == nil {
+		return nil
 	}
-	sort.Strings(hats)
-	return hats
+	return p.registry.ListProfiles()
 }
 
-// HasHat checks if a hat prompt template exists
+// HasHat checks if a hat profile exists
 func (p *PromptLoader) HasHat(hatName string) bool {
-	_, exists := p.templates[hatName]
-	return exists
+	if p.registry == nil {
+		return false
+	}
+	for _, profile := range p.registry.ListProfiles() {
+		if profile == hatName {
+			return true
+		}
+	}
+	return false
 }
 
-// Reload reloads all templates from disk
+// Reload reloads all prompts from disk
 func (p *PromptLoader) Reload() error {
-	p.templates = make(map[string]*template.Template)
+	p.registry = promptloom.NewRegistry()
+	p.assembler = nil
 	return p.LoadAll()
 }
 

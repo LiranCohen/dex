@@ -1,0 +1,6 @@
+name: devops
+components:
+  - system
+  - environment
+  - tools
+  - hat_devops

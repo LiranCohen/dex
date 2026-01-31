@@ -1274,16 +1274,15 @@ function TaskDetailPage() {
           </div>
         </div>
 
-        {/* Planning Panel (shown when task is in planning phase) */}
-        {isPlanning && (
-          <div className="mb-4">
-            <PlanningPanel
-              taskId={task.ID}
-              onPlanAccepted={handlePlanningComplete}
-              onPlanSkipped={handlePlanningComplete}
-            />
-          </div>
-        )}
+        {/* Planning Panel (always shown if session exists, read-only when not in planning) */}
+        <div className="mb-4">
+          <PlanningPanel
+            taskId={task.ID}
+            readOnly={!isPlanning}
+            onPlanAccepted={handlePlanningComplete}
+            onPlanSkipped={handlePlanningComplete}
+          />
+        </div>
 
         {/* Action Buttons */}
         <div className="bg-gray-800 rounded-lg p-4 mb-4">
