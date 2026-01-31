@@ -1056,10 +1056,7 @@ function TaskDetailPage() {
     setError(null);
 
     try {
-      await api.post(`/tasks/${id}/start`, {
-        project_path: '/Users/liran/src/dex',
-        base_branch: 'main',
-      });
+      await api.post(`/tasks/${id}/start`, {});
       // Refetch task to get updated status
       const taskData = await api.get<Task>(`/tasks/${id}`);
       setTask(taskData);

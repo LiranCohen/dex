@@ -525,23 +525,34 @@ func (s *Server) handleStartTask(c echo.Context) error {
 	taskID := c.Param("id")
 
 	var req struct {
-		ProjectPath string `json:"project_path"`
-		BaseBranch  string `json:"base_branch"`
+		BaseBranch string `json:"base_branch"`
 	}
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
-	}
-	if req.ProjectPath == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "project_path is required")
-	}
-	if req.BaseBranch == "" {
-		req.BaseBranch = "main" // Default to main
 	}
 
 	// Get the task first
 	t, err := s.taskService.Get(taskID)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusNotFound, err.Error())
+	}
+
+	// Get the project to find repo_path
+	project, err := s.db.GetProjectByID(t.ProjectID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to get project")
+	}
+	if project == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "project not found")
+	}
+
+	projectPath := project.RepoPath
+	baseBranch := req.BaseBranch
+	if baseBranch == "" {
+		baseBranch = project.DefaultBranch
+		if baseBranch == "" {
+			baseBranch = "main"
+		}
 	}
 
 	// Check if already has a worktree
@@ -554,7 +565,7 @@ func (s *Server) handleStartTask(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusServiceUnavailable, "git service not configured")
 	}
 
-	worktreePath, err := s.gitService.SetupTaskWorktree(req.ProjectPath, taskID, req.BaseBranch)
+	worktreePath, err := s.gitService.SetupTaskWorktree(projectPath, taskID, baseBranch)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("failed to create worktree: %v", err))
 	}
@@ -563,14 +574,14 @@ func (s *Server) handleStartTask(c echo.Context) error {
 	// First: pending -> ready
 	if t.Status == "pending" {
 		if err := s.taskService.UpdateStatus(taskID, "ready"); err != nil {
-			_ = s.gitService.CleanupTaskWorktree(req.ProjectPath, taskID, true)
+			_ = s.gitService.CleanupTaskWorktree(projectPath, taskID, true)
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
 	}
 	// Then: ready -> running
 	if err := s.taskService.UpdateStatus(taskID, "running"); err != nil {
 		// Try to clean up the worktree we just created
-		_ = s.gitService.CleanupTaskWorktree(req.ProjectPath, taskID, true)
+		_ = s.gitService.CleanupTaskWorktree(projectPath, taskID, true)
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 
