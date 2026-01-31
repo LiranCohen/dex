@@ -33,6 +33,7 @@ SETUP_PORT="${SETUP_PORT:-8081}"
 
 # Flags
 FRESH_INSTALL=false
+CONFIRM_FRESH=false
 
 # State
 CLEANUP_PIDS=()
@@ -49,6 +50,10 @@ parse_args() {
                 FRESH_INSTALL=true
                 shift
                 ;;
+            --yes|-y)
+                CONFIRM_FRESH=true
+                shift
+                ;;
             --help|-h)
                 echo "Poindexter Installer"
                 echo ""
@@ -56,11 +61,19 @@ parse_args() {
                 echo ""
                 echo "Options:"
                 echo "  --fresh, --reset, -f   Wipe all data and start fresh install"
+                echo "  --yes, -y              Skip confirmation (required with --fresh when piped)"
                 echo "  --help, -h             Show this help message"
                 echo ""
                 echo "Without flags, the installer will:"
                 echo "  - Fresh install if no existing installation"
                 echo "  - Upgrade (preserve data) if already installed"
+                echo ""
+                echo "Examples:"
+                echo "  # Interactive fresh install (run script directly)"
+                echo "  sudo ./install.sh --fresh"
+                echo ""
+                echo "  # Non-interactive fresh install (piped from curl)"
+                echo "  curl -fsSL ... | sudo bash -s -- --fresh --yes"
                 exit 0
                 ;;
             *)
@@ -89,18 +102,33 @@ wipe_data() {
     echo -e "${RED}${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
 
-    # Prompt for confirmation
-    echo -e "  Type ${BOLD}DELETE${NC} to confirm: "
-    read -r confirmation
+    # Check if --yes was provided or if we can prompt interactively
+    if [ "$CONFIRM_FRESH" = true ]; then
+        echo -e "  ${YELLOW}--yes flag provided, proceeding with wipe...${NC}"
+        echo ""
+    elif [ -t 0 ]; then
+        # stdin is a terminal, we can prompt
+        echo -ne "  Type ${BOLD}DELETE${NC} to confirm: "
+        read -r confirmation
 
-    if [ "$confirmation" != "DELETE" ]; then
+        if [ "$confirmation" != "DELETE" ]; then
+            echo ""
+            echo -e "  ${GREEN}Aborted.${NC} No data was deleted."
+            echo ""
+            exit 0
+        fi
         echo ""
-        echo -e "  ${GREEN}Aborted.${NC} No data was deleted."
+    else
+        # stdin is not a terminal (piped), require --yes
+        echo -e "  ${RED}ERROR:${NC} Running in non-interactive mode (piped from curl)."
         echo ""
-        exit 0
+        echo -e "  To confirm fresh install, add ${BOLD}--yes${NC} flag:"
+        echo ""
+        echo -e "    ${CYAN}curl -fsSL ... | sudo bash -s -- --fresh --yes${NC}"
+        echo ""
+        exit 1
     fi
 
-    echo ""
     log "Stopping services..."
     if command -v systemctl &>/dev/null; then
         systemctl stop dex 2>/dev/null || true
