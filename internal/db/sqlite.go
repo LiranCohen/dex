@@ -54,6 +54,8 @@ func (db *DB) Migrate() error {
 		migrationSessionCheckpoints,
 		migrationApprovals,
 		migrationSessionActivity,
+		migrationPlanningSessions,
+		migrationPlanningMessages,
 	}
 
 	for i, migration := range migrations {
@@ -237,4 +239,33 @@ CREATE TABLE IF NOT EXISTS session_activity (
 
 CREATE INDEX IF NOT EXISTS idx_session_activity_session ON session_activity(session_id);
 CREATE INDEX IF NOT EXISTS idx_session_activity_iteration ON session_activity(session_id, iteration);
+`
+
+const migrationPlanningSessions = `
+CREATE TABLE IF NOT EXISTS planning_sessions (
+	id TEXT PRIMARY KEY,
+	task_id TEXT NOT NULL UNIQUE,
+	status TEXT NOT NULL DEFAULT 'processing',
+	refined_prompt TEXT,
+	original_prompt TEXT NOT NULL,
+	created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+	completed_at DATETIME,
+	FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_planning_sessions_task ON planning_sessions(task_id);
+CREATE INDEX IF NOT EXISTS idx_planning_sessions_status ON planning_sessions(status);
+`
+
+const migrationPlanningMessages = `
+CREATE TABLE IF NOT EXISTS planning_messages (
+	id TEXT PRIMARY KEY,
+	planning_session_id TEXT NOT NULL,
+	role TEXT NOT NULL,
+	content TEXT NOT NULL,
+	created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+	FOREIGN KEY (planning_session_id) REFERENCES planning_sessions(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_planning_messages_session ON planning_messages(planning_session_id);
 `

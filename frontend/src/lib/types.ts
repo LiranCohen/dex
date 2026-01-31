@@ -29,6 +29,7 @@ export interface Task {
 
 export type TaskStatus =
   | 'pending'
+  | 'planning'
   | 'blocked'
   | 'ready'
   | 'running'
@@ -178,4 +179,28 @@ export interface ActivityResponse {
     total_sessions?: number;
     completion_reason?: string;
   };
+}
+
+// Planning types
+export type PlanningStatus = 'processing' | 'awaiting_response' | 'completed' | 'skipped';
+
+export interface PlanningSession {
+  id: string;
+  task_id: string;
+  status: PlanningStatus;
+  original_prompt: string;
+  refined_prompt?: string;
+  created_at: string;
+}
+
+export interface PlanningMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  created_at: string;
+}
+
+export interface PlanningResponse {
+  session: PlanningSession;
+  messages: PlanningMessage[];
 }

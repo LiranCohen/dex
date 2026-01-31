@@ -12,7 +12,8 @@ import (
 // validTransitions defines allowed status transitions
 // Key is the source status, value is a slice of valid target statuses
 var validTransitions = map[string][]string{
-	db.TaskStatusPending:     {db.TaskStatusReady, db.TaskStatusBlocked, db.TaskStatusCancelled},
+	db.TaskStatusPending:     {db.TaskStatusPlanning, db.TaskStatusReady, db.TaskStatusBlocked, db.TaskStatusCancelled},
+	db.TaskStatusPlanning:    {db.TaskStatusReady, db.TaskStatusCancelled},
 	db.TaskStatusBlocked:     {db.TaskStatusReady, db.TaskStatusCancelled},
 	db.TaskStatusReady:       {db.TaskStatusRunning, db.TaskStatusBlocked, db.TaskStatusCancelled},
 	db.TaskStatusRunning:     {db.TaskStatusPaused, db.TaskStatusCompleted, db.TaskStatusQuarantined, db.TaskStatusCancelled},

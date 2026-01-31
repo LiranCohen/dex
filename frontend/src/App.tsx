@@ -5,6 +5,7 @@ import { api, fetchApprovals, approveApproval, rejectApproval } from './lib/api'
 import { useWebSocket } from './hooks/useWebSocket';
 import { Onboarding } from './components/Onboarding';
 import { ActivityFeed } from './components/ActivityFeed';
+import { PlanningPanel } from './components/PlanningPanel';
 import type { Task, TasksResponse, SystemStatus, TaskStatus, WebSocketEvent, SessionEvent, Approval } from './lib/types';
 
 // Setup status type
@@ -351,6 +352,7 @@ function LoginPage() {
 function StatusBadge({ status }: { status: TaskStatus }) {
   const colors: Record<TaskStatus, string> = {
     pending: 'bg-gray-600',
+    planning: 'bg-purple-600',
     blocked: 'bg-yellow-600',
     ready: 'bg-blue-600',
     running: 'bg-green-600',
@@ -830,6 +832,7 @@ function TaskListPage() {
   const statusOptions: { value: string; label: string }[] = [
     { value: 'all', label: 'All' },
     { value: 'pending', label: 'Pending' },
+    { value: 'planning', label: 'Planning' },
     { value: 'ready', label: 'Ready' },
     { value: 'running', label: 'Running' },
     { value: 'paused', label: 'Paused' },
@@ -1179,10 +1182,22 @@ function TaskDetailPage() {
     );
   }
 
+  const isPlanning = task.Status === 'planning';
   const canStart = task.Status === 'pending' || task.Status === 'ready';
   const isRunning = task.Status === 'running';
   const isPaused = task.Status === 'paused';
   const isComplete = task.Status === 'completed' || task.Status === 'cancelled';
+
+  // Handler for when planning is accepted or skipped
+  const handlePlanningComplete = useCallback(async () => {
+    if (!id) return;
+    try {
+      const taskData = await api.get<Task>(`/tasks/${id}`);
+      setTask(taskData);
+    } catch (err) {
+      console.error('Failed to refresh task after planning:', err);
+    }
+  }, [id]);
 
   return (
     <div className="min-h-screen bg-gray-900 text-white">
@@ -1257,6 +1272,17 @@ function TaskDetailPage() {
             )}
           </div>
         </div>
+
+        {/* Planning Panel (shown when task is in planning phase) */}
+        {isPlanning && (
+          <div className="mb-4">
+            <PlanningPanel
+              taskId={task.ID}
+              onPlanAccepted={handlePlanningComplete}
+              onPlanSkipped={handlePlanningComplete}
+            />
+          </div>
+        )}
 
         {/* Action Buttons */}
         <div className="bg-gray-800 rounded-lg p-4 mb-4">

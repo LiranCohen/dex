@@ -93,4 +93,21 @@ export async function fetchTaskActivity(taskId: string): Promise<import('./types
   return api.get(`/tasks/${taskId}/activity`);
 }
 
+// Planning API functions
+export async function fetchPlanning(taskId: string): Promise<import('./types').PlanningResponse> {
+  return api.get(`/tasks/${taskId}/planning`);
+}
+
+export async function sendPlanningResponse(taskId: string, response: string): Promise<import('./types').PlanningResponse> {
+  return api.post(`/tasks/${taskId}/planning/respond`, { response });
+}
+
+export async function acceptPlan(taskId: string): Promise<{ message: string; task_id: string; refined_prompt: string }> {
+  return api.post(`/tasks/${taskId}/planning/accept`);
+}
+
+export async function skipPlanning(taskId: string): Promise<{ message: string; task_id: string }> {
+  return api.post(`/tasks/${taskId}/planning/skip`);
+}
+
 export type { ApiError };

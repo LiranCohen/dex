@@ -19,6 +19,7 @@ import (
 	"github.com/lirancohen/dex/internal/db"
 	"github.com/lirancohen/dex/internal/git"
 	"github.com/lirancohen/dex/internal/orchestrator"
+	"github.com/lirancohen/dex/internal/planning"
 	"github.com/lirancohen/dex/internal/session"
 	"github.com/lirancohen/dex/internal/task"
 	"github.com/lirancohen/dex/internal/toolbelt"
@@ -38,6 +39,7 @@ type Server struct {
 	taskService    *task.Service
 	gitService     *git.Service
 	sessionManager *session.Manager
+	planner        *planning.Planner
 	hub            *websocket.Hub
 	addr           string
 	certFile       string
@@ -127,6 +129,11 @@ func NewServer(database *db.DB, cfg Config) *Server {
 
 	s.sessionManager = sessionMgr
 
+	// Create planner for task planning phase
+	if cfg.Toolbelt != nil && cfg.Toolbelt.Anthropic != nil {
+		s.planner = planning.NewPlanner(database, cfg.Toolbelt.Anthropic, hub)
+	}
+
 	// Register routes
 	s.registerRoutes()
 
@@ -197,6 +204,12 @@ func (s *Server) registerRoutes() {
 	v1.POST("/tasks/:id/resume", s.handleResumeTask)
 	v1.POST("/tasks/:id/cancel", s.handleCancelTask)
 	v1.GET("/tasks/:id/logs", s.handleTaskLogs)
+
+	// Planning endpoints
+	v1.GET("/tasks/:id/planning", s.handleGetPlanning)
+	v1.POST("/tasks/:id/planning/respond", s.handlePlanningRespond)
+	v1.POST("/tasks/:id/planning/accept", s.handlePlanningAccept)
+	v1.POST("/tasks/:id/planning/skip", s.handlePlanningSkip)
 
 	// Session management endpoints
 	v1.GET("/sessions", s.handleListSessions)
@@ -465,6 +478,9 @@ func (s *Server) handleCreateTask(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
 	}
 
+	// Check for skip_planning query parameter
+	skipPlanning := c.QueryParam("skip_planning") == "true"
+
 	// Get or create default project for single-user mode
 	projectID := ""
 	if req.ProjectID != nil {
@@ -483,6 +499,42 @@ func (s *Server) handleCreateTask(c echo.Context) error {
 	t, err := s.taskService.Create(projectID, req.Title, req.Type, req.Priority)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+
+	// Update description if provided
+	if req.Description != "" {
+		updates := task.TaskUpdates{Description: &req.Description}
+		t, err = s.taskService.Update(t.ID, updates)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, "failed to set description")
+		}
+	}
+
+	// Start planning phase if planner is available and skip_planning is not set
+	if s.planner != nil && !skipPlanning {
+		// Get the prompt for planning (use description if available, otherwise title)
+		planningPrompt := req.Description
+		if planningPrompt == "" {
+			planningPrompt = req.Title
+		}
+
+		// Transition task to planning status
+		if err := s.taskService.UpdateStatus(t.ID, db.TaskStatusPlanning); err != nil {
+			// Log warning but don't fail task creation
+			fmt.Printf("warning: failed to transition task to planning: %v\n", err)
+		} else {
+			// Start planning session
+			_, err := s.planner.StartPlanning(c.Request().Context(), t.ID, planningPrompt)
+			if err != nil {
+				// Log warning but don't fail task creation
+				fmt.Printf("warning: failed to start planning: %v\n", err)
+				// Transition back to pending if planning fails
+				s.taskService.UpdateStatus(t.ID, db.TaskStatusPending)
+			} else {
+				// Update task status in response
+				t.Status = db.TaskStatusPlanning
+			}
+		}
 	}
 
 	return c.JSON(http.StatusCreated, toTaskResponse(t))
@@ -1174,6 +1226,11 @@ func (s *Server) handlePauseTask(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 
+	// Update task status in database so frontend sees the change
+	if err := s.taskService.UpdateStatus(taskID, "paused"); err != nil {
+		fmt.Printf("warning: failed to update task status to paused: %v\n", err)
+	}
+
 	// Broadcast WebSocket event
 	s.hub.Broadcast(websocket.Message{
 		Type: "task.paused",
@@ -1207,6 +1264,11 @@ func (s *Server) handleResumeTask(c echo.Context) error {
 	// Resume by starting the session again
 	if err := s.sessionManager.Start(c.Request().Context(), sess.ID); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+
+	// Update task status in database so frontend sees the change
+	if err := s.taskService.UpdateStatus(taskID, "running"); err != nil {
+		fmt.Printf("warning: failed to update task status to running: %v\n", err)
 	}
 
 	// Broadcast WebSocket event
@@ -1526,6 +1588,12 @@ func (s *Server) ReloadToolbelt() error {
 	if tb.Anthropic != nil {
 		fmt.Println("ReloadToolbelt: Anthropic client initialized, updating session manager")
 		s.sessionManager.SetAnthropicClient(tb.Anthropic)
+
+		// Update planner with new Anthropic client
+		if s.planner == nil {
+			s.planner = planning.NewPlanner(s.db, tb.Anthropic, s.hub)
+			fmt.Println("ReloadToolbelt: Planner created")
+		}
 	}
 	if tb.GitHub != nil {
 		fmt.Println("ReloadToolbelt: GitHub client initialized, updating session manager")
@@ -1543,4 +1611,185 @@ func (s *Server) ReloadToolbelt() error {
 	fmt.Printf("ReloadToolbelt: %d/%d services configured\n", configured, len(status))
 
 	return nil
+}
+
+// handleGetPlanning returns the planning session and messages for a task
+func (s *Server) handleGetPlanning(c echo.Context) error {
+	taskID := c.Param("id")
+
+	if s.planner == nil {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "planning not available")
+	}
+
+	session, messages, err := s.planner.GetSessionByTask(taskID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	if session == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "no planning session for task")
+	}
+
+	// Convert messages to response format
+	msgResponses := make([]map[string]any, len(messages))
+	for i, msg := range messages {
+		msgResponses[i] = map[string]any{
+			"id":         msg.ID,
+			"role":       msg.Role,
+			"content":    msg.Content,
+			"created_at": msg.CreatedAt.Format(time.RFC3339),
+		}
+	}
+
+	return c.JSON(http.StatusOK, map[string]any{
+		"session": map[string]any{
+			"id":              session.ID,
+			"task_id":         session.TaskID,
+			"status":          session.Status,
+			"original_prompt": session.OriginalPrompt,
+			"refined_prompt":  session.RefinedPrompt.String,
+			"created_at":      session.CreatedAt.Format(time.RFC3339),
+		},
+		"messages": msgResponses,
+	})
+}
+
+// handlePlanningRespond handles a user response during planning
+func (s *Server) handlePlanningRespond(c echo.Context) error {
+	taskID := c.Param("id")
+
+	if s.planner == nil {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "planning not available")
+	}
+
+	var req struct {
+		Response string `json:"response"`
+	}
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
+	}
+
+	if req.Response == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "response is required")
+	}
+
+	// Get the planning session for this task
+	session, _, err := s.planner.GetSessionByTask(taskID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	if session == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "no planning session for task")
+	}
+
+	// Process the response
+	updatedSession, err := s.planner.ProcessResponse(c.Request().Context(), session.ID, req.Response)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+
+	// Get updated messages
+	_, messages, err := s.planner.GetSession(session.ID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+
+	// Convert messages to response format
+	msgResponses := make([]map[string]any, len(messages))
+	for i, msg := range messages {
+		msgResponses[i] = map[string]any{
+			"id":         msg.ID,
+			"role":       msg.Role,
+			"content":    msg.Content,
+			"created_at": msg.CreatedAt.Format(time.RFC3339),
+		}
+	}
+
+	return c.JSON(http.StatusOK, map[string]any{
+		"session": map[string]any{
+			"id":              updatedSession.ID,
+			"task_id":         updatedSession.TaskID,
+			"status":          updatedSession.Status,
+			"original_prompt": updatedSession.OriginalPrompt,
+			"refined_prompt":  updatedSession.RefinedPrompt.String,
+			"created_at":      updatedSession.CreatedAt.Format(time.RFC3339),
+		},
+		"messages": msgResponses,
+	})
+}
+
+// handlePlanningAccept accepts the current plan and transitions task to ready
+func (s *Server) handlePlanningAccept(c echo.Context) error {
+	taskID := c.Param("id")
+
+	if s.planner == nil {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "planning not available")
+	}
+
+	// Get the planning session for this task
+	session, _, err := s.planner.GetSessionByTask(taskID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	if session == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "no planning session for task")
+	}
+
+	// Accept the plan
+	refinedPrompt, err := s.planner.AcceptPlan(c.Request().Context(), session.ID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+
+	// Transition task to ready
+	if err := s.taskService.UpdateStatus(taskID, db.TaskStatusReady); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+
+	// Broadcast task updated event
+	s.hub.Broadcast(websocket.Message{
+		Type: "task.updated",
+		Payload: map[string]any{
+			"task_id": taskID,
+			"status":  db.TaskStatusReady,
+		},
+	})
+
+	return c.JSON(http.StatusOK, map[string]any{
+		"message":        "plan accepted",
+		"task_id":        taskID,
+		"refined_prompt": refinedPrompt,
+	})
+}
+
+// handlePlanningSkip skips the planning phase and transitions task to ready
+func (s *Server) handlePlanningSkip(c echo.Context) error {
+	taskID := c.Param("id")
+
+	if s.planner == nil {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "planning not available")
+	}
+
+	// Skip the planning
+	if err := s.planner.SkipPlanning(c.Request().Context(), taskID); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+
+	// Transition task to ready
+	if err := s.taskService.UpdateStatus(taskID, db.TaskStatusReady); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+
+	// Broadcast task updated event
+	s.hub.Broadcast(websocket.Message{
+		Type: "task.updated",
+		Payload: map[string]any{
+			"task_id": taskID,
+			"status":  db.TaskStatusReady,
+		},
+	})
+
+	return c.JSON(http.StatusOK, map[string]any{
+		"message": "planning skipped",
+		"task_id": taskID,
+	})
 }

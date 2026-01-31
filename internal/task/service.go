@@ -134,7 +134,7 @@ func IsValidTaskType(t string) bool {
 // IsValidStatus checks if the status is valid
 func IsValidStatus(s string) bool {
 	switch s {
-	case db.TaskStatusPending, db.TaskStatusBlocked, db.TaskStatusReady,
+	case db.TaskStatusPending, db.TaskStatusPlanning, db.TaskStatusBlocked, db.TaskStatusReady,
 		db.TaskStatusRunning, db.TaskStatusPaused, db.TaskStatusQuarantined,
 		db.TaskStatusCompleted, db.TaskStatusCancelled:
 		return true

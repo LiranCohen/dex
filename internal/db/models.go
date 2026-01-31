@@ -130,9 +130,30 @@ type Approval struct {
 	ResolvedAt  sql.NullTime
 }
 
+// PlanningSession represents a planning phase for a task
+type PlanningSession struct {
+	ID             string
+	TaskID         string
+	Status         string // processing, awaiting_response, completed, skipped
+	RefinedPrompt  sql.NullString
+	OriginalPrompt string
+	CreatedAt      time.Time
+	CompletedAt    sql.NullTime
+}
+
+// PlanningMessage represents a message in a planning session conversation
+type PlanningMessage struct {
+	ID                string
+	PlanningSessionID string
+	Role              string // user, assistant
+	Content           string
+	CreatedAt         time.Time
+}
+
 // Task status constants
 const (
 	TaskStatusPending     = "pending"
+	TaskStatusPlanning    = "planning"
 	TaskStatusBlocked     = "blocked"
 	TaskStatusReady       = "ready"
 	TaskStatusRunning     = "running"
@@ -174,6 +195,14 @@ const (
 	ApprovalStatusPending  = "pending"
 	ApprovalStatusApproved = "approved"
 	ApprovalStatusRejected = "rejected"
+)
+
+// Planning session status constants
+const (
+	PlanningStatusProcessing       = "processing"
+	PlanningStatusAwaitingResponse = "awaiting_response"
+	PlanningStatusCompleted        = "completed"
+	PlanningStatusSkipped          = "skipped"
 )
 
 // GetDescription returns the description string, or empty if null
