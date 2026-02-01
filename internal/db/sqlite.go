@@ -58,6 +58,9 @@ func (db *DB) Migrate() error {
 		migrationPlanningMessages,
 		migrationTaskChecklists,
 		migrationChecklistItems,
+		migrationQuests,
+		migrationQuestMessages,
+		migrationQuestTemplates,
 	}
 
 	for i, migration := range migrations {
@@ -71,6 +74,7 @@ func (db *DB) Migrate() error {
 	optionalMigrations := []string{
 		"ALTER TABLE webauthn_credentials ADD COLUMN backup_eligible INTEGER NOT NULL DEFAULT 0",
 		"ALTER TABLE webauthn_credentials ADD COLUMN backup_state INTEGER NOT NULL DEFAULT 0",
+		"ALTER TABLE tasks ADD COLUMN quest_id TEXT REFERENCES quests(id)",
 	}
 	for _, migration := range optionalMigrations {
 		db.Exec(migration) // Ignore errors - column may already exist
@@ -301,4 +305,48 @@ CREATE TABLE IF NOT EXISTS checklist_items (
 CREATE INDEX IF NOT EXISTS idx_checklist_items_checklist ON checklist_items(checklist_id);
 CREATE INDEX IF NOT EXISTS idx_checklist_items_parent ON checklist_items(parent_id);
 CREATE INDEX IF NOT EXISTS idx_checklist_items_status ON checklist_items(status);
+`
+
+const migrationQuests = `
+CREATE TABLE IF NOT EXISTS quests (
+	id TEXT PRIMARY KEY,
+	project_id TEXT NOT NULL,
+	title TEXT,
+	status TEXT NOT NULL DEFAULT 'active',
+	model TEXT DEFAULT 'sonnet',
+	auto_start_default INTEGER DEFAULT 1,
+	created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+	completed_at DATETIME,
+	FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_quests_project ON quests(project_id);
+CREATE INDEX IF NOT EXISTS idx_quests_status ON quests(status);
+`
+
+const migrationQuestMessages = `
+CREATE TABLE IF NOT EXISTS quest_messages (
+	id TEXT PRIMARY KEY,
+	quest_id TEXT NOT NULL,
+	role TEXT NOT NULL,
+	content TEXT NOT NULL,
+	created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+	FOREIGN KEY (quest_id) REFERENCES quests(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_quest_messages_quest ON quest_messages(quest_id);
+`
+
+const migrationQuestTemplates = `
+CREATE TABLE IF NOT EXISTS quest_templates (
+	id TEXT PRIMARY KEY,
+	project_id TEXT NOT NULL,
+	name TEXT NOT NULL,
+	description TEXT,
+	initial_prompt TEXT NOT NULL,
+	created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+	FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_quest_templates_project ON quest_templates(project_id);
 `

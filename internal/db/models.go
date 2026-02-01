@@ -55,6 +55,7 @@ type ProjectServices struct {
 type Task struct {
 	ID                string
 	ProjectID         string
+	QuestID           sql.NullString // Optional: the Quest that spawned this task
 	GitHubIssueNumber sql.NullInt64
 	Title             string
 	Description       sql.NullString
@@ -272,6 +273,57 @@ const (
 // Task status for completed with issues
 const TaskStatusCompletedWithIssues = "completed_with_issues"
 
+// Quest status constants
+const (
+	QuestStatusActive    = "active"
+	QuestStatusCompleted = "completed"
+)
+
+// Quest model constants
+const (
+	QuestModelSonnet = "sonnet"
+	QuestModelOpus   = "opus"
+)
+
+// Quest represents a conversation with Dex that spawns tasks
+type Quest struct {
+	ID               string
+	ProjectID        string
+	Title            sql.NullString
+	Status           string
+	Model            string
+	AutoStartDefault bool
+	CreatedAt        time.Time
+	CompletedAt      sql.NullTime
+}
+
+// GetTitle returns the title string, or empty if null
+func (q *Quest) GetTitle() string {
+	if q.Title.Valid {
+		return q.Title.String
+	}
+	return ""
+}
+
+// QuestMessage represents a message in a Quest conversation
+type QuestMessage struct {
+	ID        string
+	QuestID   string
+	Role      string // user, assistant
+	Content   string
+	CreatedAt time.Time
+}
+
+// QuestTemplate represents a reusable quest template
+type QuestTemplate struct {
+	ID            string
+	ProjectID     string
+	Name          string
+	Description   sql.NullString
+	InitialPrompt string
+	CreatedAt     time.Time
+}
+
 // GetDescription returns the description string, or empty if null
 func (t *Task) GetDescription() string {
 	if t.Description.Valid {
@@ -308,6 +360,14 @@ func (t *Task) GetHat() string {
 func (t *Task) GetParentID() string {
 	if t.ParentID.Valid {
 		return t.ParentID.String
+	}
+	return ""
+}
+
+// GetQuestID returns the quest ID string, or empty if null
+func (t *Task) GetQuestID() string {
+	if t.QuestID.Valid {
+		return t.QuestID.String
 	}
 	return ""
 }

@@ -20,6 +20,7 @@ import (
 	"github.com/lirancohen/dex/internal/git"
 	"github.com/lirancohen/dex/internal/orchestrator"
 	"github.com/lirancohen/dex/internal/planning"
+	"github.com/lirancohen/dex/internal/quest"
 	"github.com/lirancohen/dex/internal/session"
 	"github.com/lirancohen/dex/internal/task"
 	"github.com/lirancohen/dex/internal/toolbelt"
@@ -40,6 +41,7 @@ type Server struct {
 	gitService     *git.Service
 	sessionManager *session.Manager
 	planner        *planning.Planner
+	questHandler   *quest.Handler
 	hub            *websocket.Hub
 	addr           string
 	certFile       string
@@ -132,6 +134,7 @@ func NewServer(database *db.DB, cfg Config) *Server {
 	// Create planner for task planning phase
 	if cfg.Toolbelt != nil && cfg.Toolbelt.Anthropic != nil {
 		s.planner = planning.NewPlanner(database, cfg.Toolbelt.Anthropic, hub)
+		s.questHandler = quest.NewHandler(database, cfg.Toolbelt.Anthropic, hub)
 	}
 
 	// Register routes
@@ -216,6 +219,26 @@ func (s *Server) registerRoutes() {
 	v1.PUT("/tasks/:id/checklist/items/:itemId", s.handleUpdateChecklistItem)
 	v1.POST("/tasks/:id/checklist/accept", s.handleAcceptChecklist)
 	v1.POST("/tasks/:id/remediate", s.handleCreateRemediation)
+
+	// Quest endpoints
+	v1.GET("/projects/:id/quests", s.handleListQuests)
+	v1.POST("/projects/:id/quests", s.handleCreateQuest)
+	v1.GET("/quests/:id", s.handleGetQuest)
+	v1.DELETE("/quests/:id", s.handleDeleteQuest)
+	v1.POST("/quests/:id/messages", s.handleSendQuestMessage)
+	v1.POST("/quests/:id/complete", s.handleCompleteQuest)
+	v1.POST("/quests/:id/reopen", s.handleReopenQuest)
+	v1.PUT("/quests/:id/model", s.handleUpdateQuestModel)
+	v1.GET("/quests/:id/tasks", s.handleGetQuestTasks)
+	v1.POST("/quests/:id/objectives", s.handleCreateObjective)
+	v1.GET("/quests/:id/preflight", s.handleGetPreflightCheck)
+
+	// Quest template endpoints
+	v1.GET("/projects/:id/quest-templates", s.handleListQuestTemplates)
+	v1.POST("/projects/:id/quest-templates", s.handleCreateQuestTemplate)
+	v1.GET("/quest-templates/:id", s.handleGetQuestTemplate)
+	v1.PUT("/quest-templates/:id", s.handleUpdateQuestTemplate)
+	v1.DELETE("/quest-templates/:id", s.handleDeleteQuestTemplate)
 
 	// Session management endpoints
 	v1.GET("/sessions", s.handleListSessions)
@@ -950,6 +973,7 @@ func (s *Server) handleDeleteProject(c echo.Context) error {
 type TaskResponse struct {
 	ID                string   `json:"ID"`
 	ProjectID         string   `json:"ProjectID"`
+	QuestID           *string  `json:"QuestID"`
 	GitHubIssueNumber *int64   `json:"GitHubIssueNumber"`
 	Title             string   `json:"Title"`
 	Description       *string  `json:"Description"`
@@ -989,6 +1013,9 @@ func toTaskResponse(t *db.Task) TaskResponse {
 		TimeUsedMin:   t.TimeUsedMin,
 		DollarUsed:    t.DollarUsed,
 		CreatedAt:     t.CreatedAt.Format(time.RFC3339),
+	}
+	if t.QuestID.Valid {
+		resp.QuestID = &t.QuestID.String
 	}
 	if t.GitHubIssueNumber.Valid {
 		resp.GitHubIssueNumber = &t.GitHubIssueNumber.Int64
@@ -2112,5 +2139,619 @@ func (s *Server) handleCreateRemediation(c echo.Context) error {
 		"task":             toTaskResponse(newTask),
 		"original_task_id": taskID,
 		"issues_count":     len(issues),
+	})
+}
+
+// Quest response types
+type questResponse struct {
+	ID               string     `json:"id"`
+	ProjectID        string     `json:"project_id"`
+	Title            string     `json:"title,omitempty"`
+	Status           string     `json:"status"`
+	Model            string     `json:"model"`
+	AutoStartDefault bool       `json:"auto_start_default"`
+	CreatedAt        time.Time  `json:"created_at"`
+	CompletedAt      *time.Time `json:"completed_at,omitempty"`
+	Summary          *questSummaryResponse `json:"summary,omitempty"`
+}
+
+type questSummaryResponse struct {
+	TotalTasks     int `json:"total_tasks"`
+	CompletedTasks int `json:"completed_tasks"`
+	RunningTasks   int `json:"running_tasks"`
+	FailedTasks    int `json:"failed_tasks"`
+	BlockedTasks   int `json:"blocked_tasks"`
+	PendingTasks   int `json:"pending_tasks"`
+}
+
+type questMessageResponse struct {
+	ID        string    `json:"id"`
+	QuestID   string    `json:"quest_id"`
+	Role      string    `json:"role"`
+	Content   string    `json:"content"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+func toQuestResponse(q *db.Quest, summary *db.QuestSummary) questResponse {
+	resp := questResponse{
+		ID:               q.ID,
+		ProjectID:        q.ProjectID,
+		Title:            q.GetTitle(),
+		Status:           q.Status,
+		Model:            q.Model,
+		AutoStartDefault: q.AutoStartDefault,
+		CreatedAt:        q.CreatedAt,
+	}
+	if q.CompletedAt.Valid {
+		resp.CompletedAt = &q.CompletedAt.Time
+	}
+	if summary != nil {
+		resp.Summary = &questSummaryResponse{
+			TotalTasks:     summary.TotalTasks,
+			CompletedTasks: summary.CompletedTasks,
+			RunningTasks:   summary.RunningTasks,
+			FailedTasks:    summary.FailedTasks,
+			BlockedTasks:   summary.BlockedTasks,
+			PendingTasks:   summary.PendingTasks,
+		}
+	}
+	return resp
+}
+
+func toQuestMessageResponse(m *db.QuestMessage) questMessageResponse {
+	return questMessageResponse{
+		ID:        m.ID,
+		QuestID:   m.QuestID,
+		Role:      m.Role,
+		Content:   m.Content,
+		CreatedAt: m.CreatedAt,
+	}
+}
+
+// handleListQuests returns all quests for a project
+func (s *Server) handleListQuests(c echo.Context) error {
+	projectID := c.Param("id")
+
+	// Verify project exists
+	project, err := s.db.GetProjectByID(projectID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	if project == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "project not found")
+	}
+
+	quests, err := s.db.GetQuestsByProjectID(projectID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+
+	// Build response with summaries
+	response := make([]questResponse, 0, len(quests))
+	for _, q := range quests {
+		summary, _ := s.db.GetQuestSummary(q.ID)
+		response = append(response, toQuestResponse(q, summary))
+	}
+
+	return c.JSON(http.StatusOK, response)
+}
+
+// handleCreateQuest creates a new quest for a project
+func (s *Server) handleCreateQuest(c echo.Context) error {
+	projectID := c.Param("id")
+
+	// Verify project exists
+	project, err := s.db.GetProjectByID(projectID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	if project == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "project not found")
+	}
+
+	var req struct {
+		Model string `json:"model"`
+	}
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+
+	// Default to sonnet if not specified
+	model := req.Model
+	if model == "" {
+		model = db.QuestModelSonnet
+	}
+	if model != db.QuestModelSonnet && model != db.QuestModelOpus {
+		return echo.NewHTTPError(http.StatusBadRequest, "model must be 'sonnet' or 'opus'")
+	}
+
+	quest, err := s.db.CreateQuest(projectID, model)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+
+	// Broadcast quest created event
+	s.hub.Broadcast(websocket.Message{
+		Type: "quest.created",
+		Payload: map[string]any{
+			"quest_id":   quest.ID,
+			"project_id": projectID,
+		},
+	})
+
+	return c.JSON(http.StatusCreated, toQuestResponse(quest, nil))
+}
+
+// handleGetQuest returns a quest by ID with its messages
+func (s *Server) handleGetQuest(c echo.Context) error {
+	questID := c.Param("id")
+
+	quest, err := s.db.GetQuestByID(questID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	if quest == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "quest not found")
+	}
+
+	messages, err := s.db.GetQuestMessages(questID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+
+	summary, _ := s.db.GetQuestSummary(questID)
+
+	// Build messages response
+	msgResponses := make([]questMessageResponse, 0, len(messages))
+	for _, m := range messages {
+		msgResponses = append(msgResponses, toQuestMessageResponse(m))
+	}
+
+	return c.JSON(http.StatusOK, map[string]any{
+		"quest":    toQuestResponse(quest, summary),
+		"messages": msgResponses,
+	})
+}
+
+// handleDeleteQuest deletes a quest and all its messages
+func (s *Server) handleDeleteQuest(c echo.Context) error {
+	questID := c.Param("id")
+
+	quest, err := s.db.GetQuestByID(questID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	if quest == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "quest not found")
+	}
+
+	// Check if quest has any tasks
+	tasks, err := s.db.GetTasksByQuestID(questID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	if len(tasks) > 0 {
+		return echo.NewHTTPError(http.StatusBadRequest, "cannot delete quest with existing tasks")
+	}
+
+	if err := s.db.DeleteQuest(questID); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+
+	// Broadcast quest deleted event
+	s.hub.Broadcast(websocket.Message{
+		Type: "quest.deleted",
+		Payload: map[string]any{
+			"quest_id":   questID,
+			"project_id": quest.ProjectID,
+		},
+	})
+
+	return c.JSON(http.StatusOK, map[string]string{
+		"message": "quest deleted",
+	})
+}
+
+// handleSendQuestMessage adds a user message to a quest and gets Dex's response
+func (s *Server) handleSendQuestMessage(c echo.Context) error {
+	questID := c.Param("id")
+
+	quest, err := s.db.GetQuestByID(questID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	if quest == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "quest not found")
+	}
+
+	if quest.Status != db.QuestStatusActive {
+		return echo.NewHTTPError(http.StatusBadRequest, "quest is not active")
+	}
+
+	var req struct {
+		Content string `json:"content"`
+	}
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	if strings.TrimSpace(req.Content) == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "content is required")
+	}
+
+	// Create user message
+	userMsg, err := s.db.CreateQuestMessage(questID, "user", req.Content)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+
+	// Broadcast user message event
+	s.hub.Broadcast(websocket.Message{
+		Type: "quest.message",
+		Payload: map[string]any{
+			"quest_id": questID,
+			"message":  toQuestMessageResponse(userMsg),
+		},
+	})
+
+	// Call Dex to generate response
+	if s.questHandler == nil {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "quest handler not configured (missing Anthropic API key)")
+	}
+
+	assistantMsg, err := s.questHandler.ProcessMessage(c.Request().Context(), questID, req.Content)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("failed to process message: %v", err))
+	}
+
+	return c.JSON(http.StatusCreated, map[string]any{
+		"user_message":      toQuestMessageResponse(userMsg),
+		"assistant_message": toQuestMessageResponse(assistantMsg),
+	})
+}
+
+// handleCompleteQuest marks a quest as completed
+func (s *Server) handleCompleteQuest(c echo.Context) error {
+	questID := c.Param("id")
+
+	quest, err := s.db.GetQuestByID(questID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	if quest == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "quest not found")
+	}
+
+	if quest.Status == db.QuestStatusCompleted {
+		return echo.NewHTTPError(http.StatusBadRequest, "quest is already completed")
+	}
+
+	if err := s.db.CompleteQuest(questID); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+
+	// Get updated quest
+	quest, _ = s.db.GetQuestByID(questID)
+	summary, _ := s.db.GetQuestSummary(questID)
+
+	// Broadcast quest completed event
+	s.hub.Broadcast(websocket.Message{
+		Type: "quest.completed",
+		Payload: map[string]any{
+			"quest_id":   questID,
+			"project_id": quest.ProjectID,
+		},
+	})
+
+	return c.JSON(http.StatusOK, toQuestResponse(quest, summary))
+}
+
+// handleReopenQuest reopens a completed quest
+func (s *Server) handleReopenQuest(c echo.Context) error {
+	questID := c.Param("id")
+
+	quest, err := s.db.GetQuestByID(questID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	if quest == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "quest not found")
+	}
+
+	if quest.Status != db.QuestStatusCompleted {
+		return echo.NewHTTPError(http.StatusBadRequest, "quest is not completed")
+	}
+
+	if err := s.db.ReopenQuest(questID); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+
+	// Get updated quest
+	quest, _ = s.db.GetQuestByID(questID)
+	summary, _ := s.db.GetQuestSummary(questID)
+
+	// Broadcast quest reopened event
+	s.hub.Broadcast(websocket.Message{
+		Type: "quest.reopened",
+		Payload: map[string]any{
+			"quest_id":   questID,
+			"project_id": quest.ProjectID,
+		},
+	})
+
+	return c.JSON(http.StatusOK, toQuestResponse(quest, summary))
+}
+
+// handleUpdateQuestModel updates the model for a quest (sonnet or opus)
+func (s *Server) handleUpdateQuestModel(c echo.Context) error {
+	questID := c.Param("id")
+
+	quest, err := s.db.GetQuestByID(questID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	if quest == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "quest not found")
+	}
+
+	var req struct {
+		Model string `json:"model"`
+	}
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+
+	if req.Model != db.QuestModelSonnet && req.Model != db.QuestModelOpus {
+		return echo.NewHTTPError(http.StatusBadRequest, "model must be 'sonnet' or 'opus'")
+	}
+
+	if err := s.db.UpdateQuestModel(questID, req.Model); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+
+	// Get updated quest
+	quest, _ = s.db.GetQuestByID(questID)
+	summary, _ := s.db.GetQuestSummary(questID)
+
+	// Broadcast quest updated event
+	s.hub.Broadcast(websocket.Message{
+		Type: "quest.updated",
+		Payload: map[string]any{
+			"quest_id": questID,
+			"model":    req.Model,
+		},
+	})
+
+	return c.JSON(http.StatusOK, toQuestResponse(quest, summary))
+}
+
+// handleGetQuestTasks returns all tasks spawned by a quest
+func (s *Server) handleGetQuestTasks(c echo.Context) error {
+	questID := c.Param("id")
+
+	quest, err := s.db.GetQuestByID(questID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	if quest == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "quest not found")
+	}
+
+	tasks, err := s.db.GetTasksByQuestID(questID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+
+	// Convert to response format
+	response := make([]TaskResponse, 0, len(tasks))
+	for _, t := range tasks {
+		response = append(response, toTaskResponse(t))
+	}
+
+	return c.JSON(http.StatusOK, response)
+}
+
+// handleCreateObjective creates a task from an accepted objective draft
+func (s *Server) handleCreateObjective(c echo.Context) error {
+	questID := c.Param("id")
+
+	questObj, err := s.db.GetQuestByID(questID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	if questObj == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "quest not found")
+	}
+
+	if s.questHandler == nil {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "quest handler not configured")
+	}
+
+	var req struct {
+		DraftID          string   `json:"draft_id"`
+		Title            string   `json:"title"`
+		Description      string   `json:"description"`
+		Hat              string   `json:"hat"`
+		MustHave         []string `json:"must_have"`
+		Optional         []string `json:"optional"`
+		SelectedOptional []int    `json:"selected_optional"`
+		AutoStart        bool     `json:"auto_start"`
+	}
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+
+	if req.Title == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "title is required")
+	}
+
+	// Create draft from request
+	draft := quest.ObjectiveDraft{
+		DraftID:     req.DraftID,
+		Title:       req.Title,
+		Description: req.Description,
+		Hat:         req.Hat,
+		Checklist: quest.Checklist{
+			MustHave: req.MustHave,
+			Optional: req.Optional,
+		},
+		AutoStart: req.AutoStart,
+	}
+
+	// Create the objective (task) from the draft
+	task, err := s.questHandler.CreateObjectiveFromDraft(c.Request().Context(), questID, draft, req.SelectedOptional)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+
+	return c.JSON(http.StatusCreated, map[string]any{
+		"message": "objective created",
+		"task":    toTaskResponse(task),
+	})
+}
+
+// handleGetPreflightCheck returns pre-flight check results for a quest's project
+func (s *Server) handleGetPreflightCheck(c echo.Context) error {
+	questID := c.Param("id")
+
+	if s.questHandler == nil {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "quest handler not configured")
+	}
+
+	check, err := s.questHandler.GetPreflightCheck(questID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+
+	return c.JSON(http.StatusOK, check)
+}
+
+// handleListQuestTemplates returns all quest templates for a project
+func (s *Server) handleListQuestTemplates(c echo.Context) error {
+	projectID := c.Param("id")
+
+	templates, err := s.db.GetQuestTemplatesByProjectID(projectID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+
+	result := make([]map[string]any, len(templates))
+	for i, t := range templates {
+		result[i] = map[string]any{
+			"id":             t.ID,
+			"project_id":     t.ProjectID,
+			"name":           t.Name,
+			"description":    t.Description.String,
+			"initial_prompt": t.InitialPrompt,
+			"created_at":     t.CreatedAt,
+		}
+	}
+
+	return c.JSON(http.StatusOK, result)
+}
+
+// handleCreateQuestTemplate creates a new quest template
+func (s *Server) handleCreateQuestTemplate(c echo.Context) error {
+	projectID := c.Param("id")
+
+	var req struct {
+		Name          string `json:"name"`
+		Description   string `json:"description"`
+		InitialPrompt string `json:"initial_prompt"`
+	}
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+
+	if req.Name == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "name is required")
+	}
+	if req.InitialPrompt == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "initial_prompt is required")
+	}
+
+	template, err := s.db.CreateQuestTemplate(projectID, req.Name, req.Description, req.InitialPrompt)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+
+	return c.JSON(http.StatusCreated, map[string]any{
+		"id":             template.ID,
+		"project_id":     template.ProjectID,
+		"name":           template.Name,
+		"description":    template.Description.String,
+		"initial_prompt": template.InitialPrompt,
+		"created_at":     template.CreatedAt,
+	})
+}
+
+// handleGetQuestTemplate returns a quest template by ID
+func (s *Server) handleGetQuestTemplate(c echo.Context) error {
+	templateID := c.Param("id")
+
+	template, err := s.db.GetQuestTemplateByID(templateID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	if template == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "template not found")
+	}
+
+	return c.JSON(http.StatusOK, map[string]any{
+		"id":             template.ID,
+		"project_id":     template.ProjectID,
+		"name":           template.Name,
+		"description":    template.Description.String,
+		"initial_prompt": template.InitialPrompt,
+		"created_at":     template.CreatedAt,
+	})
+}
+
+// handleUpdateQuestTemplate updates a quest template
+func (s *Server) handleUpdateQuestTemplate(c echo.Context) error {
+	templateID := c.Param("id")
+
+	var req struct {
+		Name          string `json:"name"`
+		Description   string `json:"description"`
+		InitialPrompt string `json:"initial_prompt"`
+	}
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+
+	if req.Name == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "name is required")
+	}
+	if req.InitialPrompt == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "initial_prompt is required")
+	}
+
+	err := s.db.UpdateQuestTemplate(templateID, req.Name, req.Description, req.InitialPrompt)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+
+	template, _ := s.db.GetQuestTemplateByID(templateID)
+	return c.JSON(http.StatusOK, map[string]any{
+		"id":             template.ID,
+		"project_id":     template.ProjectID,
+		"name":           template.Name,
+		"description":    template.Description.String,
+		"initial_prompt": template.InitialPrompt,
+		"created_at":     template.CreatedAt,
+	})
+}
+
+// handleDeleteQuestTemplate deletes a quest template
+func (s *Server) handleDeleteQuestTemplate(c echo.Context) error {
+	templateID := c.Param("id")
+
+	err := s.db.DeleteQuestTemplate(templateID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+
+	return c.JSON(http.StatusOK, map[string]string{
+		"message": "template deleted",
 	})
 }

@@ -130,4 +130,93 @@ export async function createRemediation(
   return api.post(`/tasks/${taskId}/remediate`);
 }
 
+// Quest API functions
+export async function fetchQuests(projectId: string): Promise<import('./types').Quest[]> {
+  return api.get(`/projects/${projectId}/quests`);
+}
+
+export async function createQuest(projectId: string, model?: import('./types').QuestModel): Promise<import('./types').Quest> {
+  return api.post(`/projects/${projectId}/quests`, model ? { model } : undefined);
+}
+
+export async function fetchQuest(questId: string): Promise<import('./types').QuestResponse> {
+  return api.get(`/quests/${questId}`);
+}
+
+export async function deleteQuest(questId: string): Promise<{ message: string }> {
+  return api.delete(`/quests/${questId}`);
+}
+
+export async function sendQuestMessage(questId: string, content: string): Promise<{ message: import('./types').QuestMessage }> {
+  return api.post(`/quests/${questId}/messages`, { content });
+}
+
+export async function completeQuest(questId: string): Promise<import('./types').Quest> {
+  return api.post(`/quests/${questId}/complete`);
+}
+
+export async function reopenQuest(questId: string): Promise<import('./types').Quest> {
+  return api.post(`/quests/${questId}/reopen`);
+}
+
+export async function updateQuestModel(questId: string, model: import('./types').QuestModel): Promise<import('./types').Quest> {
+  return api.put(`/quests/${questId}/model`, { model });
+}
+
+export async function fetchQuestTasks(questId: string): Promise<import('./types').Task[]> {
+  return api.get(`/quests/${questId}/tasks`);
+}
+
+export async function createObjective(
+  questId: string,
+  draft: import('./types').ObjectiveDraft,
+  selectedOptional: number[]
+): Promise<{ message: string; task: import('./types').Task }> {
+  return api.post(`/quests/${questId}/objectives`, {
+    draft_id: draft.draft_id,
+    title: draft.title,
+    description: draft.description,
+    hat: draft.hat,
+    must_have: draft.checklist.must_have,
+    optional: draft.checklist.optional || [],
+    selected_optional: selectedOptional,
+    auto_start: draft.auto_start,
+  });
+}
+
+export async function fetchPreflightCheck(questId: string): Promise<import('./types').PreflightCheck> {
+  return api.get(`/quests/${questId}/preflight`);
+}
+
+// Quest template API functions
+export async function fetchQuestTemplates(projectId: string): Promise<import('./types').QuestTemplate[]> {
+  return api.get(`/projects/${projectId}/quest-templates`);
+}
+
+export async function createQuestTemplate(
+  projectId: string,
+  name: string,
+  description: string,
+  initialPrompt: string
+): Promise<import('./types').QuestTemplate> {
+  return api.post(`/projects/${projectId}/quest-templates`, { name, description, initial_prompt: initialPrompt });
+}
+
+export async function fetchQuestTemplate(templateId: string): Promise<import('./types').QuestTemplate> {
+  return api.get(`/quest-templates/${templateId}`);
+}
+
+export async function updateQuestTemplate(
+  templateId: string,
+  name: string,
+  description: string,
+  initialPrompt: string
+): Promise<import('./types').QuestTemplate> {
+  return api.put(`/quest-templates/${templateId}`, { name, description, initial_prompt: initialPrompt });
+}
+
+export async function deleteQuestTemplate(templateId: string): Promise<{ message: string }> {
+  return api.delete(`/quest-templates/${templateId}`);
+}
+
 export type { ApiError };

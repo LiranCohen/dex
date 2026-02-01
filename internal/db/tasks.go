@@ -34,11 +34,42 @@ func (db *DB) CreateTask(projectID, title string, taskType string, priority int)
 	return task, nil
 }
 
+// CreateTaskForQuest creates a new task spawned by a Quest
+// Tasks from Quests are created with status 'ready' (or 'blocked' if they have dependencies)
+func (db *DB) CreateTaskForQuest(questID, projectID, title, description, hat, taskType string, priority int) (*Task, error) {
+	task := &Task{
+		ID:            NewPrefixedID("task"),
+		ProjectID:     projectID,
+		QuestID:       sql.NullString{String: questID, Valid: true},
+		Title:         title,
+		Description:   sql.NullString{String: description, Valid: description != ""},
+		Hat:           sql.NullString{String: hat, Valid: hat != ""},
+		Type:          taskType,
+		Priority:      priority,
+		AutonomyLevel: 1,
+		Status:        TaskStatusReady, // Tasks from Quests start as ready
+		BaseBranch:    "main",
+		CreatedAt:     time.Now(),
+	}
+
+	_, err := db.Exec(
+		`INSERT INTO tasks (id, project_id, quest_id, title, description, hat, type, priority, autonomy_level, status, base_branch, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		task.ID, task.ProjectID, task.QuestID, task.Title, task.Description, task.Hat,
+		task.Type, task.Priority, task.AutonomyLevel, task.Status, task.BaseBranch, task.CreatedAt,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create task for quest: %w", err)
+	}
+
+	return task, nil
+}
+
 // GetTaskByID retrieves a task by its ID
 func (db *DB) GetTaskByID(id string) (*Task, error) {
 	task := &Task{}
 	err := db.QueryRow(
-		`SELECT id, project_id, github_issue_number, title, description, parent_id,
+		`SELECT id, project_id, quest_id, github_issue_number, title, description, parent_id,
 		        type, hat, priority, autonomy_level, status, base_branch,
 		        worktree_path, branch_name, pr_number,
 		        token_budget, token_used, time_budget_min, time_used_min,
@@ -46,7 +77,7 @@ func (db *DB) GetTaskByID(id string) (*Task, error) {
 		 FROM tasks WHERE id = ?`,
 		id,
 	).Scan(
-		&task.ID, &task.ProjectID, &task.GitHubIssueNumber, &task.Title, &task.Description, &task.ParentID,
+		&task.ID, &task.ProjectID, &task.QuestID, &task.GitHubIssueNumber, &task.Title, &task.Description, &task.ParentID,
 		&task.Type, &task.Hat, &task.Priority, &task.AutonomyLevel, &task.Status, &task.BaseBranch,
 		&task.WorktreePath, &task.BranchName, &task.PRNumber,
 		&task.TokenBudget, &task.TokenUsed, &task.TimeBudgetMin, &task.TimeUsedMin,
@@ -85,7 +116,7 @@ func (db *DB) ListAllTasks() ([]*Task, error) {
 
 // listTasks is a helper for listing tasks with a WHERE clause
 func (db *DB) listTasks(whereClause string, args ...any) ([]*Task, error) {
-	query := `SELECT id, project_id, github_issue_number, title, description, parent_id,
+	query := `SELECT id, project_id, quest_id, github_issue_number, title, description, parent_id,
 	                 type, hat, priority, autonomy_level, status, base_branch,
 	                 worktree_path, branch_name, pr_number,
 	                 token_budget, token_used, time_budget_min, time_used_min,
@@ -102,7 +133,7 @@ func (db *DB) listTasks(whereClause string, args ...any) ([]*Task, error) {
 	for rows.Next() {
 		task := &Task{}
 		err := rows.Scan(
-			&task.ID, &task.ProjectID, &task.GitHubIssueNumber, &task.Title, &task.Description, &task.ParentID,
+			&task.ID, &task.ProjectID, &task.QuestID, &task.GitHubIssueNumber, &task.Title, &task.Description, &task.ParentID,
 			&task.Type, &task.Hat, &task.Priority, &task.AutonomyLevel, &task.Status, &task.BaseBranch,
 			&task.WorktreePath, &task.BranchName, &task.PRNumber,
 			&task.TokenBudget, &task.TokenUsed, &task.TimeBudgetMin, &task.TimeUsedMin,

@@ -3,6 +3,7 @@
 export interface Task {
   ID: string;
   ProjectID: string;
+  QuestID: string | null;
   GitHubIssueNumber: number | null;
   Title: string;
   Description: string | null;
@@ -265,4 +266,88 @@ export interface ChecklistUpdateContent {
   description: string;
   status: ChecklistItemStatus;
   notes?: string;
+}
+
+// Quest types
+export type QuestStatus = 'active' | 'completed';
+export type QuestModel = 'sonnet' | 'opus';
+
+export interface QuestSummary {
+  total_tasks: number;
+  completed_tasks: number;
+  running_tasks: number;
+  failed_tasks: number;
+  blocked_tasks: number;
+  pending_tasks: number;
+}
+
+export interface Quest {
+  id: string;
+  project_id: string;
+  title?: string;
+  status: QuestStatus;
+  model: QuestModel;
+  auto_start_default: boolean;
+  created_at: string;
+  completed_at?: string;
+  summary?: QuestSummary;
+}
+
+export interface QuestMessage {
+  id: string;
+  quest_id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  created_at: string;
+}
+
+export interface QuestResponse {
+  quest: Quest;
+  messages: QuestMessage[];
+}
+
+// Objective draft proposed by Dex during Quest conversation
+export interface ObjectiveDraft {
+  draft_id: string;
+  title: string;
+  description: string;
+  hat: string;
+  checklist: {
+    must_have: string[];
+    optional?: string[];
+  };
+  blocked_by?: string[];
+  auto_start: boolean;
+  estimated_iterations?: number;
+  estimated_budget?: number; // estimated cost in dollars
+}
+
+// Pre-flight check result
+export interface PreflightCheck {
+  ok: boolean;
+  warnings?: string[];
+}
+
+// Quest template for reusable quest patterns
+export interface QuestTemplate {
+  id: string;
+  project_id: string;
+  name: string;
+  description?: string;
+  initial_prompt: string;
+  created_at: string;
+}
+
+// Quest WebSocket events
+export interface QuestEvent extends WebSocketEvent {
+  type: 'quest.created' | 'quest.message' | 'quest.completed' | 'quest.reopened' | 'quest.deleted' | 'quest.objective_draft' | 'quest.question' | 'quest.ready';
+  payload: {
+    quest_id: string;
+    project_id?: string;
+    message?: QuestMessage;
+    draft?: ObjectiveDraft;
+    question?: { question: string; options?: string[] };
+    drafts?: string[];
+    summary?: string;
+  };
 }
