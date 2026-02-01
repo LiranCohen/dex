@@ -973,7 +973,7 @@ function TaskDetailPage() {
       <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center">
         <div className="text-center">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto mb-4" />
-          <p className="text-gray-400">Loading task...</p>
+          <p className="text-gray-400">Loading objective...</p>
         </div>
       </div>
     );
@@ -1001,7 +1001,7 @@ function TaskDetailPage() {
           <Link to="/" className="text-blue-400 hover:text-blue-300 text-sm mb-4 inline-block">
             &larr; Back to Dashboard
           </Link>
-          <p className="text-gray-400">Task not found</p>
+          <p className="text-gray-400">Objective not found</p>
         </div>
       </div>
     );
@@ -1107,7 +1107,7 @@ function TaskDetailPage() {
                 disabled={isActioning}
                 className="flex-1 bg-green-600 hover:bg-green-700 disabled:bg-gray-700 disabled:cursor-not-allowed text-white font-medium py-2 px-4 rounded-lg transition-colors"
               >
-                {isStarting ? 'Starting...' : 'Start Task'}
+                {isStarting ? 'Starting...' : 'Start Objective'}
               </button>
             )}
             {isRunning && (
@@ -1612,6 +1612,8 @@ function QuestDetailPage() {
       // Parse drafts and questions from existing messages
       const allDrafts: ObjectiveDraft[] = [];
       let latestQuestions: QuestQuestion[] = [];
+      let lastAssistantHadDraft = false;
+
       for (const msg of data.messages) {
         if (msg.role === 'assistant') {
           const msgDrafts = parseObjectiveDrafts(msg.content);
@@ -1622,17 +1624,25 @@ function QuestDetailPage() {
             (d) => !handledDraftIds.current.has(d.draft_id) && !existingTaskTitles.has(d.title)
           );
           allDrafts.push(...unhandledDrafts);
-          // Only keep questions from the last assistant message
+
+          // Track if this message has drafts or questions
           const msgQuestions = parseQuestions(msg.content);
-          if (msgQuestions.length > 0) {
+          if (msgDrafts.length > 0) {
+            // This message has drafts - clear any previous questions
+            latestQuestions = [];
+            lastAssistantHadDraft = true;
+          } else if (msgQuestions.length > 0) {
+            // This message has questions (no drafts) - these are the latest
             latestQuestions = msgQuestions;
+            lastAssistantHadDraft = false;
           }
         }
       }
       setDrafts(allDrafts);
-      // Only show questions if there are pending drafts to discuss
-      // If all drafts have been accepted/rejected, questions are no longer relevant
-      setQuestions(allDrafts.length > 0 ? latestQuestions : []);
+      // Only show questions if:
+      // 1. The last assistant message had questions (not drafts)
+      // 2. There are still pending drafts OR no drafts have been proposed yet
+      setQuestions(lastAssistantHadDraft ? [] : latestQuestions);
 
       // Fetch preflight checks if quest is active
       if (data.quest.status === 'active') {
@@ -1673,11 +1683,14 @@ function QuestDetailPage() {
         if (msg.role === 'assistant') {
           const newDrafts = parseObjectiveDrafts(msg.content);
           if (newDrafts.length > 0) {
+            // Message has drafts - add them and clear questions
             setDrafts((prev) => [...prev, ...newDrafts]);
+            setQuestions([]);
+          } else {
+            // Message has no drafts - check for questions
+            const newQuestions = parseQuestions(msg.content);
+            setQuestions(newQuestions);
           }
-          // Replace questions with new ones (old questions are answered)
-          const newQuestions = parseQuestions(msg.content);
-          setQuestions(newQuestions);
         } else {
           // User message clears pending questions
           setQuestions([]);
