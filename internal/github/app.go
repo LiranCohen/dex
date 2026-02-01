@@ -270,6 +270,7 @@ func AppManifest(name, callbackURL, setupURL, webhookURL string) map[string]any 
 	return map[string]any{
 		"name":               name,
 		"url":                "https://github.com/lirancohen/dex",
+		"logo_url":           "https://raw.githubusercontent.com/lirancohen/dex/master/images/headshot.png",
 		"callback_urls":      []string{callbackURL},
 		"setup_url":          setupURL,
 		"setup_on_update":    true,
