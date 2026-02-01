@@ -1,6 +1,6 @@
-name: tester
+name: critic
 components:
   - system
   - environment
   - tools
-  - hat_tester
+  - hat_critic

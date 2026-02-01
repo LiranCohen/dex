@@ -10,20 +10,19 @@ import (
 
 // HatTransitions defines the valid transitions from each hat
 // An empty slice means the hat is terminal (task completes after it)
+// These are general-purpose roles that apply to any domain
 var HatTransitions = map[string][]string{
-	"planner":          {"architect", "implementer"},  // planner can spawn to architect or implementer
-	"architect":        {"implementer"},               // architect → implementer
-	"implementer":      {"reviewer", "tester"},        // implementer → reviewer or tester
-	"reviewer":         {"implementer"},               // reviewer → implementer (if changes needed)
-	"tester":           {"implementer", "debugger"},   // tester → implementer or debugger
-	"debugger":         {"implementer", "tester"},     // debugger → implementer or tester
-	"documenter":       {},                            // terminal: task completes
-	"devops":           {},                            // terminal: task completes
-	"conflict_manager": {},                            // terminal: task completes
+	"explorer": {"planner", "designer", "creator"}, // research → plan, design, or create
+	"planner":  {"designer", "creator"},            // plan → design or create
+	"designer": {"creator"},                        // design → create
+	"creator":  {"critic", "editor"},               // create → review or refine
+	"critic":   {"creator", "editor"},              // review → fix issues or polish
+	"editor":   {},                                 // terminal: task completes after editing
+	"resolver": {"creator", "critic"},              // resolve issues → continue work or re-review
 }
 
 // TerminalHats lists hats that mark task completion (no further transitions)
-var TerminalHats = []string{"documenter", "devops", "conflict_manager"}
+var TerminalHats = []string{"editor"}
 
 // TransitionHandler handles hat transitions and task completion
 type TransitionHandler struct {
@@ -71,24 +70,24 @@ func (h *TransitionHandler) OnHatComplete(taskID, currentHat string) (nextHat st
 	// - planner/architect completing → task complete (unusual but valid)
 
 	switch currentHat {
-	case "implementer":
-		// After implementation, go to reviewer
-		return "reviewer", false, nil
+	case "creator":
+		// After creation, go to critic for review
+		return "critic", false, nil
 
-	case "reviewer":
-		// Reviewer completing means code is approved, task is done
+	case "critic":
+		// Critic completing means work is approved, task is done
 		return "", true, nil
 
-	case "tester":
-		// Tester completing means tests pass, task is done
+	case "explorer":
+		// Explorer completing means research is done, task is done
 		return "", true, nil
 
-	case "debugger":
-		// Debugger completing means bug is fixed, task is done
-		return "", true, nil
-
-	case "planner", "architect":
+	case "planner", "designer":
 		// These normally transition, but if they signal complete, respect it
+		return "", true, nil
+
+	case "resolver":
+		// Resolver completing means issues are handled, task is done
 		return "", true, nil
 	}
 

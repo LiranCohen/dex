@@ -706,7 +706,7 @@ func (s *Server) startTaskInternal(ctx context.Context, taskID string, baseBranc
 	}
 
 	// Create and start a session for this task
-	hat := "implementer" // Default hat - could be determined from task type
+	hat := "creator" // Default hat - could be determined from task type
 	if t.Hat.Valid && t.Hat.String != "" {
 		hat = t.Hat.String
 	}
@@ -1558,6 +1558,7 @@ type ActivityResponse struct {
 	SessionID    string  `json:"session_id"`
 	Iteration    int     `json:"iteration"`
 	EventType    string  `json:"event_type"`
+	Hat          *string `json:"hat,omitempty"`
 	Content      *string `json:"content,omitempty"`
 	TokensInput  *int64  `json:"tokens_input,omitempty"`
 	TokensOutput *int64  `json:"tokens_output,omitempty"`
@@ -1572,6 +1573,9 @@ func toActivityResponse(a *db.SessionActivity) ActivityResponse {
 		Iteration: a.Iteration,
 		EventType: a.EventType,
 		CreatedAt: a.CreatedAt.Format(time.RFC3339),
+	}
+	if a.Hat.Valid {
+		resp.Hat = &a.Hat.String
 	}
 	if a.Content.Valid {
 		resp.Content = &a.Content.String

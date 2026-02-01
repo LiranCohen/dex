@@ -1,6 +1,6 @@
-name: implementer
+name: editor
 components:
   - system
   - environment
   - tools
-  - hat_implementer
+  - hat_editor

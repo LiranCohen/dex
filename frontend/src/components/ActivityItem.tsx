@@ -314,6 +314,11 @@ export function ActivityItem({ activity }: ActivityItemProps) {
         <div className="flex items-center gap-2 text-gray-400">
           {style.icon}
           <span className="text-xs font-medium">{style.label}</span>
+          {activity.hat && (
+            <span className="text-xs bg-indigo-900/50 text-indigo-300 px-1.5 py-0.5 rounded">
+              {activity.hat}
+            </span>
+          )}
           {activity.iteration > 0 && (
             <span className="text-xs text-gray-500">
               (iteration {activity.iteration})

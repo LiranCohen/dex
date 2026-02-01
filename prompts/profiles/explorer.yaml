@@ -1,6 +1,6 @@
-name: architect
+name: explorer
 components:
   - system
   - environment
   - tools
-  - hat_architect
+  - hat_explorer

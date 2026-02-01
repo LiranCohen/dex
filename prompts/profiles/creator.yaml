@@ -1,6 +1,6 @@
-name: conflict_manager
+name: creator
 components:
   - system
   - environment
   - tools
-  - hat_conflict_manager
+  - hat_creator

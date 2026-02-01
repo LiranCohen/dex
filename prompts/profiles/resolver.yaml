@@ -1,6 +1,6 @@
-name: reviewer
+name: resolver
 components:
   - system
   - environment
   - tools
-  - hat_reviewer
+  - hat_resolver

@@ -108,6 +108,7 @@ func (r *RalphLoop) Run(ctx context.Context) error {
 
 	// Initialize activity recorder with WebSocket broadcasting
 	r.activity = NewActivityRecorder(r.db, r.session.ID, r.session.TaskID, r.broadcastEvent)
+	r.activity.SetHat(r.session.Hat)
 
 	// Build initial system prompt from hat template
 	fmt.Printf("RalphLoop.Run: building prompt for hat %s\n", r.session.Hat)
@@ -339,6 +340,7 @@ func (r *RalphLoop) Run(ctx context.Context) error {
 
 			// Store transition for manager to handle
 			r.session.Hat = nextHat
+			r.activity.SetHat(nextHat)
 			r.broadcastEvent(websocket.EventSessionCompleted, map[string]any{
 				"session_id": r.session.ID,
 				"outcome":    "hat_transition",
@@ -576,6 +578,9 @@ func (r *RalphLoop) RestoreFromCheckpoint(checkpoint *db.SessionCheckpoint) erro
 
 	r.session.IterationCount = state.Iteration
 	r.session.Hat = state.Hat
+	if r.activity != nil {
+		r.activity.SetHat(state.Hat)
+	}
 	r.messages = state.Messages
 
 	// Use new fields if available, otherwise estimate from legacy

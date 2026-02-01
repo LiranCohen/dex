@@ -21,13 +21,22 @@ instructions: |
 
   ### Hat Transitions
   Use `HAT_TRANSITION:<hat_name>` when you need different expertise:
-  - Architecture decisions needed → `HAT_TRANSITION:architect`
-  - Code review needed → `HAT_TRANSITION:reviewer`
-  - Tests need to be written → `HAT_TRANSITION:tester`
-  - Debugging required → `HAT_TRANSITION:debugger`
-  - Documentation needed → `HAT_TRANSITION:documenter`
-  - CI/CD or deployment → `HAT_TRANSITION:devops`
-  - Merge conflicts → `HAT_TRANSITION:conflict_manager`
+  - Research needed → `HAT_TRANSITION:explorer`
+  - Strategy/breakdown needed → `HAT_TRANSITION:planner`
+  - Architecture decisions → `HAT_TRANSITION:designer`
+  - Implementation work → `HAT_TRANSITION:creator`
+  - Quality review → `HAT_TRANSITION:critic`
+  - Polish/finalization → `HAT_TRANSITION:editor`
+  - Blockers/conflicts → `HAT_TRANSITION:resolver`
+
+  ### Valid Hat Transitions
+  - explorer → planner, designer, creator
+  - planner → designer, creator
+  - designer → creator
+  - creator → critic, editor
+  - critic → creator, editor
+  - editor → (terminal, task completes)
+  - resolver → creator, critic
 
   ### Completion Signals
   - `TASK_COMPLETE` - The entire task is finished

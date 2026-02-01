@@ -83,6 +83,8 @@ func (db *DB) Migrate() error {
 		"ALTER TABLE sessions ADD COLUMN output_rate REAL DEFAULT 15.0",
 		// Quest tool calls support
 		"ALTER TABLE quest_messages ADD COLUMN tool_calls TEXT",
+		// Activity hat tracking
+		"ALTER TABLE session_activity ADD COLUMN hat TEXT",
 	}
 	for _, migration := range optionalMigrations {
 		db.Exec(migration) // Ignore errors - column may already exist
