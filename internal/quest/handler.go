@@ -475,6 +475,14 @@ func (h *Handler) RunPreflightChecks(projectID string) (*PreflightCheck, error) 
 
 	check := &PreflightCheck{OK: true}
 
+	// Check if the project path is valid for checking
+	if !h.isValidProjectPath(project.RepoPath) {
+		// Project path is not configured or points to a system directory
+		// This is OK for new projects - the task will create its own directory
+		check.Warnings = append(check.Warnings, "New project - a working directory will be created when the objective starts")
+		return check, nil
+	}
+
 	// Check for uncommitted changes
 	cmd := exec.Command("git", "status", "--porcelain")
 	cmd.Dir = project.RepoPath
@@ -483,8 +491,9 @@ func (h *Handler) RunPreflightChecks(projectID string) (*PreflightCheck, error) 
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		// Git command failed - maybe not a git repo
-		check.Warnings = append(check.Warnings, fmt.Sprintf("Could not check git status: %s", stderr.String()))
+		// Git command failed - maybe not a git repo yet
+		// This is OK for new projects
+		check.Warnings = append(check.Warnings, "Not a git repository yet - git will be initialized when the objective starts")
 	} else if stdout.Len() > 0 {
 		// There are uncommitted changes
 		lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
@@ -492,7 +501,7 @@ func (h *Handler) RunPreflightChecks(projectID string) (*PreflightCheck, error) 
 		check.OK = false
 	}
 
-	// Check for merge conflicts
+	// Check for merge conflicts (only if we're in a git repo)
 	cmd = exec.Command("git", "diff", "--check")
 	cmd.Dir = project.RepoPath
 	stdout.Reset()
@@ -508,6 +517,34 @@ func (h *Handler) RunPreflightChecks(projectID string) (*PreflightCheck, error) 
 	}
 
 	return check, nil
+}
+
+// isValidProjectPath checks if a path is appropriate for use as a project directory
+func (h *Handler) isValidProjectPath(path string) bool {
+	if path == "" || path == "." || path == ".." {
+		return false
+	}
+
+	// List of path prefixes that should not be used as project directories
+	invalidPrefixes := []string{
+		"/opt/dex",
+		"/opt/poindexter",
+		"/usr",
+		"/bin",
+		"/sbin",
+		"/lib",
+		"/etc",
+		"/var/lib",
+		"/var/log",
+	}
+
+	for _, prefix := range invalidPrefixes {
+		if strings.HasPrefix(path, prefix) {
+			return false
+		}
+	}
+
+	return true
 }
 
 // GetPreflightCheck performs preflight checks for a quest's project

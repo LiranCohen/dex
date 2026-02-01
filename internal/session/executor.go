@@ -52,12 +52,16 @@ func (e *ToolExecutor) Execute(ctx context.Context, toolName string, input map[s
 		return e.executeWriteFile(input)
 	case "list_files":
 		return e.executeListFiles(input)
+	case "git_init":
+		return e.executeGitInit(input)
 	case "git_status":
 		return e.executeGitStatus()
 	case "git_diff":
 		return e.executeGitDiff(input)
 	case "git_commit":
 		return e.executeGitCommit(input)
+	case "git_remote_add":
+		return e.executeGitRemoteAdd(input)
 	case "git_push":
 		return e.executeGitPush(input)
 	case "github_create_repo":
@@ -290,6 +294,76 @@ func (e *ToolExecutor) executeListFiles(input map[string]any) ToolResult {
 	return ToolResult{Output: strings.Join(files, "\n"), IsError: false}
 }
 
+func (e *ToolExecutor) executeGitInit(input map[string]any) ToolResult {
+	defaultBranch := "main"
+	if branch, ok := input["default_branch"].(string); ok && branch != "" {
+		defaultBranch = branch
+	}
+
+	// Initialize git repo
+	cmd := exec.Command("git", "init", "-b", defaultBranch)
+	cmd.Dir = e.worktreePath
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return ToolResult{
+			Output:  fmt.Sprintf("git init failed: %s: %v", string(output), err),
+			IsError: true,
+		}
+	}
+
+	return ToolResult{
+		Output:  fmt.Sprintf("Initialized git repository with default branch '%s'\n%s", defaultBranch, string(output)),
+		IsError: false,
+	}
+}
+
+func (e *ToolExecutor) executeGitRemoteAdd(input map[string]any) ToolResult {
+	url, ok := input["url"].(string)
+	if !ok || url == "" {
+		return ToolResult{Output: "url is required", IsError: true}
+	}
+
+	name := "origin"
+	if n, ok := input["name"].(string); ok && n != "" {
+		name = n
+	}
+
+	// Add remote
+	cmd := exec.Command("git", "remote", "add", name, url)
+	cmd.Dir = e.worktreePath
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		// Check if remote already exists
+		if strings.Contains(string(output), "already exists") {
+			// Update the remote URL instead
+			updateCmd := exec.Command("git", "remote", "set-url", name, url)
+			updateCmd.Dir = e.worktreePath
+			updateOutput, updateErr := updateCmd.CombinedOutput()
+			if updateErr != nil {
+				return ToolResult{
+					Output:  fmt.Sprintf("git remote set-url failed: %s: %v", string(updateOutput), updateErr),
+					IsError: true,
+				}
+			}
+			return ToolResult{
+				Output:  fmt.Sprintf("Updated remote '%s' to %s", name, url),
+				IsError: false,
+			}
+		}
+		return ToolResult{
+			Output:  fmt.Sprintf("git remote add failed: %s: %v", string(output), err),
+			IsError: true,
+		}
+	}
+
+	return ToolResult{
+		Output:  fmt.Sprintf("Added remote '%s' pointing to %s", name, url),
+		IsError: false,
+	}
+}
+
 func (e *ToolExecutor) executeGitStatus() ToolResult {
 	cmd := exec.Command("git", "status", "--porcelain")
 	cmd.Dir = e.worktreePath
@@ -448,8 +522,14 @@ func (e *ToolExecutor) executeGitHubCreateRepo(ctx context.Context, input map[st
 		}
 	}
 
+	// Include both the HTML URL for viewing and clone URL for git remote add
+	cloneURL := repo.GetCloneURL()
+	if cloneURL == "" {
+		cloneURL = repo.GetHTMLURL() + ".git"
+	}
+
 	return ToolResult{
-		Output:  fmt.Sprintf("Created repository: %s", repo.GetHTMLURL()),
+		Output:  fmt.Sprintf("Created repository: %s\nClone URL: %s\nUse this URL with git_remote_add to connect your local repo.", repo.GetHTMLURL(), cloneURL),
 		IsError: false,
 	}
 }

@@ -9,24 +9,44 @@ instructions: |
   ### Tool Categories
 
   **GitHub Operations** (use for repo/issue management):
-  - `github_create_repo` - Create new repositories on GitHub
-  - `github_list_issues` / `github_create_issue` - Manage issues
+  - `github_create_repo` - Create new repository on GitHub (returns clone URL)
   - `github_create_pr` - Create pull requests
 
-  **File Operations** (use within your worktree):
+  **File Operations** (use within your working directory):
   - `read_file` - Read file contents
   - `write_file` - Write/create files
   - `list_files` - List directory contents
 
   **Git Operations**:
+  - `git_init` - Initialize a new git repository (for new projects)
   - `git_status` - Check working directory status
-  - `git_commit` - Commit changes
   - `git_diff` - View changes
+  - `git_commit` - Commit staged changes
+  - `git_remote_add` - Add a remote repository (use after github_create_repo)
+  - `git_push` - Push commits to remote
 
   **Shell**:
   - `bash` - Execute shell commands
 
+  ### Workflow for NEW Projects
+  When creating a completely new project from scratch:
+  1. Use `git_init` to initialize a git repository
+  2. Create your files using `write_file`
+  3. Use `git_commit` to commit your changes (with files: ["."] to stage all)
+  4. Use `github_create_repo` to create the GitHub repository
+  5. Use `git_remote_add` with the clone URL from step 4
+  6. Use `git_push` with set_upstream: true to push to GitHub
+
+  ### Workflow for EXISTING Projects
+  When working on existing code in a worktree:
+  1. Read and understand existing code with `read_file` / `list_files`
+  2. Make changes with `write_file`
+  3. Check status with `git_status`
+  4. Commit with `git_commit`
+  5. Push with `git_push`
+  6. Create PR with `github_create_pr` if needed
+
   ### Important Guidelines
-  - For creating NEW repos: Use `github_create_repo`, NOT file operations
-  - For code in existing repos: Use file operations in your worktree
   - Always check `git_status` before and after changes
+  - Use descriptive commit messages
+  - For new projects, create the files BEFORE the GitHub repo

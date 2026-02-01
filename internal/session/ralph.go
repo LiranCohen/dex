@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -403,6 +405,13 @@ func (r *RalphLoop) buildPrompt() (string, error) {
 		}
 		if project.GitHubRepo.Valid {
 			projectCtx.GitHubRepo = project.GitHubRepo.String
+		}
+		// Check if this is a new project (no .git directory in worktree)
+		if r.session.WorktreePath != "" {
+			gitDir := filepath.Join(r.session.WorktreePath, ".git")
+			if _, err := os.Stat(gitDir); os.IsNotExist(err) {
+				projectCtx.IsNewProject = true
+			}
 		}
 	}
 

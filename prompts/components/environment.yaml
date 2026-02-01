@@ -6,12 +6,13 @@ instructions: |
   ### Project
   - **Name:** {{.Values.project_name}}
   {{if .Values.repo_path}}- **Repository:** {{.Values.repo_path}}{{end}}
-  {{if .Values.github_owner}}- **GitHub:** {{.Values.github_owner}}/{{.Values.github_repo}}{{end}}
+  {{if .Values.github_owner}}- **GitHub:** {{.Values.github_owner}}/{{.Values.github_repo}}{{else}}- **GitHub:** Not configured (use git_init + github_create_repo + git_remote_add to set up){{end}}
   {{end}}
 
   ### Session
-  {{if .Values.worktree_path}}- **Worktree:** {{.Values.worktree_path}}{{end}}
+  {{if .Values.worktree_path}}- **Working Directory:** {{.Values.worktree_path}}{{end}}
   {{if .Values.branch_name}}- **Branch:** {{.Values.branch_name}}{{end}}
+  {{if .Values.is_new_project}}- **New Project:** Yes - use git_init to initialize before committing{{end}}
 
   ### Task
   - **ID:** {{.Values.task_id}}

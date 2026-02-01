@@ -21,10 +21,11 @@ type PromptContext struct {
 
 // ProjectContext provides project-level context for prompts
 type ProjectContext struct {
-	Name        string
-	RepoPath    string
-	GitHubOwner string
-	GitHubRepo  string
+	Name         string
+	RepoPath     string
+	GitHubOwner  string
+	GitHubRepo   string
+	IsNewProject bool // True if this is a new project without an existing git repo
 }
 
 // ToolbeltService represents a toolbelt service status
@@ -123,6 +124,9 @@ func (p *PromptLoader) Get(hatName string, ctx *PromptContext) (string, error) {
 			loomCtx.SetValue("github_owner", ctx.Project.GitHubOwner)
 			loomCtx.SetValue("github_repo", ctx.Project.GitHubRepo)
 			loomCtx.SetFlag("has_github", true)
+		}
+		if ctx.Project.IsNewProject {
+			loomCtx.SetFlag("is_new_project", true)
 		}
 	}
 

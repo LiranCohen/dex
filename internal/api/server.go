@@ -652,30 +652,37 @@ func (s *Server) startTaskInternal(ctx context.Context, taskID string, baseBranc
 		return nil, fmt.Errorf("task already has a worktree")
 	}
 
-	// Check if project has a valid git repository
+	// Check if project has a valid git repository that's appropriate for this project
 	// For new projects (creating repos), we start without a worktree
 	var worktreePath string
 	hasGitRepo := s.isValidGitRepo(projectPath)
+	isValidProjectPath := s.isValidProjectPath(projectPath)
 
-	if hasGitRepo && s.gitService != nil {
-		// Project has a git repo - create worktree as usual
+	if hasGitRepo && isValidProjectPath && s.gitService != nil {
+		// Project has a valid git repo - create worktree as usual
 		worktreePath, err = s.gitService.SetupTaskWorktree(projectPath, taskID, baseBranch)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create worktree: %w", err)
 		}
 	} else {
-		// No git repo yet - use project path directly (for repo creation objectives)
-		// If project path is empty, use a temp directory
-		if projectPath == "" {
-			worktreePath = filepath.Join(os.TempDir(), "dex-task-"+taskID)
-			if err := os.MkdirAll(worktreePath, 0755); err != nil {
-				return nil, fmt.Errorf("failed to create temp directory: %w", err)
-			}
-		} else {
+		// No valid git repo yet - create a task-specific directory
+		// This happens for new projects or when project path is invalid/system path
+		if isValidProjectPath && projectPath != "" {
 			// Use the project path - the objective will create the repo here
 			worktreePath = projectPath
 			if err := os.MkdirAll(worktreePath, 0755); err != nil {
 				return nil, fmt.Errorf("failed to create project directory: %w", err)
+			}
+		} else {
+			// Project path is empty or invalid (e.g., system directory)
+			// Create a task-specific directory in the configured repos directory
+			if s.reposDir != "" {
+				worktreePath = filepath.Join(s.reposDir, "task-"+taskID)
+			} else {
+				worktreePath = filepath.Join(os.TempDir(), "dex-task-"+taskID)
+			}
+			if err := os.MkdirAll(worktreePath, 0755); err != nil {
+				return nil, fmt.Errorf("failed to create task directory: %w", err)
 			}
 		}
 	}
@@ -736,6 +743,48 @@ func (s *Server) isValidGitRepo(path string) bool {
 		return false
 	}
 	return info.IsDir()
+}
+
+// isValidProjectPath checks if the given path is appropriate for use as a project directory
+// It returns false for system directories, dex installation directories, and other invalid paths
+func (s *Server) isValidProjectPath(path string) bool {
+	if path == "" || path == "." || path == ".." {
+		return false
+	}
+
+	// Normalize the path
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return false
+	}
+
+	// List of path prefixes that should not be used as project directories
+	invalidPrefixes := []string{
+		"/opt/dex",
+		"/opt/poindexter",
+		"/usr",
+		"/bin",
+		"/sbin",
+		"/lib",
+		"/etc",
+		"/var/lib",
+		"/var/log",
+	}
+
+	for _, prefix := range invalidPrefixes {
+		if strings.HasPrefix(absPath, prefix) {
+			return false
+		}
+	}
+
+	// Also check if this looks like the dex installation by checking for cmd/main.go
+	dexMarker := filepath.Join(absPath, "cmd", "main.go")
+	if _, err := os.Stat(dexMarker); err == nil {
+		// This is likely the dex source directory
+		return false
+	}
+
+	return true
 }
 
 // handleStartTask transitions a task to running and sets up its worktree
