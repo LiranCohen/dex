@@ -1522,11 +1522,38 @@ function stripSignals(content: string): string {
   return stripped.trim();
 }
 
+// Question type for quest conversations
+interface QuestQuestion {
+  question: string;
+  options?: string[];
+}
+
+// Helper to parse questions from message content
+function parseQuestions(content: string): QuestQuestion[] {
+  const questions: QuestQuestion[] = [];
+  const regex = /QUESTION:\s*(\{[^}]*\})/g;
+  let match;
+
+  while ((match = regex.exec(content)) !== null) {
+    try {
+      const q = JSON.parse(match[1]);
+      if (q.question) {
+        questions.push(q);
+      }
+    } catch {
+      // Skip malformed JSON
+    }
+  }
+
+  return questions;
+}
+
 function QuestDetailPage() {
   const { id } = useParams<{ id: string }>();
   const [quest, setQuest] = useState<Quest | null>(null);
   const [messages, setMessages] = useState<QuestMessage[]>([]);
   const [drafts, setDrafts] = useState<ObjectiveDraft[]>([]);
+  const [questions, setQuestions] = useState<QuestQuestion[]>([]);
   const [acceptingDraft, setAcceptingDraft] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -1550,15 +1577,22 @@ function QuestDetailPage() {
       setQuest(data.quest);
       setMessages(data.messages);
 
-      // Parse drafts from existing messages
+      // Parse drafts and questions from existing messages
       const allDrafts: ObjectiveDraft[] = [];
+      let latestQuestions: QuestQuestion[] = [];
       for (const msg of data.messages) {
         if (msg.role === 'assistant') {
           const msgDrafts = parseObjectiveDrafts(msg.content);
           allDrafts.push(...msgDrafts);
+          // Only keep questions from the last assistant message
+          const msgQuestions = parseQuestions(msg.content);
+          if (msgQuestions.length > 0) {
+            latestQuestions = msgQuestions;
+          }
         }
       }
       setDrafts(allDrafts);
+      setQuestions(latestQuestions);
 
       // Fetch preflight checks if quest is active
       if (data.quest.status === 'active') {
@@ -1595,13 +1629,24 @@ function QuestDetailPage() {
       const msg = payload.message;
       if (msg) {
         setMessages((prev) => [...prev, msg]);
-        // Parse drafts from new assistant messages
+        // Parse drafts and questions from new assistant messages
         if (msg.role === 'assistant') {
           const newDrafts = parseObjectiveDrafts(msg.content);
           if (newDrafts.length > 0) {
             setDrafts((prev) => [...prev, ...newDrafts]);
           }
+          // Replace questions with new ones (old questions are answered)
+          const newQuestions = parseQuestions(msg.content);
+          setQuestions(newQuestions);
+        } else {
+          // User message clears pending questions
+          setQuestions([]);
         }
+      }
+    } else if (event.type === 'quest.question') {
+      const q = payload as { question?: QuestQuestion };
+      if (q.question) {
+        setQuestions([q.question]);
       }
     } else if (event.type === 'quest.objective_draft') {
       if (payload.draft) {
@@ -1906,6 +1951,31 @@ function QuestDetailPage() {
               ))
             )}
           </div>
+
+          {/* Questions from Dex */}
+          {questions.length > 0 && isActive && (
+            <div className="p-4 border-t border-gray-700 bg-gray-800/50">
+              {questions.map((q, idx) => (
+                <div key={idx} className="mb-3 last:mb-0">
+                  <p className="text-gray-300 mb-2 font-medium">{q.question}</p>
+                  {q.options && q.options.length > 0 && (
+                    <div className="flex flex-wrap gap-2">
+                      {q.options.map((opt, optIdx) => (
+                        <button
+                          key={optIdx}
+                          type="button"
+                          onClick={() => setMessageInput(opt)}
+                          className="bg-gray-700 hover:bg-gray-600 text-gray-200 px-3 py-1.5 rounded-lg text-sm transition-colors"
+                        >
+                          {opt}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
 
           {/* Input Area */}
           {isActive && (
