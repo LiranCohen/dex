@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -650,28 +652,49 @@ func (s *Server) startTaskInternal(ctx context.Context, taskID string, baseBranc
 		return nil, fmt.Errorf("task already has a worktree")
 	}
 
-	// Create worktree
-	if s.gitService == nil {
-		return nil, fmt.Errorf("git service not configured")
-	}
+	// Check if project has a valid git repository
+	// For new projects (creating repos), we start without a worktree
+	var worktreePath string
+	hasGitRepo := s.isValidGitRepo(projectPath)
 
-	worktreePath, err := s.gitService.SetupTaskWorktree(projectPath, taskID, baseBranch)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create worktree: %w", err)
+	if hasGitRepo && s.gitService != nil {
+		// Project has a git repo - create worktree as usual
+		worktreePath, err = s.gitService.SetupTaskWorktree(projectPath, taskID, baseBranch)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create worktree: %w", err)
+		}
+	} else {
+		// No git repo yet - use project path directly (for repo creation objectives)
+		// If project path is empty, use a temp directory
+		if projectPath == "" {
+			worktreePath = filepath.Join(os.TempDir(), "dex-task-"+taskID)
+			if err := os.MkdirAll(worktreePath, 0755); err != nil {
+				return nil, fmt.Errorf("failed to create temp directory: %w", err)
+			}
+		} else {
+			// Use the project path - the objective will create the repo here
+			worktreePath = projectPath
+			if err := os.MkdirAll(worktreePath, 0755); err != nil {
+				return nil, fmt.Errorf("failed to create project directory: %w", err)
+			}
+		}
 	}
 
 	// Transition through ready to running status
 	// First: pending -> ready
 	if t.Status == "pending" {
 		if err := s.taskService.UpdateStatus(taskID, "ready"); err != nil {
-			_ = s.gitService.CleanupTaskWorktree(projectPath, taskID, true)
+			if hasGitRepo && s.gitService != nil {
+				_ = s.gitService.CleanupTaskWorktree(projectPath, taskID, true)
+			}
 			return nil, fmt.Errorf("failed to transition to ready: %w", err)
 		}
 	}
 	// Then: ready -> running
 	if err := s.taskService.UpdateStatus(taskID, "running"); err != nil {
-		// Try to clean up the worktree we just created
-		_ = s.gitService.CleanupTaskWorktree(projectPath, taskID, true)
+		if hasGitRepo && s.gitService != nil {
+			_ = s.gitService.CleanupTaskWorktree(projectPath, taskID, true)
+		}
 		return nil, fmt.Errorf("failed to transition to running: %w", err)
 	}
 
@@ -700,6 +723,19 @@ func (s *Server) startTaskInternal(ctx context.Context, taskID string, baseBranc
 		WorktreePath: worktreePath,
 		SessionID:    session.ID,
 	}, nil
+}
+
+// isValidGitRepo checks if the given path is a valid git repository
+func (s *Server) isValidGitRepo(path string) bool {
+	if path == "" {
+		return false
+	}
+	gitDir := filepath.Join(path, ".git")
+	info, err := os.Stat(gitDir)
+	if err != nil {
+		return false
+	}
+	return info.IsDir()
 }
 
 // handleStartTask transitions a task to running and sets up its worktree
