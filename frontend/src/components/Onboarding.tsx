@@ -193,7 +193,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
 
       // 5. Store JWT and proceed to next step
       setToken(finishResponse.token, finishResponse.user_id);
-      setStep('github_token');
+      setStep('github_choice');
     } catch (err: unknown) {
       let message = 'Passkey registration failed';
       if (err instanceof Error) {
