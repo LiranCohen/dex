@@ -277,10 +277,11 @@ func AppManifest(name, callbackURL, setupURL string) map[string]any {
 		"public":           false,
 		"default_events":   []string{},
 		"default_permissions": map[string]string{
-			"contents":      "write", // Read/write repo contents
-			"metadata":      "read",  // Read repo metadata
-			"issues":        "write", // Create/update issues
-			"pull_requests": "write", // Create PRs
+			"administration": "write", // Create/delete repos
+			"contents":       "write", // Read/write repo contents
+			"metadata":       "read",  // Read repo metadata
+			"issues":         "write", // Create/update issues
+			"pull_requests":  "write", // Create PRs
 		},
 	}
 }

@@ -118,29 +118,27 @@ export function Onboarding({ onComplete }: OnboardingProps) {
           // On desktop - show mobile warning first
           setStep('mobile_warning');
         }
+      } else if (githubAppCreated === 'created' && installUrl) {
+        // Just created a GitHub App - need to install it
+        // Check this BEFORE github_auth_method because app exists in DB but isn't installed yet
+        setGithubAppStatus({
+          app_configured: true,
+          install_url: decodeURIComponent(installUrl),
+          installations: 0,
+          legacy_token_set: false,
+          auth_method: 'app',
+        });
+        setGithubMethod('app');
+        setStep('github_app_install');
+        // Clean up URL
+        window.history.replaceState({}, '', window.location.pathname);
+      } else if (githubInstalled === 'true') {
+        // App just installed, show success then move to next step
+        window.history.replaceState({}, '', window.location.pathname);
+        setStep('github_success');
       } else if (data.github_auth_method === 'none') {
-        // Check if we just created a GitHub App (callback from GitHub)
-        if (githubAppCreated === 'created' && installUrl) {
-          // App created, need to install
-          setGithubAppStatus({
-            app_configured: true,
-            install_url: decodeURIComponent(installUrl),
-            installations: 0,
-            legacy_token_set: false,
-            auth_method: 'app',
-          });
-          setGithubMethod('app');
-          setStep('github_app_install');
-          // Clean up URL
-          window.history.replaceState({}, '', window.location.pathname);
-        } else if (githubInstalled === 'true') {
-          // App installed, show success then move to next step
-          window.history.replaceState({}, '', window.location.pathname);
-          setStep('github_success');
-        } else {
-          // Show GitHub choice step
-          setStep('github_choice');
-        }
+        // No GitHub auth configured - show choice step
+        setStep('github_choice');
       } else if (!data.anthropic_key_set) {
         setStep('anthropic_key');
       } else {
