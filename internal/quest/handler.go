@@ -525,20 +525,16 @@ func (h *Handler) isValidProjectPath(path string) bool {
 		return false
 	}
 
-	// List of path prefixes that should not be used as project directories
-	invalidPrefixes := []string{
-		"/opt/dex",
-		"/opt/poindexter",
-		"/usr",
-		"/bin",
-		"/sbin",
-		"/lib",
-		"/etc",
-		"/var/lib",
-		"/var/log",
+	// System directories that should never be used (including subdirectories)
+	systemPrefixes := []string{
+		"/usr/",
+		"/bin/",
+		"/sbin/",
+		"/lib/",
+		"/etc/",
 	}
 
-	for _, prefix := range invalidPrefixes {
+	for _, prefix := range systemPrefixes {
 		if strings.HasPrefix(path, prefix) {
 			return false
 		}

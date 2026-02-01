@@ -758,26 +758,23 @@ func (s *Server) isValidProjectPath(path string) bool {
 		return false
 	}
 
-	// List of path prefixes that should not be used as project directories
-	invalidPrefixes := []string{
-		"/opt/dex",
-		"/opt/poindexter",
-		"/usr",
-		"/bin",
-		"/sbin",
-		"/lib",
-		"/etc",
-		"/var/lib",
-		"/var/log",
+	// System directories that should never be used (including subdirectories)
+	systemPrefixes := []string{
+		"/usr/",
+		"/bin/",
+		"/sbin/",
+		"/lib/",
+		"/etc/",
 	}
 
-	for _, prefix := range invalidPrefixes {
+	for _, prefix := range systemPrefixes {
 		if strings.HasPrefix(absPath, prefix) {
 			return false
 		}
 	}
 
-	// Also check if this looks like the dex installation by checking for cmd/main.go
+	// Check if this looks like the dex installation by checking for cmd/main.go
+	// This catches /opt/dex or any other location where dex source is installed
 	dexMarker := filepath.Join(absPath, "cmd", "main.go")
 	if _, err := os.Stat(dexMarker); err == nil {
 		// This is likely the dex source directory
