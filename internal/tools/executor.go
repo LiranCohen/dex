@@ -411,12 +411,62 @@ func (e *Executor) executeGitLog(input map[string]any) Result {
 }
 
 func (e *Executor) executeWebSearch(ctx context.Context, input map[string]any) Result {
-	// Web search is not implemented in the base executor
-	// It requires an external search API (e.g., SerpAPI, Brave Search)
-	// This will be implemented via the toolbelt's Anthropic client web search capability
+	query, ok := input["query"].(string)
+	if !ok || query == "" {
+		return Result{Output: "query is required", IsError: true}
+	}
+
+	// Use DuckDuckGo's lite HTML interface for basic search
+	// This provides search results without requiring an API key
+	searchURL := fmt.Sprintf("https://lite.duckduckgo.com/lite/?q=%s", strings.ReplaceAll(query, " ", "+"))
+
+	cmd := exec.CommandContext(ctx, "curl", "-sL", "--max-time", "15", searchURL)
+	output, err := cmd.Output()
+	if err != nil {
+		return Result{
+			Output:  fmt.Sprintf("Web search failed: %v. Try using web_fetch with a specific URL instead.", err),
+			IsError: true,
+		}
+	}
+
+	// Extract text content and search results from HTML
+	content := string(output)
+
+	// Simple extraction of result links and snippets
+	var results []string
+	lines := strings.Split(content, "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		// Look for result links (simplified extraction)
+		if strings.Contains(line, "result-link") || strings.Contains(line, "result__a") {
+			// Extract URL from href
+			if idx := strings.Index(line, "href=\""); idx != -1 {
+				start := idx + 6
+				end := strings.Index(line[start:], "\"")
+				if end > 0 {
+					url := line[start : start+end]
+					if strings.HasPrefix(url, "http") {
+						results = append(results, url)
+					}
+				}
+			}
+		}
+		// Also look for snippets
+		if strings.Contains(line, "result__snippet") && !strings.Contains(line, "<") {
+			results = append(results, "  "+line)
+		}
+	}
+
+	if len(results) == 0 {
+		return Result{
+			Output:  fmt.Sprintf("Search completed for '%s' but couldn't extract structured results. Consider using web_fetch to access specific URLs directly.", query),
+			IsError: false,
+		}
+	}
+
 	return Result{
-		Output:  "Web search requires external API integration. Please configure a search provider.",
-		IsError: true,
+		Output:  fmt.Sprintf("Search results for '%s':\n%s", query, strings.Join(results[:min(len(results), 20)], "\n")),
+		IsError: false,
 	}
 }
 
