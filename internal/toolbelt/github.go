@@ -12,6 +12,7 @@ import (
 // GitHubClient wraps the go-github client for Poindexter's needs
 type GitHubClient struct {
 	client     *github.Client
+	token      string // Stored for git HTTPS operations
 	defaultOrg string
 }
 
@@ -25,8 +26,43 @@ func NewGitHubClient(config *GitHubConfig) *GitHubClient {
 
 	return &GitHubClient{
 		client:     client,
+		token:      config.Token,
 		defaultOrg: config.DefaultOrg,
 	}
+}
+
+// NewGitHubClientFromToken creates a new GitHubClient from a token string.
+// This is useful for GitHub App installation tokens.
+func NewGitHubClientFromToken(token string, defaultOrg string) *GitHubClient {
+	if token == "" {
+		return nil
+	}
+
+	client := github.NewClient(nil).WithAuthToken(token)
+
+	return &GitHubClient{
+		client:     client,
+		token:      token,
+		defaultOrg: defaultOrg,
+	}
+}
+
+// Token returns the auth token for git operations
+func (g *GitHubClient) Token() string {
+	return g.token
+}
+
+// AuthURL returns the authenticated URL for a git remote.
+// Converts https://github.com/owner/repo to https://x-access-token:{token}@github.com/owner/repo
+func (g *GitHubClient) AuthURL(repoURL string) string {
+	if g.token == "" {
+		return repoURL
+	}
+	// Handle both https://github.com/... and git@github.com:... formats
+	if len(repoURL) > 19 && repoURL[:19] == "https://github.com/" {
+		return fmt.Sprintf("https://x-access-token:%s@github.com/%s", g.token, repoURL[19:])
+	}
+	return repoURL
 }
 
 // Ping verifies the GitHub connection by getting the authenticated user
