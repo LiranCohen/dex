@@ -64,6 +64,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
   const [anthropicKey, setAnthropicKey] = useState('');
   const [_githubMethod, setGithubMethod] = useState<GitHubMethod>(null);
   const [githubAppStatus, setGithubAppStatus] = useState<GitHubAppStatus | null>(null);
+  const [countdown, setCountdown] = useState(3);
 
   // Auth store
   const setToken = useAuthStore((state) => state.setToken);
@@ -569,9 +570,6 @@ export function Onboarding({ onComplete }: OnboardingProps) {
       </div>
     );
   }
-
-  // Countdown state for github_success auto-advance
-  const [countdown, setCountdown] = useState(3);
 
   // Auto-advance from github_success after countdown
   useEffect(() => {
