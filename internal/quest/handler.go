@@ -55,9 +55,11 @@ type PreflightCheck struct {
 
 // Handler manages Quest conversations with Dex
 type Handler struct {
-	db     *db.DB
-	client *toolbelt.AnthropicClient
-	hub    *websocket.Hub
+	db             *db.DB
+	client         *toolbelt.AnthropicClient
+	github         *toolbelt.GitHubClient
+	hub            *websocket.Hub
+	githubUsername string // cached GitHub username
 }
 
 // NewHandler creates a new Quest handler
@@ -67,6 +69,27 @@ func NewHandler(database *db.DB, client *toolbelt.AnthropicClient, hub *websocke
 		client: client,
 		hub:    hub,
 	}
+}
+
+// SetGitHubClient sets the GitHub client for the handler
+func (h *Handler) SetGitHubClient(client *toolbelt.GitHubClient) {
+	h.github = client
+}
+
+// getGitHubUsername returns the cached GitHub username, fetching it if needed
+func (h *Handler) getGitHubUsername(ctx context.Context) string {
+	if h.githubUsername != "" {
+		return h.githubUsername
+	}
+	if h.github == nil {
+		return ""
+	}
+	username, err := h.github.GetUsername(ctx)
+	if err != nil {
+		return ""
+	}
+	h.githubUsername = username
+	return username
 }
 
 // questSystemPrompt is the system prompt for Quest conversations
@@ -107,17 +130,18 @@ Guidelines for objectives:
 - estimated_iterations: estimated number of iterations needed (1-5 for simple, 5-10 for moderate, 10-20 for complex)
 - estimated_budget: estimated cost in USD based on complexity ($0.20-$0.50 for simple, $0.50-$1.50 for moderate, $1.50-$5.00 for complex)
 
-When asking a clarifying question, you can use:
-QUESTION:{
-  "question": "Your question here?",
-  "options": ["Option 1", "Option 2", "Option 3"]
-}
+When asking a clarifying question, output ONLY the signal on its own line (no surrounding text):
+QUESTION:{"question": "Your question here?", "options": ["Option 1", "Option 2"]}
 
 When all objectives for a request are drafted:
-QUEST_READY:{
-  "drafts": ["draft-1", "draft-2"],
-  "summary": "Brief summary of what will be accomplished"
-}
+QUEST_READY:{"drafts": ["draft-1", "draft-2"], "summary": "Brief summary of what will be accomplished"}
+
+IMPORTANT SIGNAL RULES:
+- Signals (OBJECTIVE_DRAFT, QUESTION, QUEST_READY) are parsed and rendered as UI components
+- Output signals on their own lines without any surrounding prose
+- Do NOT repeat or describe the signal content in plain text
+- If you need to ask a question, ONLY output the QUESTION signal, nothing else
+- Keep any conversational text brief and separate from signals
 
 Keep your conversational responses concise and focused. You can include multiple signals in one response if proposing several related objectives.`
 
@@ -161,8 +185,8 @@ func (h *Handler) ProcessMessage(ctx context.Context, questID, content string) (
 		model = ModelOpus
 	}
 
-	// Build system prompt with cross-quest awareness
-	systemPrompt := questSystemPrompt + h.buildCrossQuestContext(quest.ProjectID, questID)
+	// Build system prompt with user context and cross-quest awareness
+	systemPrompt := questSystemPrompt + h.buildUserContext(ctx) + h.buildCrossQuestContext(quest.ProjectID, questID)
 
 	// Call the model
 	response, err := h.client.Chat(ctx, &toolbelt.AnthropicChatRequest{
@@ -492,6 +516,23 @@ func (h *Handler) GetPreflightCheck(questID string) (*PreflightCheck, error) {
 	}
 
 	return h.RunPreflightChecks(quest.ProjectID)
+}
+
+// buildUserContext creates a context section about the user
+func (h *Handler) buildUserContext(ctx context.Context) string {
+	username := h.getGitHubUsername(ctx)
+	if username == "" {
+		return ""
+	}
+
+	return fmt.Sprintf(`
+
+## User Context
+- GitHub username: %s
+- Default Go module path: github.com/%s/<project-name>
+
+Use this information when creating repositories, Go modules, or any resources that need the user's identity. Do NOT ask for this information.
+`, username, username)
 }
 
 // buildCrossQuestContext creates a context section about other active quests

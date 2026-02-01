@@ -38,6 +38,15 @@ func (g *GitHubClient) Ping(ctx context.Context) error {
 	return nil
 }
 
+// GetUsername returns the authenticated user's GitHub username
+func (g *GitHubClient) GetUsername(ctx context.Context) (string, error) {
+	user, _, err := g.client.Users.Get(ctx, "")
+	if err != nil {
+		return "", fmt.Errorf("failed to get user: %w", err)
+	}
+	return user.GetLogin(), nil
+}
+
 // CreateRepoOptions specifies options for creating a repository
 type CreateRepoOptions struct {
 	Name        string

@@ -1510,6 +1510,18 @@ function parseObjectiveDrafts(content: string): ObjectiveDraft[] {
   return drafts;
 }
 
+// Helper to strip signals from message content for display
+function stripSignals(content: string): string {
+  // Remove OBJECTIVE_DRAFT signals
+  let stripped = content.replace(/OBJECTIVE_DRAFT:\s*\{[\s\S]*?\}\s*(?=OBJECTIVE_DRAFT:|QUESTION:|QUEST_READY:|$)/g, '');
+  // Remove QUESTION signals
+  stripped = stripped.replace(/QUESTION:\s*\{[^}]*\}/g, '');
+  // Remove QUEST_READY signals
+  stripped = stripped.replace(/QUEST_READY:\s*\{[^}]*\}/g, '');
+  // Clean up extra whitespace
+  return stripped.trim();
+}
+
 function QuestDetailPage() {
   const { id } = useParams<{ id: string }>();
   const [quest, setQuest] = useState<Quest | null>(null);
@@ -1883,7 +1895,9 @@ function QuestDetailPage() {
                         : 'bg-gray-800 text-gray-200'
                     }`}
                   >
-                    <p className="whitespace-pre-wrap">{msg.content}</p>
+                    <p className="whitespace-pre-wrap">
+                      {msg.role === 'assistant' ? stripSignals(msg.content) : msg.content}
+                    </p>
                     <p className={`text-xs mt-1 ${msg.role === 'user' ? 'text-blue-200' : 'text-gray-500'}`}>
                       {formatTime(msg.created_at)}
                     </p>
