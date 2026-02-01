@@ -279,9 +279,9 @@ From research:
 
 ### Viable Options
 
-#### Option A: GitHub App (Strongly Recommended)
+#### Option A: GitHub App via Manifest Flow ✅ IMPLEMENTED
 
-A centrally-owned GitHub App that acts as Poindexter's identity across all users.
+Each Dex instance creates its own GitHub App via the manifest flow during onboarding.
 
 ```
 Benefits:
@@ -289,39 +289,48 @@ Benefits:
 - No license seat consumed
 - Higher rate limits (15,000 req/hr vs 5,000)
 - Fine-grained permissions
-- Survives employee turnover
-- Better security model
-- Consistent branding across all installations
+- User owns their App (can customize name/logo)
+- Better security model (short-lived tokens)
+- Self-hosted friendly (no central dependency)
 ```
 
 **How it works:**
-1. Operator creates and owns the "Poindexter" GitHub App (one time)
-2. Users install the App on their repositories during onboarding
-3. Each installation gets its own installation ID and scoped access
-4. Commits show as "Poindexter[bot]" with consistent avatar/branding
+1. User clicks "Create GitHub App" in onboarding
+2. Dex generates a manifest and redirects to `github.com/settings/apps/new`
+3. GitHub creates the App (named `dex-<random>`) and redirects back with credentials
+4. User installs the App on their account/repos
+5. Commits show as "dex-xxxx[bot]" (user can rename in GitHub settings)
 
-**Implementation:**
+**Implementation (Completed):**
 
 ```go
-// /internal/toolbelt/github_app.go
-
-type GitHubAppClient struct {
-    appID          int64
-    installationID int64
-    privateKey     *rsa.PrivateKey
+// /internal/github/app.go - AppManager handles JWT generation and token caching
+type AppManager struct {
+    config     *AppConfig
+    privateKey *rsa.PrivateKey
+    // Token cache with 5-minute buffer before expiry
+    installTokens   map[int64]*cachedToken
 }
 
-func (c *GitHubAppClient) GetInstallationToken() (string, error) {
-    // Generate JWT, exchange for installation token
-    // Tokens are short-lived (1 hour)
-}
+// /internal/db/github.go - Database storage
+// - github_app_config: singleton table for App credentials
+// - github_installations: tracks installed accounts/orgs
+
+// /internal/api/github.go - API endpoints
+// - GET  /api/v1/setup/github/app/status    - Check if App configured
+// - GET  /api/v1/setup/github/app/manifest  - Get manifest for creation
+// - GET  /api/v1/setup/github/app/callback  - Handle App creation callback
+// - GET  /api/v1/setup/github/install/callback - Handle installation callback
+// - POST /api/v1/setup/github/sync          - Sync installations from GitHub
 ```
 
-**Onboarding Flow:**
-1. User clicks "Create GitHub App" link (pre-filled manifest)
-2. GitHub redirects with App credentials
-3. User installs App on repositories
-4. Poindexter stores App ID + private key + installation ID
+**Permissions Requested:**
+- `contents: write` - Read/write repo files
+- `pull_requests: write` - Create PRs
+- `issues: write` - Create issues
+- `administration: write` - Create repos
+- `metadata: read` - Repo metadata
+- `workflows: write` - Trigger GitHub Actions
 
 #### Option B: Dedicated Machine Account (Manual)
 
@@ -365,121 +374,100 @@ Flow:
 - All actions show as user
 - Not suitable if Poindexter identity is desired
 
-### Recommendation: GitHub App (Option A)
+### Final Decision: Per-Instance GitHub App via Manifest Flow ✅
 
 ```
 ┌────────────────────────────────────────────────────────────────────┐
-│                     GitHub App Architecture                         │
+│                 Per-Instance GitHub App Architecture                │
 ├────────────────────────────────────────────────────────────────────┤
 │                                                                     │
-│  OPERATOR (One-Time Setup)                                          │
-│  └── Creates "Poindexter" GitHub App                               │
-│      ├── App ID: 123456                                             │
-│      ├── Custom Avatar: [Poindexter Logo]                          │
-│      ├── Description: "AI development assistant"                   │
-│      └── Private Key: (stored securely by operator)                │
+│  DEX INSTANCE (User's Server)                                       │
+│  └── Creates own GitHub App during onboarding                      │
+│      ├── App Name: "dex-a1b2c3d4" (unique per instance)            │
+│      ├── Logo: Poindexter headshot (from manifest)                 │
+│      ├── Credentials: Stored in github_app_config table            │
+│      └── User can rename/rebrand in GitHub settings                │
 │                                                                     │
-│  USER A's GitHub                     USER B's GitHub                │
-│  └── Installs Poindexter App         └── Installs Poindexter App   │
-│      ├── Installation ID: 111            ├── Installation ID: 222  │
-│      ├── Repos: user-a/proj-1            ├── Repos: user-b/app     │
-│      └── Repos: user-a/proj-2            └── Org: user-b-org       │
+│  USER's GitHub Account                                              │
+│  └── Installs dex-xxxx App                                         │
+│      ├── Installation ID: stored in github_installations           │
+│      ├── Scoped to: Selected repos OR all repos                    │
+│      └── Can install on personal account + organizations           │
 │                                                                     │
-│  All Actions Appear As:                                             │
-│  ├── Commits: "Poindexter[bot] <123456+poindexter[bot]@...>"       │
-│  ├── PRs: "poindexter[bot]"                                        │
-│  └── Same avatar everywhere (brand recognition)                    │
+│  Token Flow:                                                        │
+│  ├── JWT: Generated from private key (10min expiry)                │
+│  ├── Installation Token: Exchanged from JWT (1hr expiry)           │
+│  └── Cache: In-memory with 5-minute refresh buffer                 │
+│                                                                     │
+│  Actions Appear As:                                                 │
+│  ├── Commits: "dex-xxxx[bot] <id+dex-xxxx[bot]@users...>"         │
+│  └── PRs/Issues: Created by "dex-xxxx[bot]"                        │
 │                                                                     │
 └────────────────────────────────────────────────────────────────────┘
 ```
 
-### Implementation Plan
+### Implementation Status ✅ COMPLETE
 
-**Step 1: Operator Creates GitHub App (One-Time)**
+**Key Files Created:**
 
-The operator (you) creates the Poindexter GitHub App once:
+| File | Purpose |
+|------|---------|
+| `/internal/github/app.go` | AppManager - JWT generation, token caching, installation management |
+| `/internal/db/github.go` | Database operations for app config & installations |
+| `/internal/api/github.go` | API endpoints for manifest flow & callbacks |
 
-1. Go to https://github.com/settings/apps/new
-2. Configure the App:
-   ```
-   Name:        Poindexter
-   Description: AI-powered development assistant
-   Homepage:    https://poindexter.ai
-   Logo:        [Upload Poindexter avatar]
-   Public:      Yes (so users can install it)
-   ```
-3. Set permissions:
-   ```
-   Repository permissions:
-   - Contents: Read & Write
-   - Issues: Read & Write
-   - Pull requests: Read & Write
-   - Workflows: Read & Write
-   - Metadata: Read-only
-   ```
-4. Generate and securely store the private key
-5. Note the App ID and publish the App
+**Database Schema (Implemented):**
 
-**Step 2: Store App Credentials (Operator-Side)**
+```sql
+-- Singleton table for App credentials
+CREATE TABLE github_app_config (
+    id INTEGER PRIMARY KEY DEFAULT 1,
+    app_id INTEGER NOT NULL,
+    app_slug TEXT NOT NULL,
+    client_id TEXT NOT NULL,
+    client_secret TEXT NOT NULL,
+    private_key TEXT NOT NULL,
+    webhook_secret TEXT,
+    created_at TIMESTAMP,
+    updated_at TIMESTAMP
+);
 
-The App's private key is stored centrally or distributed to instances:
-
-```go
-// /internal/toolbelt/github_app.go
-
-type GitHubAppConfig struct {
-    AppID         int64  `json:"app_id"`
-    PrivateKeyPEM string `json:"private_key"` // Or path to key file
-}
-
-// Loaded from operator-provisioned config (like Anthropic key)
-func LoadGitHubAppConfig(path string) (*GitHubAppConfig, error)
+-- Tracks installed accounts/orgs
+CREATE TABLE github_installations (
+    id INTEGER PRIMARY KEY,  -- GitHub's installation ID
+    account_id INTEGER NOT NULL,
+    account_type TEXT NOT NULL,  -- 'User' or 'Organization'
+    login TEXT NOT NULL,         -- Username or org name
+    created_at TIMESTAMP
+);
 ```
 
-**Step 3: User Installation Flow (Onboarding)**
+**API Endpoints (Implemented):**
 
-During onboarding, the user installs the pre-existing App:
-
-```go
-// /internal/api/github_app.go
-
-func (s *Server) handleGitHubAppInstallRedirect(w http.ResponseWriter, r *http.Request) {
-    // Redirect user to install the Poindexter App
-    // https://github.com/apps/poindexter/installations/new
-    http.Redirect(w, r, "https://github.com/apps/poindexter/installations/new", http.StatusFound)
-}
-
-func (s *Server) handleGitHubAppInstallCallback(w http.ResponseWriter, r *http.Request) {
-    installationID := r.URL.Query().Get("installation_id")
-
-    // Store this user's installation ID
-    // This scopes Poindexter's access to just their repos
-}
+```
+GET  /api/v1/setup/github/app/status     - Check if App is configured
+GET  /api/v1/setup/github/app/manifest   - Get manifest for App creation
+GET  /api/v1/setup/github/app/callback   - Handle App creation callback from GitHub
+GET  /api/v1/setup/github/install/callback - Handle installation callback
+GET  /api/v1/setup/github/installations  - List all installations
+POST /api/v1/setup/github/sync           - Sync installations from GitHub
+DELETE /api/v1/setup/github/app          - Remove App configuration
 ```
 
-**Step 4: Authentication**
+**Onboarding Flow:**
 
-```go
-// /internal/toolbelt/github_app.go
-
-func (c *GitHubAppClient) getInstallationToken(ctx context.Context) (string, error) {
-    // Create JWT signed with App private key
-    jwt := createAppJWT(c.appID, c.privateKey)
-
-    // Exchange for installation access token
-    // POST /app/installations/{installation_id}/access_tokens
-    token, err := exchangeForToken(jwt, c.installationID)
-
-    // Cache token until near expiration
-    return token, err
-}
 ```
-
-**Files to create/modify:**
-- `/internal/toolbelt/github_app.go` - GitHub App client
-- `/internal/api/github_app.go` - App creation/installation handlers
-- `/frontend/src/components/GitHubAppSetup.tsx` - UI for App creation
-- `/internal/api/setup.go` - Integrate into onboarding flow
+1. User clicks "Create GitHub App" button
+2. Frontend fetches manifest from /api/v1/setup/github/app/manifest
+3. User redirected to: github.com/settings/apps/new?manifest=<json>
+4. User approves App creation on GitHub
+5. GitHub redirects to callback with code
+6. Backend exchanges code for credentials (app_id, private_key, etc.)
+7. Credentials saved to github_app_config table
+8. User redirected to install the App on their repos
+9. Installation callback saves installation_id to github_installations
+10. Setup complete - App can now authenticate to GitHub
+```
 
 ---
 
@@ -631,13 +619,13 @@ Currently, `secrets.json` stores credentials in **plaintext**. The redesign shou
 
 ## Implementation Phases
 
-### Phase 1: Foundation (2-3 weeks)
+### Phase 1: GitHub App Foundation ✅ COMPLETE
 
-- [ ] Implement GitHub App authentication
-- [ ] Create App manifest and creation flow
-- [ ] Add installation management
-- [ ] Update onboarding UI with App option
-- [ ] Maintain PAT as fallback
+- [x] Implement GitHub App authentication (`internal/github/app.go`)
+- [x] Create App manifest and creation flow (`internal/api/github.go`)
+- [x] Add installation management (`internal/db/github.go`)
+- [x] Update onboarding UI with App option
+- [x] Maintain PAT as fallback (legacy token support)
 
 ### Phase 2: Email Infrastructure (1-2 weeks)
 
@@ -680,9 +668,10 @@ Currently, `secrets.json` stores credentials in **plaintext**. The redesign shou
    - User might want custom naming
 
 3. **Multi-Instance Scenarios**: Will users run multiple Poindexter instances?
-   - **Decision**: One central GitHub App with consistent branding
-   - Each instance gets its own installation ID (scoped access)
-   - Same "Poindexter[bot]" identity across all users (brand recognition)
+   - **Decision**: Per-instance GitHub Apps via manifest flow
+   - Each instance creates its own App (named `dex-<random>`)
+   - User can customize name/logo in GitHub settings after creation
+   - Self-hosted friendly - no central App dependency
 
 4. **Operator Model**: Is there a central operator provisioning instances?
    - If yes: Consider centralized credential management
