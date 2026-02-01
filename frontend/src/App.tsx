@@ -1584,6 +1584,8 @@ function QuestDetailPage() {
 
   // Track accepted/rejected drafts to avoid re-showing them after loadQuest
   const handledDraftIds = useRef<Set<string>>(new Set());
+  // Ref for textarea to reset height after sending
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const { connected, subscribe } = useWebSocket();
   const navigate = useNavigate();
@@ -1720,6 +1722,10 @@ function QuestDetailPage() {
     try {
       await sendQuestMessage(id, messageInput.trim());
       setMessageInput('');
+      // Reset textarea height
+      if (textareaRef.current) {
+        textareaRef.current.style.height = 'auto';
+      }
       // Message will be added via WebSocket event
     } catch (err) {
       // err could be ApiError (with message property) or Error
@@ -1959,8 +1965,8 @@ function QuestDetailPage() {
             </div>
           )}
 
-          {/* Messages */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          {/* Messages - aligned to bottom */}
+          <div className="flex-1 overflow-y-auto p-4 flex flex-col justify-end">
             {messages.length === 0 ? (
               <div className="text-center py-8">
                 <p className="text-gray-400 mb-2">Start your quest</p>
@@ -1969,7 +1975,8 @@ function QuestDetailPage() {
                 </p>
               </div>
             ) : (
-              messages.map((msg) => (
+              <div className="space-y-4">
+              {messages.map((msg) => (
                 <div
                   key={msg.id}
                   className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
@@ -1989,7 +1996,8 @@ function QuestDetailPage() {
                     </p>
                   </div>
                 </div>
-              ))
+              ))}
+              </div>
             )}
           </div>
 
@@ -2021,21 +2029,55 @@ function QuestDetailPage() {
           {/* Input Area */}
           {isActive && (
             <form onSubmit={handleSendMessage} className="p-4 border-t border-gray-700">
-              <div className="flex gap-3">
-                <input
-                  type="text"
+              <div className="flex gap-3 items-end">
+                <textarea
+                  ref={textareaRef}
                   value={messageInput}
-                  onChange={(e) => setMessageInput(e.target.value)}
+                  onChange={(e) => {
+                    setMessageInput(e.target.value);
+                    // Auto-resize: reset height then set to scrollHeight
+                    e.target.style.height = 'auto';
+                    e.target.style.height = Math.min(e.target.scrollHeight, window.innerWidth < 768 ? 120 : 200) + 'px';
+                  }}
+                  onKeyDown={(e) => {
+                    // Check if mobile (touch device)
+                    const isMobile = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+
+                    if (e.key === 'Enter') {
+                      if (isMobile) {
+                        // Mobile: Enter = new line (don't prevent default)
+                        return;
+                      }
+                      // Desktop: Enter = send, Shift+Enter = new line
+                      if (!e.shiftKey) {
+                        e.preventDefault();
+                        if (messageInput.trim() && !isSending) {
+                          handleSendMessage(e);
+                        }
+                      }
+                    }
+                  }}
                   placeholder="Describe what you want to accomplish..."
-                  className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none min-h-[42px] max-h-[120px] md:max-h-[200px] overflow-y-auto"
                   disabled={isSending}
+                  rows={1}
                 />
                 <button
                   type="submit"
                   disabled={isSending || !messageInput.trim()}
-                  className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-700 disabled:cursor-not-allowed text-white font-medium px-4 py-2 rounded-lg transition-colors"
+                  className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-700 disabled:cursor-not-allowed text-white font-medium p-2 rounded-lg transition-colors flex-shrink-0"
+                  aria-label="Send message"
                 >
-                  {isSending ? 'Sending...' : 'Send'}
+                  {isSending ? (
+                    <svg className="w-6 h-6 animate-spin" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                    </svg>
+                  ) : (
+                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                    </svg>
+                  )}
                 </button>
               </div>
             </form>
