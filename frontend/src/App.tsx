@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Routes, Route, Navigate, useNavigate, useParams, Link } from 'react-router-dom';
 import { useAuthStore } from './stores/auth';
-import { api, fetchApprovals, approveApproval, rejectApproval, fetchQuests, createQuest, fetchQuest, sendQuestMessage, completeQuest, reopenQuest, deleteQuest, createObjective, updateQuestModel, fetchPreflightCheck } from './lib/api';
+import { api, fetchApprovals, approveApproval, rejectApproval, fetchQuests, createQuest, fetchQuest, fetchQuestTasks, sendQuestMessage, completeQuest, reopenQuest, deleteQuest, createObjective, updateQuestModel, fetchPreflightCheck } from './lib/api';
 import { useWebSocket } from './hooks/useWebSocket';
 import { Onboarding } from './components/Onboarding';
 import { ActivityFeed } from './components/ActivityFeed';
@@ -1500,6 +1500,10 @@ function parseObjectiveDrafts(content: string): ObjectiveDraft[] {
     try {
       const draft = JSON.parse(match[1]);
       if (draft.title && draft.draft_id) {
+        // Default auto_start to true if not specified
+        if (draft.auto_start === undefined) {
+          draft.auto_start = true;
+        }
         drafts.push(draft);
       }
     } catch {
@@ -1510,16 +1514,29 @@ function parseObjectiveDrafts(content: string): ObjectiveDraft[] {
   return drafts;
 }
 
-// Helper to strip signals from message content for display
-function stripSignals(content: string): string {
-  // Remove OBJECTIVE_DRAFT signals
-  let stripped = content.replace(/OBJECTIVE_DRAFT:\s*\{[\s\S]*?\}\s*(?=OBJECTIVE_DRAFT:|QUESTION:|QUEST_READY:|$)/g, '');
-  // Remove QUESTION signals
-  stripped = stripped.replace(/QUESTION:\s*\{[^}]*\}/g, '');
+// Helper to format signals for display (strips drafts, formats questions)
+function formatMessageContent(content: string): string {
+  // Remove OBJECTIVE_DRAFT signals (these are shown in the sidebar)
+  let formatted = content.replace(/OBJECTIVE_DRAFT:\s*\{[\s\S]*?\}\s*(?=OBJECTIVE_DRAFT:|QUESTION:|QUEST_READY:|$)/g, '');
+
+  // Format QUESTION signals as readable text
+  formatted = formatted.replace(/QUESTION:\s*(\{[^}]*\})/g, (_match, jsonStr) => {
+    try {
+      const q = JSON.parse(jsonStr);
+      let questionText = `\n**${q.question}**`;
+      if (q.options && q.options.length > 0) {
+        questionText += '\n' + q.options.map((opt: string) => `• ${opt}`).join('\n');
+      }
+      return questionText;
+    } catch {
+      return ''; // Strip malformed questions
+    }
+  });
+
   // Remove QUEST_READY signals
-  stripped = stripped.replace(/QUEST_READY:\s*\{[^}]*\}/g, '');
+  formatted = formatted.replace(/QUEST_READY:\s*\{[^}]*\}/g, '');
   // Clean up extra whitespace
-  return stripped.trim();
+  return formatted.trim();
 }
 
 // Question type for quest conversations
@@ -1580,14 +1597,27 @@ function QuestDetailPage() {
       setQuest(data.quest);
       setMessages(data.messages);
 
+      // Fetch quest tasks to filter out already-accepted drafts
+      let existingTaskTitles: Set<string> = new Set();
+      try {
+        const tasks = await fetchQuestTasks(id);
+        existingTaskTitles = new Set(tasks.map((t) => t.Title));
+      } catch {
+        // Continue without task filtering if fetch fails
+      }
+
       // Parse drafts and questions from existing messages
       const allDrafts: ObjectiveDraft[] = [];
       let latestQuestions: QuestQuestion[] = [];
       for (const msg of data.messages) {
         if (msg.role === 'assistant') {
           const msgDrafts = parseObjectiveDrafts(msg.content);
-          // Filter out drafts that have been accepted or rejected
-          const unhandledDrafts = msgDrafts.filter((d) => !handledDraftIds.current.has(d.draft_id));
+          // Filter out drafts that have been:
+          // 1. Accepted/rejected in this session (handledDraftIds)
+          // 2. Already converted to tasks (matching title)
+          const unhandledDrafts = msgDrafts.filter(
+            (d) => !handledDraftIds.current.has(d.draft_id) && !existingTaskTitles.has(d.title)
+          );
           allDrafts.push(...unhandledDrafts);
           // Only keep questions from the last assistant message
           const msgQuestions = parseQuestions(msg.content);
@@ -1684,6 +1714,8 @@ function QuestDetailPage() {
 
     setIsSending(true);
     setError(null);
+    // Clear questions immediately when user sends a message
+    setQuestions([]);
 
     try {
       await sendQuestMessage(id, messageInput.trim());
@@ -1950,7 +1982,7 @@ function QuestDetailPage() {
                     }`}
                   >
                     <p className="whitespace-pre-wrap">
-                      {msg.role === 'assistant' ? stripSignals(msg.content) : msg.content}
+                      {msg.role === 'assistant' ? formatMessageContent(msg.content) : msg.content}
                     </p>
                     <p className={`text-xs mt-1 ${msg.role === 'user' ? 'text-blue-200' : 'text-gray-500'}`}>
                       {formatTime(msg.created_at)}
