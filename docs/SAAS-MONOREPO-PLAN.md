@@ -943,64 +943,526 @@ volumes:
 
 ## Integration with Open Source Dex
 
-### Dex Configuration
+### Seamless OAuth Connection Flow
 
-```yaml
-# In the open-source Dex repo: /opt/dex/config.yaml
+No manual API key copying. Dex connects to Poindexter Cloud via OAuth.
 
-identity:
-  # Option 1: Use Poindexter Cloud (managed)
-  provider: "poindexter"
-  api_key: "${POINDEXTER_API_KEY}"
-  api_url: "https://api.poindexter.ai"
-  proxy_url: "https://proxy.poindexter.ai"
-
-  # Option 2: Self-managed (BYOK)
-  # provider: "custom"
-  # anthropic_key: "${ANTHROPIC_API_KEY}"
-  # google_credentials_file: "/opt/dex/google-credentials.json"
-  # telnyx_api_key: "${TELNYX_API_KEY}"
-  # telnyx_phone_number: "+15551234567"
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                     DEX ↔ POINDEXTER CLOUD CONNECTION                        │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  IN DEX ONBOARDING UI                                                        │
+│                                                                              │
+│  ┌───────────────────────────────────────────────────────────────────────┐  │
+│  │  How would you like to set up Poindexter's identity?                  │  │
+│  │                                                                        │  │
+│  │  ○ Self Setup (bring your own API keys)                               │  │
+│  │  ● Connect to Poindexter Cloud     ← RECOMMENDED                      │  │
+│  │                                                                        │  │
+│  │  [Connect to Poindexter Cloud]                                        │  │
+│  └───────────────────────────────────────────────────────────────────────┘  │
+│                                                                              │
+│  STEP 1: User clicks "Connect to Poindexter Cloud"                          │
+│          └── Dex opens browser to: cloud.poindexter.ai/connect?...          │
+│                                                                              │
+│  STEP 2: User lands on Poindexter Cloud                                     │
+│          ├── If not logged in → Sign up / Login                            │
+│          ├── If no subscription → Choose plan + add payment                │
+│          └── If ready → Authorize connection                                │
+│                                                                              │
+│  STEP 3: User authorizes Dex instance                                       │
+│          ┌────────────────────────────────────────────────────────────┐    │
+│          │  Authorize Poindexter Instance                              │    │
+│          │                                                              │    │
+│          │  "dex-a1b2c3d4" wants to connect to your account.          │    │
+│          │                                                              │    │
+│          │  This will allow the instance to:                           │    │
+│          │  ✓ Use your provisioned email identity                     │    │
+│          │  ✓ Use your provisioned phone/Signal                       │    │
+│          │  ✓ Make AI requests (metered to your account)              │    │
+│          │                                                              │    │
+│          │  [Authorize]                        [Cancel]                 │    │
+│          └────────────────────────────────────────────────────────────┘    │
+│                                                                              │
+│  STEP 4: Redirect back to Dex with auth code                                │
+│          └── Dex exchanges code for access + refresh tokens                 │
+│                                                                              │
+│  STEP 5: Dex is connected                                                    │
+│          ├── Tokens stored locally (encrypted)                              │
+│          ├── Identity fetched from cloud                                    │
+│          └── Ready to use                                                   │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Dex Identity Client
+### OAuth Flow Implementation
+
+**Poindexter Cloud Side:**
 
 ```go
-// In open-source Dex: /internal/identity/cloud_client.go
+// apps/api/internal/handlers/oauth.go
 
-type CloudClient struct {
-    apiKey   string
-    apiURL   string
-    proxyURL string
-    http     *http.Client
+// GET /oauth/authorize
+// Dex redirects user here to start connection
+func HandleOAuthAuthorize(w http.ResponseWriter, r *http.Request) {
+    clientID := r.URL.Query().Get("client_id")      // Dex instance ID
+    redirectURI := r.URL.Query().Get("redirect_uri") // Dex callback URL
+    state := r.URL.Query().Get("state")              // CSRF token
+    codeChallenge := r.URL.Query().Get("code_challenge") // PKCE
+
+    // Validate redirect_uri is a valid Dex instance
+    // (Tailscale URL, localhost, or registered domain)
+
+    // Check if user is logged in
+    user := getSessionUser(r)
+    if user == nil {
+        // Redirect to login, preserving OAuth params
+        redirectToLogin(w, r)
+        return
+    }
+
+    // Check if user has active subscription
+    if !hasActiveSubscription(user) {
+        // Redirect to subscription page
+        redirectToSubscribe(w, r)
+        return
+    }
+
+    // Show authorization page
+    renderAuthorizePage(w, user, clientID, redirectURI, state)
 }
 
-// Fetch identity on startup
-func (c *CloudClient) GetIdentity(ctx context.Context) (*Identity, error) {
-    req, _ := http.NewRequestWithContext(ctx, "GET", c.apiURL+"/v1/identity", nil)
-    req.Header.Set("Authorization", "Bearer "+c.apiKey)
+// POST /oauth/authorize
+// User clicks "Authorize"
+func HandleOAuthAuthorizeSubmit(w http.ResponseWriter, r *http.Request) {
+    user := requireAuth(r)
 
-    resp, err := c.http.Do(req)
-    // ... parse response
+    clientID := r.FormValue("client_id")
+    redirectURI := r.FormValue("redirect_uri")
+    state := r.FormValue("state")
+    codeChallenge := r.FormValue("code_challenge")
+
+    // Generate authorization code
+    code := generateAuthCode(user.ID, clientID, codeChallenge)
+
+    // Store code temporarily (5 min expiry)
+    storeAuthCode(code, AuthCodeData{
+        UserID:        user.ID,
+        ClientID:      clientID,
+        CodeChallenge: codeChallenge,
+        ExpiresAt:     time.Now().Add(5 * time.Minute),
+    })
+
+    // Redirect back to Dex
+    redirectURL := fmt.Sprintf("%s?code=%s&state=%s", redirectURI, code, state)
+    http.Redirect(w, r, redirectURL, http.StatusFound)
 }
 
-// Create AI client that routes through proxy
-func (c *CloudClient) NewAnthropicClient() *anthropic.Client {
-    return anthropic.NewClient(
-        anthropic.WithAPIKey(c.apiKey),  // Uses our key, not Anthropic's
-        anthropic.WithBaseURL(c.proxyURL),
+// POST /oauth/token
+// Dex exchanges code for tokens
+func HandleOAuthToken(w http.ResponseWriter, r *http.Request) {
+    grantType := r.FormValue("grant_type")
+
+    switch grantType {
+    case "authorization_code":
+        code := r.FormValue("code")
+        codeVerifier := r.FormValue("code_verifier") // PKCE
+
+        // Validate code and PKCE
+        data, err := validateAuthCode(code, codeVerifier)
+        if err != nil {
+            http.Error(w, "Invalid code", 400)
+            return
+        }
+
+        // Generate tokens
+        accessToken := generateAccessToken(data.UserID, 1*time.Hour)
+        refreshToken := generateRefreshToken(data.UserID, 30*24*time.Hour)
+
+        // Return tokens
+        json.NewEncoder(w).Encode(map[string]any{
+            "access_token":  accessToken,
+            "refresh_token": refreshToken,
+            "token_type":    "Bearer",
+            "expires_in":    3600,
+        })
+
+    case "refresh_token":
+        refreshToken := r.FormValue("refresh_token")
+
+        // Validate and issue new access token
+        userID, err := validateRefreshToken(refreshToken)
+        if err != nil {
+            http.Error(w, "Invalid refresh token", 401)
+            return
+        }
+
+        accessToken := generateAccessToken(userID, 1*time.Hour)
+
+        json.NewEncoder(w).Encode(map[string]any{
+            "access_token": accessToken,
+            "token_type":   "Bearer",
+            "expires_in":   3600,
+        })
+    }
+}
+```
+
+**Dex (Open Source) Side:**
+
+```go
+// In open-source Dex: /internal/cloud/oauth.go
+
+type CloudConnection struct {
+    db           *db.DB
+    clientID     string // This Dex instance's unique ID
+    cloudBaseURL string // https://cloud.poindexter.ai
+}
+
+// Start OAuth flow - opens browser
+func (c *CloudConnection) StartConnection(ctx context.Context) (string, error) {
+    // Generate PKCE code verifier and challenge
+    codeVerifier := generateCodeVerifier()
+    codeChallenge := generateCodeChallenge(codeVerifier)
+    state := generateState()
+
+    // Store for later validation
+    c.db.StorePendingAuth(state, codeVerifier)
+
+    // Build authorization URL
+    authURL := fmt.Sprintf(
+        "%s/oauth/authorize?client_id=%s&redirect_uri=%s&state=%s&code_challenge=%s&code_challenge_method=S256",
+        c.cloudBaseURL,
+        c.clientID,
+        url.QueryEscape(c.getCallbackURL()),
+        state,
+        codeChallenge,
     )
+
+    return authURL, nil
 }
 
-// Email operations
-func (c *CloudClient) SendEmail(ctx context.Context, to, subject, body string) error {
-    req := EmailRequest{To: to, Subject: subject, Body: body}
-    // POST to c.apiURL + "/v1/email/send"
+// Handle callback from cloud
+func (c *CloudConnection) HandleCallback(ctx context.Context, code, state string) error {
+    // Validate state
+    codeVerifier, err := c.db.GetPendingAuth(state)
+    if err != nil {
+        return fmt.Errorf("invalid state")
+    }
+
+    // Exchange code for tokens
+    tokens, err := c.exchangeCode(ctx, code, codeVerifier)
+    if err != nil {
+        return err
+    }
+
+    // Store tokens (encrypted)
+    if err := c.db.StoreCloudTokens(tokens); err != nil {
+        return err
+    }
+
+    // Fetch and store identity
+    identity, err := c.fetchIdentity(ctx, tokens.AccessToken)
+    if err != nil {
+        return err
+    }
+
+    if err := c.db.StoreCloudIdentity(identity); err != nil {
+        return err
+    }
+
+    return nil
 }
 
-// Signal operations
-func (c *CloudClient) SendSignal(ctx context.Context, to, message string) error {
-    // POST to c.apiURL + "/v1/signal/send"
+// Get current identity (used throughout Dex)
+func (c *CloudConnection) GetIdentity(ctx context.Context) (*Identity, error) {
+    // Get stored tokens
+    tokens, err := c.db.GetCloudTokens()
+    if err != nil {
+        return nil, fmt.Errorf("not connected to cloud")
+    }
+
+    // Refresh if needed
+    if tokens.IsExpired() {
+        tokens, err = c.refreshTokens(ctx, tokens.RefreshToken)
+        if err != nil {
+            return nil, err
+        }
+        c.db.StoreCloudTokens(tokens)
+    }
+
+    // Return cached identity (refresh periodically)
+    return c.db.GetCloudIdentity()
+}
+```
+
+### Payment Methods (Stripe)
+
+Support multiple payment options via Stripe:
+
+```go
+// apps/api/internal/handlers/billing.go
+
+// POST /v1/billing/subscribe
+func HandleSubscribe(w http.ResponseWriter, r *http.Request) {
+    user := requireAuth(r)
+
+    var req struct {
+        Plan string `json:"plan"` // "basic" or "pro"
+    }
+    json.NewDecoder(r.Body).Decode(&req)
+
+    // Create Stripe Checkout Session with multiple payment methods
+    session, err := stripe.CheckoutSessions.New(&stripe.CheckoutSessionParams{
+        Customer: stripe.String(user.StripeCustomerID),
+        Mode:     stripe.String("subscription"),
+        LineItems: []*stripe.CheckoutSessionLineItemParams{
+            {
+                Price:    stripe.String(getPriceID(req.Plan)),
+                Quantity: stripe.Int64(1),
+            },
+        },
+        PaymentMethodTypes: stripe.StringSlice([]string{
+            "card",           // Credit/Debit cards
+            "link",           // Stripe Link (one-click)
+        }),
+        // These require additional Stripe configuration:
+        // "google_pay"     - via card with wallet detection
+        // "apple_pay"      - via card with wallet detection
+        // "paypal"         - requires Stripe PayPal integration
+        // "cashapp"        - requires Cash App Pay setup
+        SuccessURL: stripe.String(fmt.Sprintf("%s/billing/success?session_id={CHECKOUT_SESSION_ID}", baseURL)),
+        CancelURL:  stripe.String(fmt.Sprintf("%s/billing/cancel", baseURL)),
+    })
+
+    json.NewEncoder(w).Encode(map[string]string{
+        "checkout_url": session.URL,
+    })
+}
+```
+
+**Stripe Dashboard Setup:**
+
+1. Enable payment methods in Stripe Dashboard:
+   - Cards (default)
+   - Google Pay (automatic with cards)
+   - Apple Pay (automatic with cards)
+   - Link (Stripe's one-click checkout)
+   - PayPal (requires activation)
+   - Cash App Pay (requires activation)
+
+2. Configure in Stripe:
+   ```
+   Dashboard → Settings → Payment Methods → Enable:
+   ├── Cards ✓
+   ├── Wallets
+   │   ├── Apple Pay ✓
+   │   ├── Google Pay ✓
+   │   └── Link ✓
+   ├── PayPal ✓
+   └── Cash App Pay ✓
+   ```
+
+### Signup + Connect Flow (Combined)
+
+For new users, combine signup and Dex connection:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    NEW USER: SIGNUP + CONNECT FLOW                           │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  1. User clicks "Connect to Poindexter Cloud" in Dex                        │
+│     └── Opens: cloud.poindexter.ai/connect?client_id=...                    │
+│                                                                              │
+│  2. User sees signup/login page                                              │
+│     ┌────────────────────────────────────────────────────────────────────┐  │
+│     │  Welcome to Poindexter Cloud                                        │  │
+│     │                                                                      │  │
+│     │  [Continue with Google]                                              │  │
+│     │  [Continue with GitHub]                                              │  │
+│     │                                                                      │  │
+│     │  ─────────── or ───────────                                         │  │
+│     │                                                                      │  │
+│     │  Email: _______________________                                      │  │
+│     │  Password: ____________________                                      │  │
+│     │                                                                      │  │
+│     │  [Create Account]                                                    │  │
+│     │                                                                      │  │
+│     │  Already have an account? [Log in]                                  │  │
+│     └────────────────────────────────────────────────────────────────────┘  │
+│                                                                              │
+│  3. User chooses plan                                                        │
+│     ┌────────────────────────────────────────────────────────────────────┐  │
+│     │  Choose Your Plan                                                    │  │
+│     │                                                                      │  │
+│     │  ┌─────────────────────┐    ┌─────────────────────┐                │  │
+│     │  │ Basic - $50/mo      │    │ Pro - $250/mo       │                │  │
+│     │  │                     │    │                     │                │  │
+│     │  │ ✓ 5M tokens         │    │ ✓ 30M tokens        │                │  │
+│     │  │ ✓ Email + Calendar  │    │ ✓ Email + Calendar  │                │  │
+│     │  │ ✓ Phone + Signal    │    │ ✓ Phone + Signal    │                │  │
+│     │  │ ✓ Email support     │    │ ✓ Priority support  │                │  │
+│     │  │                     │    │                     │                │  │
+│     │  │ [Select Basic]      │    │ [Select Pro]        │                │  │
+│     │  └─────────────────────┘    └─────────────────────┘                │  │
+│     └────────────────────────────────────────────────────────────────────┘  │
+│                                                                              │
+│  4. Stripe Checkout (embedded or redirect)                                  │
+│     ┌────────────────────────────────────────────────────────────────────┐  │
+│     │  Payment                                                             │  │
+│     │                                                                      │  │
+│     │  [Google Pay]  [Apple Pay]  [PayPal]  [Cash App]                   │  │
+│     │                                                                      │  │
+│     │  ─────────── or pay with card ───────────                           │  │
+│     │                                                                      │  │
+│     │  Card number: ____ ____ ____ ____                                   │  │
+│     │  Expiry: __/__    CVC: ___                                          │  │
+│     │                                                                      │  │
+│     │  [Subscribe - $50/mo]                                                │  │
+│     └────────────────────────────────────────────────────────────────────┘  │
+│                                                                              │
+│  5. Identity provisioning (automatic, shown as loading)                     │
+│     ┌────────────────────────────────────────────────────────────────────┐  │
+│     │  Setting up your Poindexter identity...                             │  │
+│     │                                                                      │  │
+│     │  ✓ Creating email account                                           │  │
+│     │  ✓ Provisioning phone number                                        │  │
+│     │  ◐ Registering Signal...                                            │  │
+│     │                                                                      │  │
+│     └────────────────────────────────────────────────────────────────────┘  │
+│                                                                              │
+│  6. Authorization (auto-approved for new signup via this flow)              │
+│     └── Redirect back to Dex with auth code                                │
+│                                                                              │
+│  7. Dex receives tokens, fetches identity, ready to use                    │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Dex Database Changes
+
+```sql
+-- In open-source Dex: new table for cloud connection
+
+CREATE TABLE cloud_connection (
+    id INTEGER PRIMARY KEY DEFAULT 1,  -- Singleton
+
+    -- OAuth tokens (encrypted)
+    access_token_encrypted TEXT,
+    refresh_token_encrypted TEXT,
+    token_expires_at TIMESTAMP,
+
+    -- Cached identity (from cloud)
+    identity_email TEXT,
+    identity_phone TEXT,
+    identity_signal_registered BOOLEAN,
+
+    -- Connection metadata
+    connected_at TIMESTAMP,
+    last_synced_at TIMESTAMP,
+
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+### API Endpoints for Dex Connection
+
+```
+# Cloud API endpoints for Dex OAuth
+
+GET  /oauth/authorize           # Start OAuth flow (browser)
+POST /oauth/authorize           # User approves connection
+POST /oauth/token               # Exchange code for tokens
+POST /oauth/revoke              # Disconnect instance
+
+# Identity endpoints (require Bearer token)
+GET  /v1/identity               # Get provisioned identity
+GET  /v1/identity/status        # Check provisioning status
+
+# Usage endpoints
+GET  /v1/usage                  # Get current usage stats
+GET  /v1/usage/remaining        # Get remaining included tokens
+```
+
+### Dex Onboarding UI Changes
+
+```tsx
+// In open-source Dex: frontend/src/components/CloudConnect.tsx
+
+function CloudConnect() {
+  const [connecting, setConnecting] = useState(false);
+  const [connected, setConnected] = useState(false);
+  const [identity, setIdentity] = useState(null);
+
+  const handleConnect = async () => {
+    setConnecting(true);
+
+    // Get OAuth URL from backend
+    const { authUrl } = await fetch('/api/v1/cloud/connect').then(r => r.json());
+
+    // Open in new window (or redirect)
+    const popup = window.open(authUrl, 'poindexter-cloud', 'width=600,height=700');
+
+    // Listen for callback
+    window.addEventListener('message', async (event) => {
+      if (event.data.type === 'poindexter-cloud-connected') {
+        popup.close();
+
+        // Fetch identity
+        const identity = await fetch('/api/v1/identity').then(r => r.json());
+        setIdentity(identity);
+        setConnected(true);
+        setConnecting(false);
+      }
+    });
+  };
+
+  if (connected) {
+    return (
+      <div className="cloud-connected">
+        <h3>✓ Connected to Poindexter Cloud</h3>
+        <div className="identity-info">
+          <p>Email: {identity.email}</p>
+          <p>Phone: {identity.phone}</p>
+          <p>Signal: {identity.signalRegistered ? '✓ Active' : 'Pending...'}</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="cloud-connect">
+      <h3>Connect to Poindexter Cloud</h3>
+      <p>Get a complete identity for your Poindexter: email, phone, Signal, and AI access.</p>
+
+      <div className="plans">
+        <div className="plan">
+          <h4>Basic - $50/mo</h4>
+          <ul>
+            <li>5M AI tokens included</li>
+            <li>Email + Calendar</li>
+            <li>Phone + Signal</li>
+          </ul>
+        </div>
+        <div className="plan featured">
+          <h4>Pro - $250/mo</h4>
+          <ul>
+            <li>30M AI tokens included</li>
+            <li>Email + Calendar</li>
+            <li>Phone + Signal</li>
+            <li>Priority support</li>
+          </ul>
+        </div>
+      </div>
+
+      <button onClick={handleConnect} disabled={connecting}>
+        {connecting ? 'Connecting...' : 'Connect to Poindexter Cloud'}
+      </button>
+    </div>
+  );
 }
 ```
 
