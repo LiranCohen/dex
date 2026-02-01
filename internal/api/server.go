@@ -2759,6 +2759,21 @@ func (s *Server) handleCreateObjective(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 
+	// Add a message to the quest history indicating the objective was accepted
+	acceptMessage := fmt.Sprintf("✓ Accepted objective: **%s**", req.Title)
+	if msg, err := s.db.CreateQuestMessage(questID, "user", acceptMessage); err != nil {
+		fmt.Printf("warning: failed to add accept message to quest: %v\n", err)
+	} else if s.hub != nil {
+		// Broadcast the new message via WebSocket
+		s.hub.Broadcast(websocket.Message{
+			Type: "quest.message",
+			Payload: map[string]any{
+				"quest_id": questID,
+				"message":  msg,
+			},
+		})
+	}
+
 	response := map[string]any{
 		"message": "objective created",
 		"task":    toTaskResponse(createdTask),
