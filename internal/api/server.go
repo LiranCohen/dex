@@ -1222,9 +1222,11 @@ type SessionResponse struct {
 	WorktreePath   string   `json:"worktree_path"`
 	IterationCount int      `json:"iteration_count"`
 	MaxIterations  int      `json:"max_iterations"`
-	TokensUsed     int64    `json:"tokens_used"`
+	InputTokens    int64    `json:"input_tokens"`
+	OutputTokens   int64    `json:"output_tokens"`
+	TokensUsed     int64    `json:"tokens_used"`     // Derived: input + output
 	TokensBudget   *int64   `json:"tokens_budget,omitempty"`
-	DollarsUsed    float64  `json:"dollars_used"`
+	DollarsUsed    float64  `json:"dollars_used"`    // Derived from tokens and rates
 	DollarsBudget  *float64 `json:"dollars_budget,omitempty"`
 	StartedAt      string   `json:"started_at,omitempty"`
 	LastActivity   string   `json:"last_activity,omitempty"`
@@ -1240,9 +1242,11 @@ func toSessionResponse(s *session.ActiveSession) SessionResponse {
 		WorktreePath:   s.WorktreePath,
 		IterationCount: s.IterationCount,
 		MaxIterations:  s.MaxIterations,
-		TokensUsed:     s.TokensUsed,
+		InputTokens:    s.InputTokens,
+		OutputTokens:   s.OutputTokens,
+		TokensUsed:     s.TotalTokens(),
 		TokensBudget:   s.TokensBudget,
-		DollarsUsed:    s.DollarsUsed,
+		DollarsUsed:    s.Cost(),
 		DollarsBudget:  s.DollarsBudget,
 	}
 	if !s.StartedAt.IsZero() {
@@ -1647,7 +1651,7 @@ func (s *Server) handleGetTaskActivity(c echo.Context) error {
 	var totalTokens int64
 	var totalIterations int
 	for _, sess := range sessions {
-		totalTokens += sess.TokensUsed
+		totalTokens += sess.TotalTokens()
 		if sess.IterationCount > totalIterations {
 			totalIterations = sess.IterationCount
 		}
@@ -2282,12 +2286,13 @@ type questResponse struct {
 }
 
 type questSummaryResponse struct {
-	TotalTasks     int `json:"total_tasks"`
-	CompletedTasks int `json:"completed_tasks"`
-	RunningTasks   int `json:"running_tasks"`
-	FailedTasks    int `json:"failed_tasks"`
-	BlockedTasks   int `json:"blocked_tasks"`
-	PendingTasks   int `json:"pending_tasks"`
+	TotalTasks       int     `json:"total_tasks"`
+	CompletedTasks   int     `json:"completed_tasks"`
+	RunningTasks     int     `json:"running_tasks"`
+	FailedTasks      int     `json:"failed_tasks"`
+	BlockedTasks     int     `json:"blocked_tasks"`
+	PendingTasks     int     `json:"pending_tasks"`
+	TotalDollarsUsed float64 `json:"total_dollars_used"`
 }
 
 type questMessageResponse struct {
@@ -2313,12 +2318,13 @@ func toQuestResponse(q *db.Quest, summary *db.QuestSummary) questResponse {
 	}
 	if summary != nil {
 		resp.Summary = &questSummaryResponse{
-			TotalTasks:     summary.TotalTasks,
-			CompletedTasks: summary.CompletedTasks,
-			RunningTasks:   summary.RunningTasks,
-			FailedTasks:    summary.FailedTasks,
-			BlockedTasks:   summary.BlockedTasks,
-			PendingTasks:   summary.PendingTasks,
+			TotalTasks:       summary.TotalTasks,
+			CompletedTasks:   summary.CompletedTasks,
+			RunningTasks:     summary.RunningTasks,
+			FailedTasks:      summary.FailedTasks,
+			BlockedTasks:     summary.BlockedTasks,
+			PendingTasks:     summary.PendingTasks,
+			TotalDollarsUsed: summary.TotalDollarsUsed,
 		}
 	}
 	return resp

@@ -39,15 +39,17 @@ func (db *DB) GetSessionByID(id string) (*Session, error) {
 	err := db.QueryRow(
 		`SELECT id, task_id, hat, claude_session_id, status, worktree_path,
 		        iteration_count, max_iterations, completion_promise,
-		        tokens_used, tokens_budget, dollars_used, dollars_budget,
+		        input_tokens, output_tokens, input_rate, output_rate,
+		        tokens_budget, dollars_budget,
 		        created_at, started_at, ended_at, outcome
 		 FROM sessions WHERE id = ?`,
 		id,
 	).Scan(
 		&session.ID, &session.TaskID, &session.Hat, &session.ClaudeSessionID,
 		&session.Status, &session.WorktreePath, &session.IterationCount,
-		&session.MaxIterations, &session.CompletionPromise, &session.TokensUsed,
-		&session.TokensBudget, &session.DollarsUsed, &session.DollarsBudget,
+		&session.MaxIterations, &session.CompletionPromise,
+		&session.InputTokens, &session.OutputTokens, &session.InputRate, &session.OutputRate,
+		&session.TokensBudget, &session.DollarsBudget,
 		&session.CreatedAt, &session.StartedAt, &session.EndedAt, &session.Outcome,
 	)
 
@@ -80,7 +82,8 @@ func (db *DB) ListActiveSessions() ([]*Session, error) {
 func (db *DB) listSessions(whereClause string, args ...any) ([]*Session, error) {
 	query := `SELECT id, task_id, hat, claude_session_id, status, worktree_path,
 	                 iteration_count, max_iterations, completion_promise,
-	                 tokens_used, tokens_budget, dollars_used, dollars_budget,
+	                 input_tokens, output_tokens, input_rate, output_rate,
+	                 tokens_budget, dollars_budget,
 	                 created_at, started_at, ended_at, outcome
 	          FROM sessions ` + whereClause
 
@@ -96,8 +99,9 @@ func (db *DB) listSessions(whereClause string, args ...any) ([]*Session, error) 
 		err := rows.Scan(
 			&session.ID, &session.TaskID, &session.Hat, &session.ClaudeSessionID,
 			&session.Status, &session.WorktreePath, &session.IterationCount,
-			&session.MaxIterations, &session.CompletionPromise, &session.TokensUsed,
-			&session.TokensBudget, &session.DollarsUsed, &session.DollarsBudget,
+			&session.MaxIterations, &session.CompletionPromise,
+			&session.InputTokens, &session.OutputTokens, &session.InputRate, &session.OutputRate,
+			&session.TokensBudget, &session.DollarsBudget,
 			&session.CreatedAt, &session.StartedAt, &session.EndedAt, &session.Outcome,
 		)
 		if err != nil {
@@ -171,14 +175,32 @@ func (db *DB) UpdateSessionIteration(id string, iterationCount int) error {
 	return nil
 }
 
-// UpdateSessionUsage updates the token and dollar usage for a session
-func (db *DB) UpdateSessionUsage(id string, tokensUsed int64, dollarsUsed float64) error {
+// UpdateSessionUsage updates the token usage for a session
+func (db *DB) UpdateSessionUsage(id string, inputTokens, outputTokens int64) error {
 	result, err := db.Exec(
-		`UPDATE sessions SET tokens_used = ?, dollars_used = ? WHERE id = ?`,
-		tokensUsed, dollarsUsed, id,
+		`UPDATE sessions SET input_tokens = ?, output_tokens = ? WHERE id = ?`,
+		inputTokens, outputTokens, id,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to update session usage: %w", err)
+	}
+
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("session not found: %s", id)
+	}
+
+	return nil
+}
+
+// SetSessionRates sets the token rates for cost calculation
+func (db *DB) SetSessionRates(id string, inputRate, outputRate float64) error {
+	result, err := db.Exec(
+		`UPDATE sessions SET input_rate = ?, output_rate = ? WHERE id = ?`,
+		inputRate, outputRate, id,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to set session rates: %w", err)
 	}
 
 	rows, _ := result.RowsAffected()

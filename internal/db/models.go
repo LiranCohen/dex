@@ -105,14 +105,28 @@ type Session struct {
 	IterationCount    int
 	MaxIterations     int
 	CompletionPromise sql.NullString
-	TokensUsed        int64
+	InputTokens       int64   // Total input tokens used
+	OutputTokens      int64   // Total output tokens used
+	InputRate         float64 // $/MTok for input at session start
+	OutputRate        float64 // $/MTok for output at session start
 	TokensBudget      sql.NullInt64
-	DollarsUsed       float64
 	DollarsBudget     sql.NullFloat64
 	CreatedAt         time.Time
 	StartedAt         sql.NullTime
 	EndedAt           sql.NullTime
 	Outcome           sql.NullString
+}
+
+// Cost calculates the session cost from tokens and rates
+func (s *Session) Cost() float64 {
+	inputCost := float64(s.InputTokens) * s.InputRate / 1_000_000
+	outputCost := float64(s.OutputTokens) * s.OutputRate / 1_000_000
+	return inputCost + outputCost
+}
+
+// TotalTokens returns the combined input + output tokens
+func (s *Session) TotalTokens() int64 {
+	return s.InputTokens + s.OutputTokens
 }
 
 // SessionCheckpoint represents a saved state of a session

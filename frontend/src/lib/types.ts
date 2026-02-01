@@ -279,6 +279,7 @@ export interface QuestSummary {
   failed_tasks: number;
   blocked_tasks: number;
   pending_tasks: number;
+  total_dollars_used: number;
 }
 
 export interface Quest {

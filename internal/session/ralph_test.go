@@ -2,8 +2,6 @@ package session
 
 import (
 	"testing"
-
-	"github.com/lirancohen/dex/internal/toolbelt"
 )
 
 func TestNewRalphLoop(t *testing.T) {
@@ -68,7 +66,8 @@ func TestCheckBudget_IterationBelowLimit(t *testing.T) {
 func TestCheckBudget_TokenBudget(t *testing.T) {
 	tokenBudget := int64(1000)
 	session := &ActiveSession{
-		TokensUsed:    1000,
+		InputTokens:   600,
+		OutputTokens:  400, // Total: 1000, at budget
 		TokensBudget:  &tokenBudget,
 		MaxIterations: 100,
 	}
@@ -84,7 +83,8 @@ func TestCheckBudget_TokenBudget(t *testing.T) {
 func TestCheckBudget_TokenBelowBudget(t *testing.T) {
 	tokenBudget := int64(1000)
 	session := &ActiveSession{
-		TokensUsed:    500,
+		InputTokens:   300,
+		OutputTokens:  200, // Total: 500, below budget
 		TokensBudget:  &tokenBudget,
 		MaxIterations: 100,
 	}
@@ -100,7 +100,12 @@ func TestCheckBudget_TokenBelowBudget(t *testing.T) {
 func TestCheckBudget_DollarBudget(t *testing.T) {
 	dollarBudget := 5.0
 	session := &ActiveSession{
-		DollarsUsed:   5.0,
+		// At $3/MTok input, $15/MTok output (Sonnet rates):
+		// Need cost of $5: e.g., 1M input ($3) + 133K output ($2)
+		InputTokens:   1000000,
+		OutputTokens:  133334,
+		InputRate:     3.0,
+		OutputRate:    15.0,
 		DollarsBudget: &dollarBudget,
 		MaxIterations: 100,
 	}
@@ -116,7 +121,11 @@ func TestCheckBudget_DollarBudget(t *testing.T) {
 func TestCheckBudget_DollarBelowBudget(t *testing.T) {
 	dollarBudget := 5.0
 	session := &ActiveSession{
-		DollarsUsed:   2.5,
+		// At $3/MTok input, $15/MTok output: 500K input = $1.5, 66K output = $1
+		InputTokens:   500000,
+		OutputTokens:  66666,
+		InputRate:     3.0,
+		OutputRate:    15.0,
 		DollarsBudget: &dollarBudget,
 		MaxIterations: 100,
 	}
@@ -133,9 +142,11 @@ func TestCheckBudget_NoBudgetsSet(t *testing.T) {
 	session := &ActiveSession{
 		IterationCount: 50,
 		MaxIterations:  0, // 0 means no limit
-		TokensUsed:     999999,
+		InputTokens:    500000,
+		OutputTokens:   499999,
+		InputRate:      3.0,
+		OutputRate:     15.0,
 		TokensBudget:   nil,
-		DollarsUsed:    999.99,
 		DollarsBudget:  nil,
 	}
 
@@ -250,55 +261,75 @@ func TestDetectHatTransition_EdgeCases(t *testing.T) {
 	}
 }
 
-func TestEstimateCost(t *testing.T) {
-	loop := &RalphLoop{}
-
+func TestSessionCost(t *testing.T) {
 	tests := []struct {
 		name         string
-		inputTokens  int
-		outputTokens int
+		inputTokens  int64
+		outputTokens int64
+		inputRate    float64
+		outputRate   float64
 		expectedCost float64
 	}{
 		{
 			name:         "zero tokens",
 			inputTokens:  0,
 			outputTokens: 0,
+			inputRate:    3.0,
+			outputRate:   15.0,
 			expectedCost: 0.0,
 		},
 		{
-			name:         "1M input tokens only",
+			name:         "1M input tokens only (Sonnet)",
 			inputTokens:  1_000_000,
 			outputTokens: 0,
+			inputRate:    3.0,
+			outputRate:   15.0,
 			expectedCost: 3.0,
 		},
 		{
-			name:         "1M output tokens only",
+			name:         "1M output tokens only (Sonnet)",
 			inputTokens:  0,
 			outputTokens: 1_000_000,
+			inputRate:    3.0,
+			outputRate:   15.0,
 			expectedCost: 15.0,
 		},
 		{
-			name:         "1M each",
+			name:         "1M each (Sonnet)",
 			inputTokens:  1_000_000,
 			outputTokens: 1_000_000,
+			inputRate:    3.0,
+			outputRate:   15.0,
 			expectedCost: 18.0,
 		},
 		{
-			name:         "small usage",
+			name:         "1M each (Opus)",
+			inputTokens:  1_000_000,
+			outputTokens: 1_000_000,
+			inputRate:    5.0,
+			outputRate:   25.0,
+			expectedCost: 30.0,
+		},
+		{
+			name:         "small usage (Sonnet)",
 			inputTokens:  1000,
 			outputTokens: 500,
+			inputRate:    3.0,
+			outputRate:   15.0,
 			expectedCost: 0.0105, // (1000*3 + 500*15) / 1M = 10500 / 1M
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			usage := toolbelt.AnthropicUsage{
+			session := &ActiveSession{
 				InputTokens:  tt.inputTokens,
 				OutputTokens: tt.outputTokens,
+				InputRate:    tt.inputRate,
+				OutputRate:   tt.outputRate,
 			}
 
-			result := loop.estimateCost(usage)
+			result := session.Cost()
 
 			// Allow small floating point differences
 			diff := result - tt.expectedCost
@@ -306,8 +337,7 @@ func TestEstimateCost(t *testing.T) {
 				diff = -diff
 			}
 			if diff > 0.0001 {
-				t.Errorf("estimateCost(%d input, %d output) = %f, want %f",
-					tt.inputTokens, tt.outputTokens, result, tt.expectedCost)
+				t.Errorf("Cost() = %f, want %f", result, tt.expectedCost)
 			}
 		})
 	}

@@ -319,15 +319,16 @@ func (db *DB) GetTasksByQuestID(questID string) ([]*Task, error) {
 
 // QuestSummary provides aggregate information about a Quest's tasks
 type QuestSummary struct {
-	TotalTasks     int
-	CompletedTasks int
-	RunningTasks   int
-	FailedTasks    int
-	BlockedTasks   int
-	PendingTasks   int
+	TotalTasks       int
+	CompletedTasks   int
+	RunningTasks     int
+	FailedTasks      int
+	BlockedTasks     int
+	PendingTasks     int
+	TotalDollarsUsed float64
 }
 
-// GetQuestSummary calculates task statistics for a Quest
+// GetQuestSummary calculates task statistics for a Quest (derived from tasks and sessions)
 func (db *DB) GetQuestSummary(questID string) (*QuestSummary, error) {
 	tasks, err := db.GetTasksByQuestID(questID)
 	if err != nil {
@@ -349,6 +350,18 @@ func (db *DB) GetQuestSummary(questID string) (*QuestSummary, error) {
 		default:
 			summary.PendingTasks++
 		}
+	}
+
+	// Aggregate cost from sessions (derived from tokens and rates)
+	err = db.QueryRow(
+		`SELECT COALESCE(SUM(s.input_tokens * s.input_rate + s.output_tokens * s.output_rate) / 1000000.0, 0)
+		 FROM sessions s
+		 JOIN tasks t ON s.task_id = t.id
+		 WHERE t.quest_id = ?`,
+		questID,
+	).Scan(&summary.TotalDollarsUsed)
+	if err != nil {
+		return nil, fmt.Errorf("failed to aggregate quest cost: %w", err)
 	}
 
 	return summary, nil

@@ -39,9 +39,11 @@ type ActiveSession struct {
 	IterationCount int
 	MaxIterations  int
 
-	TokensUsed    int64
+	InputTokens   int64   // Total input tokens used
+	OutputTokens  int64   // Total output tokens used
+	InputRate     float64 // $/MTok for input (captured at session start)
+	OutputRate    float64 // $/MTok for output (captured at session start)
 	TokensBudget  *int64
-	DollarsUsed   float64
 	DollarsBudget *float64
 
 	StartedAt    time.Time
@@ -50,6 +52,18 @@ type ActiveSession struct {
 	// For cancellation
 	cancel context.CancelFunc
 	done   chan struct{}
+}
+
+// TotalTokens returns the combined input + output tokens
+func (s *ActiveSession) TotalTokens() int64 {
+	return s.InputTokens + s.OutputTokens
+}
+
+// Cost calculates the session cost from tokens and rates
+func (s *ActiveSession) Cost() float64 {
+	inputCost := float64(s.InputTokens) * s.InputRate / 1_000_000
+	outputCost := float64(s.OutputTokens) * s.OutputRate / 1_000_000
+	return inputCost + outputCost
 }
 
 // Manager manages Claude Code session lifecycle
@@ -325,8 +339,10 @@ func (m *Manager) copySession(s *ActiveSession) *ActiveSession {
 		WorktreePath:   s.WorktreePath,
 		IterationCount: s.IterationCount,
 		MaxIterations:  s.MaxIterations,
-		TokensUsed:     s.TokensUsed,
-		DollarsUsed:    s.DollarsUsed,
+		InputTokens:    s.InputTokens,
+		OutputTokens:   s.OutputTokens,
+		InputRate:      s.InputRate,
+		OutputRate:     s.OutputRate,
 		StartedAt:      s.StartedAt,
 		LastActivity:   s.LastActivity,
 	}
@@ -564,8 +580,10 @@ func (m *Manager) LoadActiveSessions() error {
 			WorktreePath:   dbSession.WorktreePath,
 			IterationCount: dbSession.IterationCount,
 			MaxIterations:  dbSession.MaxIterations,
-			TokensUsed:     dbSession.TokensUsed,
-			DollarsUsed:    dbSession.DollarsUsed,
+			InputTokens:    dbSession.InputTokens,
+			OutputTokens:   dbSession.OutputTokens,
+			InputRate:      dbSession.InputRate,
+			OutputRate:     dbSession.OutputRate,
 			done:           make(chan struct{}),
 		}
 

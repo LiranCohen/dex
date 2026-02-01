@@ -1406,6 +1406,9 @@ function QuestsPage() {
                           {quest.summary.total_tasks} objective{quest.summary.total_tasks !== 1 ? 's' : ''} &middot;{' '}
                           {quest.summary.running_tasks > 0 && `${quest.summary.running_tasks} running, `}
                           {quest.summary.completed_tasks} completed
+                          {quest.summary.total_dollars_used > 0 && (
+                            <span className="text-yellow-500"> &middot; ${quest.summary.total_dollars_used.toFixed(2)}</span>
+                          )}
                         </p>
                       )}
                     </div>
@@ -1445,6 +1448,9 @@ function QuestsPage() {
                       {quest.summary && (
                         <p className="text-sm text-gray-400">
                           {quest.summary.total_tasks} objective{quest.summary.total_tasks !== 1 ? 's' : ''} completed
+                          {quest.summary.total_dollars_used > 0 && (
+                            <span className="text-yellow-500"> &middot; ${quest.summary.total_dollars_used.toFixed(2)}</span>
+                          )}
                         </p>
                       )}
                     </div>
@@ -2172,6 +2178,12 @@ function QuestDetailPage() {
                       <div className="flex justify-between text-red-400">
                         <span>Failed</span>
                         <span>{quest.summary.failed_tasks}</span>
+                      </div>
+                    )}
+                    {quest.summary.total_dollars_used > 0 && (
+                      <div className="flex justify-between text-yellow-500 pt-2 border-t border-gray-700 mt-2">
+                        <span>Total Cost</span>
+                        <span>${quest.summary.total_dollars_used.toFixed(2)}</span>
                       </div>
                     )}
                   </div>

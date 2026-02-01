@@ -76,6 +76,11 @@ func (db *DB) Migrate() error {
 		"ALTER TABLE webauthn_credentials ADD COLUMN backup_state INTEGER NOT NULL DEFAULT 0",
 		"ALTER TABLE tasks ADD COLUMN quest_id TEXT REFERENCES quests(id)",
 		"ALTER TABLE tasks ADD COLUMN model TEXT DEFAULT 'sonnet'",
+		// Session token/rate tracking (replaces tokens_used, dollars_used)
+		"ALTER TABLE sessions ADD COLUMN input_tokens INTEGER DEFAULT 0",
+		"ALTER TABLE sessions ADD COLUMN output_tokens INTEGER DEFAULT 0",
+		"ALTER TABLE sessions ADD COLUMN input_rate REAL DEFAULT 3.0",
+		"ALTER TABLE sessions ADD COLUMN output_rate REAL DEFAULT 15.0",
 	}
 	for _, migration := range optionalMigrations {
 		db.Exec(migration) // Ignore errors - column may already exist

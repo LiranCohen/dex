@@ -79,10 +79,22 @@ func (r *RalphLoop) InitExecutor(worktreePath string, gitOps *git.Operations, gi
 	r.executor = NewToolExecutor(worktreePath, gitOps, githubClient, owner, repo)
 }
 
-// SetModel sets the AI model to use for this loop
+// SetModel sets the AI model to use for this loop and captures the rates
 // model should be "sonnet" or "opus"
 func (r *RalphLoop) SetModel(model string) {
 	r.model = model
+	// Capture rates at session start for historical accuracy
+	if model == db.TaskModelOpus {
+		r.session.InputRate = getEnvFloat("DEX_OPUS_INPUT_COST", 5.0)
+		r.session.OutputRate = getEnvFloat("DEX_OPUS_OUTPUT_COST", 25.0)
+	} else {
+		r.session.InputRate = getEnvFloat("DEX_SONNET_INPUT_COST", 3.0)
+		r.session.OutputRate = getEnvFloat("DEX_SONNET_OUTPUT_COST", 15.0)
+	}
+	// Persist rates to database
+	if r.db != nil {
+		r.db.SetSessionRates(r.session.ID, r.session.InputRate, r.session.OutputRate)
+	}
 }
 
 // Run executes the Ralph loop until completion, error, or budget exceeded
@@ -175,8 +187,8 @@ func (r *RalphLoop) Run(ctx context.Context) error {
 		fmt.Printf("RalphLoop.Run: received response (input tokens: %d, output tokens: %d)\n", response.Usage.InputTokens, response.Usage.OutputTokens)
 
 		// 4. Update usage tracking
-		r.session.TokensUsed += int64(response.Usage.InputTokens + response.Usage.OutputTokens)
-		r.session.DollarsUsed += r.estimateCost(response.Usage)
+		r.session.InputTokens += int64(response.Usage.InputTokens)
+		r.session.OutputTokens += int64(response.Usage.OutputTokens)
 		r.session.IterationCount++
 		r.session.LastActivity = time.Now()
 
@@ -184,7 +196,7 @@ func (r *RalphLoop) Run(ctx context.Context) error {
 		r.broadcastEvent(websocket.EventSessionIteration, map[string]any{
 			"session_id": r.session.ID,
 			"iteration":  r.session.IterationCount,
-			"tokens":     r.session.TokensUsed,
+			"tokens":     r.session.TotalTokens(),
 		})
 
 		// 5. Handle tool use if requested
@@ -373,12 +385,12 @@ func (r *RalphLoop) checkBudget() error {
 	}
 
 	// Check token budget
-	if r.session.TokensBudget != nil && r.session.TokensUsed >= *r.session.TokensBudget {
+	if r.session.TokensBudget != nil && r.session.TotalTokens() >= *r.session.TokensBudget {
 		return ErrTokenBudget
 	}
 
 	// Check dollar budget
-	if r.session.DollarsBudget != nil && r.session.DollarsUsed >= *r.session.DollarsBudget {
+	if r.session.DollarsBudget != nil && r.session.Cost() >= *r.session.DollarsBudget {
 		return ErrDollarBudget
 	}
 
@@ -497,16 +509,21 @@ func (r *RalphLoop) detectHatTransition(response string) string {
 func (r *RalphLoop) checkpoint() error {
 	// Build checkpoint state
 	state := map[string]any{
-		"iteration":    r.session.IterationCount,
-		"tokens_used":  r.session.TokensUsed,
-		"dollars_used": r.session.DollarsUsed,
-		"hat":          r.session.Hat,
-		"messages":     r.messages,
+		"iteration":     r.session.IterationCount,
+		"input_tokens":  r.session.InputTokens,
+		"output_tokens": r.session.OutputTokens,
+		"hat":           r.session.Hat,
+		"messages":      r.messages,
 	}
 
 	stateJSON, err := json.Marshal(state)
 	if err != nil {
 		return fmt.Errorf("failed to marshal checkpoint state: %w", err)
+	}
+
+	// Also persist to sessions table for real-time queries
+	if err := r.db.UpdateSessionUsage(r.session.ID, r.session.InputTokens, r.session.OutputTokens); err != nil {
+		fmt.Printf("Warning: failed to update session usage: %v\n", err)
 	}
 
 	_, err = r.db.CreateSessionCheckpoint(r.session.ID, r.session.IterationCount, stateJSON)
@@ -526,18 +543,27 @@ func (r *RalphLoop) broadcastEvent(eventType string, payload map[string]any) {
 	})
 }
 
-// estimateCost calculates the estimated cost in dollars for the API usage
-// Uses approximate pricing: $3 per 1M input tokens, $15 per 1M output tokens for Sonnet
-func (r *RalphLoop) estimateCost(usage toolbelt.AnthropicUsage) float64 {
-	inputCost := float64(usage.InputTokens) * 3.0 / 1_000_000
-	outputCost := float64(usage.OutputTokens) * 15.0 / 1_000_000
-	return inputCost + outputCost
+// getEnvFloat reads a float64 from an environment variable, returning defaultVal if not set or invalid
+// Used for model pricing rates (DEX_SONNET_INPUT_COST, DEX_OPUS_OUTPUT_COST, etc.)
+func getEnvFloat(key string, defaultVal float64) float64 {
+	val := os.Getenv(key)
+	if val == "" {
+		return defaultVal
+	}
+	var f float64
+	if _, err := fmt.Sscanf(val, "%f", &f); err != nil {
+		return defaultVal
+	}
+	return f
 }
 
 // RestoreFromCheckpoint restores session state from a checkpoint
 func (r *RalphLoop) RestoreFromCheckpoint(checkpoint *db.SessionCheckpoint) error {
 	var state struct {
-		Iteration   int                          `json:"iteration"`
+		Iteration    int                         `json:"iteration"`
+		InputTokens  int64                       `json:"input_tokens"`
+		OutputTokens int64                       `json:"output_tokens"`
+		// Legacy fields for backwards compatibility
 		TokensUsed  int64                        `json:"tokens_used"`
 		DollarsUsed float64                      `json:"dollars_used"`
 		Hat         string                       `json:"hat"`
@@ -549,10 +575,18 @@ func (r *RalphLoop) RestoreFromCheckpoint(checkpoint *db.SessionCheckpoint) erro
 	}
 
 	r.session.IterationCount = state.Iteration
-	r.session.TokensUsed = state.TokensUsed
-	r.session.DollarsUsed = state.DollarsUsed
 	r.session.Hat = state.Hat
 	r.messages = state.Messages
+
+	// Use new fields if available, otherwise estimate from legacy
+	if state.InputTokens > 0 || state.OutputTokens > 0 {
+		r.session.InputTokens = state.InputTokens
+		r.session.OutputTokens = state.OutputTokens
+	} else if state.TokensUsed > 0 {
+		// Legacy: split evenly as approximation (input usually larger)
+		r.session.InputTokens = state.TokensUsed * 2 / 3
+		r.session.OutputTokens = state.TokensUsed / 3
+	}
 
 	return nil
 }
