@@ -167,11 +167,20 @@ export async function fetchQuestTasks(questId: string): Promise<import('./types'
   return api.get(`/quests/${questId}/tasks`);
 }
 
+export interface CreateObjectiveResult {
+  message: string;
+  task: import('./types').Task;
+  auto_started?: boolean;
+  auto_start_error?: string;
+  worktree_path?: string;
+  session_id?: string;
+}
+
 export async function createObjective(
   questId: string,
   draft: import('./types').ObjectiveDraft,
   selectedOptional: number[]
-): Promise<{ message: string; task: import('./types').Task }> {
+): Promise<CreateObjectiveResult> {
   return api.post(`/quests/${questId}/objectives`, {
     draft_id: draft.draft_id,
     title: draft.title,

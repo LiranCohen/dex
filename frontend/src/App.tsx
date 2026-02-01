@@ -1514,25 +1514,13 @@ function parseObjectiveDrafts(content: string): ObjectiveDraft[] {
   return drafts;
 }
 
-// Helper to format signals for display (strips drafts, formats questions)
+// Helper to strip signals from message content for display
+// Questions are shown in the sticky UI, not inline
 function formatMessageContent(content: string): string {
-  // Remove OBJECTIVE_DRAFT signals (these are shown in the sidebar)
+  // Remove OBJECTIVE_DRAFT signals (shown in sidebar)
   let formatted = content.replace(/OBJECTIVE_DRAFT:\s*\{[\s\S]*?\}\s*(?=OBJECTIVE_DRAFT:|QUESTION:|QUEST_READY:|$)/g, '');
-
-  // Format QUESTION signals as readable text
-  formatted = formatted.replace(/QUESTION:\s*(\{[^}]*\})/g, (_match, jsonStr) => {
-    try {
-      const q = JSON.parse(jsonStr);
-      let questionText = `\n**${q.question}**`;
-      if (q.options && q.options.length > 0) {
-        questionText += '\n' + q.options.map((opt: string) => `• ${opt}`).join('\n');
-      }
-      return questionText;
-    } catch {
-      return ''; // Strip malformed questions
-    }
-  });
-
+  // Remove QUESTION signals (shown in sticky UI at bottom)
+  formatted = formatted.replace(/QUESTION:\s*\{[^}]*\}/g, '');
   // Remove QUEST_READY signals
   formatted = formatted.replace(/QUEST_READY:\s*\{[^}]*\}/g, '');
   // Clean up extra whitespace
@@ -1629,7 +1617,9 @@ function QuestDetailPage() {
         }
       }
       setDrafts(allDrafts);
-      setQuestions(latestQuestions);
+      // Only show questions if there are pending drafts to discuss
+      // If all drafts have been accepted/rejected, questions are no longer relevant
+      setQuestions(allDrafts.length > 0 ? latestQuestions : []);
 
       // Fetch preflight checks if quest is active
       if (data.quest.status === 'active') {
@@ -1821,11 +1811,22 @@ function QuestDetailPage() {
     setError(null);
 
     try {
-      await createObjective(id, draft, selectedOptional);
+      console.log('Creating objective with auto_start:', draft.auto_start);
+      const result = await createObjective(id, draft, selectedOptional);
+      console.log('Create objective result:', result);
+
+      // Check for auto-start error
+      if ('auto_start_error' in result) {
+        console.error('Auto-start failed:', result.auto_start_error);
+        setError(`Objective created but auto-start failed: ${result.auto_start_error}`);
+      }
+
       // Mark draft as handled so it won't reappear after loadQuest
       handledDraftIds.current.add(draft.draft_id);
       // Remove the accepted draft from the list
       setDrafts((prev) => prev.filter((d) => d.draft_id !== draft.draft_id));
+      // Clear questions since we've moved past the planning stage
+      setQuestions([]);
       // Reload quest to get updated summary
       loadQuest();
     } catch (err) {
