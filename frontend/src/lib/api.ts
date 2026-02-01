@@ -10,6 +10,16 @@ class ApiClient {
     return localStorage.getItem('auth_token');
   }
 
+  private clearAuthAndRedirect(): void {
+    // Clear auth state
+    localStorage.removeItem('auth_token');
+    localStorage.removeItem('auth-storage');
+    // Redirect to login if not already there
+    if (window.location.pathname !== '/login') {
+      window.location.href = '/login';
+    }
+  }
+
   private async request<T>(
     method: string,
     path: string,
@@ -31,6 +41,11 @@ class ApiClient {
     });
 
     if (!response.ok) {
+      // Handle 401 Unauthorized - clear auth and redirect to login
+      if (response.status === 401) {
+        this.clearAuthAndRedirect();
+      }
+
       const error: ApiError = {
         message: response.statusText,
         status: response.status,

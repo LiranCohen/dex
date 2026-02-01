@@ -181,13 +181,13 @@ func (s *Server) registerRoutes() {
 	v1.POST("/auth/passkey/login/begin", s.handlePasskeyLoginBegin)
 	v1.POST("/auth/passkey/login/finish", s.handlePasskeyLoginFinish)
 
-	// Setup endpoints (for onboarding flow)
+	// Setup endpoints (for onboarding flow - public during initial setup)
 	v1.GET("/setup/status", s.handleSetupStatus)
 	v1.POST("/setup/github-token", s.handleSetupGitHubToken)
 	v1.POST("/setup/anthropic-key", s.handleSetupAnthropicKey)
 	v1.POST("/setup/complete", s.handleSetupComplete)
 
-	// GitHub App endpoints (for one-click GitHub integration)
+	// GitHub App endpoints (callbacks must be public for GitHub redirects)
 	v1.GET("/setup/github/app/status", s.handleGitHubAppStatus)
 	v1.GET("/setup/github/app/manifest", s.handleGitHubAppManifest)
 	v1.GET("/setup/github/app/callback", s.handleGitHubAppCallback)
@@ -196,90 +196,93 @@ func (s *Server) registerRoutes() {
 	v1.POST("/setup/github/installations/sync", s.handleGitHubSyncInstallations)
 	v1.DELETE("/setup/github/app", s.handleGitHubDeleteApp)
 
-	// Task endpoints (public for now, will add auth later)
-	v1.GET("/tasks", s.handleListTasks)
-	v1.POST("/tasks", s.handleCreateTask)
-	v1.GET("/tasks/:id", s.handleGetTask)
-	v1.PUT("/tasks/:id", s.handleUpdateTask)
-	v1.DELETE("/tasks/:id", s.handleDeleteTask)
-	v1.POST("/tasks/:id/start", s.handleStartTask)
-	v1.GET("/tasks/:id/worktree/status", s.handleTaskWorktreeStatus)
+	// Protected endpoints (require JWT auth)
+	// Use middleware if token config is available, otherwise allow all (dev mode)
+	protected := v1.Group("")
+	if s.tokenConfig != nil {
+		protected.Use(middleware.JWTAuth(s.tokenConfig))
+	}
 
-	// Worktree endpoints (public for now)
-	v1.GET("/worktrees", s.handleListWorktrees)
-	v1.DELETE("/worktrees/:task_id", s.handleDeleteWorktree)
+	// User info
+	protected.GET("/me", s.handleMe)
 
-	// Project endpoints (public for now, will add auth later)
-	v1.GET("/projects", s.handleListProjects)
-	v1.POST("/projects", s.handleCreateProject)
-	v1.GET("/projects/:id", s.handleGetProject)
-	v1.PUT("/projects/:id", s.handleUpdateProject)
-	v1.DELETE("/projects/:id", s.handleDeleteProject)
+	// Task endpoints
+	protected.GET("/tasks", s.handleListTasks)
+	protected.POST("/tasks", s.handleCreateTask)
+	protected.GET("/tasks/:id", s.handleGetTask)
+	protected.PUT("/tasks/:id", s.handleUpdateTask)
+	protected.DELETE("/tasks/:id", s.handleDeleteTask)
+	protected.POST("/tasks/:id/start", s.handleStartTask)
+	protected.GET("/tasks/:id/worktree/status", s.handleTaskWorktreeStatus)
 
-	// Approval endpoints (public for now, will add auth later)
-	v1.GET("/approvals", s.handleListApprovals)
-	v1.GET("/approvals/:id", s.handleGetApproval)
-	v1.POST("/approvals/:id/approve", s.handleApproveApproval)
-	v1.POST("/approvals/:id/reject", s.handleRejectApproval)
+	// Worktree endpoints
+	protected.GET("/worktrees", s.handleListWorktrees)
+	protected.DELETE("/worktrees/:task_id", s.handleDeleteWorktree)
+
+	// Project endpoints
+	protected.GET("/projects", s.handleListProjects)
+	protected.POST("/projects", s.handleCreateProject)
+	protected.GET("/projects/:id", s.handleGetProject)
+	protected.PUT("/projects/:id", s.handleUpdateProject)
+	protected.DELETE("/projects/:id", s.handleDeleteProject)
+
+	// Approval endpoints
+	protected.GET("/approvals", s.handleListApprovals)
+	protected.GET("/approvals/:id", s.handleGetApproval)
+	protected.POST("/approvals/:id/approve", s.handleApproveApproval)
+	protected.POST("/approvals/:id/reject", s.handleRejectApproval)
 
 	// Session control endpoints
-	v1.POST("/tasks/:id/pause", s.handlePauseTask)
-	v1.POST("/tasks/:id/resume", s.handleResumeTask)
-	v1.POST("/tasks/:id/cancel", s.handleCancelTask)
-	v1.GET("/tasks/:id/logs", s.handleTaskLogs)
+	protected.POST("/tasks/:id/pause", s.handlePauseTask)
+	protected.POST("/tasks/:id/resume", s.handleResumeTask)
+	protected.POST("/tasks/:id/cancel", s.handleCancelTask)
+	protected.GET("/tasks/:id/logs", s.handleTaskLogs)
 
 	// Planning endpoints
-	v1.GET("/tasks/:id/planning", s.handleGetPlanning)
-	v1.POST("/tasks/:id/planning/respond", s.handlePlanningRespond)
-	v1.POST("/tasks/:id/planning/accept", s.handlePlanningAccept)
-	v1.POST("/tasks/:id/planning/skip", s.handlePlanningSkip)
+	protected.GET("/tasks/:id/planning", s.handleGetPlanning)
+	protected.POST("/tasks/:id/planning/respond", s.handlePlanningRespond)
+	protected.POST("/tasks/:id/planning/accept", s.handlePlanningAccept)
+	protected.POST("/tasks/:id/planning/skip", s.handlePlanningSkip)
 
 	// Checklist endpoints
-	v1.GET("/tasks/:id/checklist", s.handleGetChecklist)
-	v1.PUT("/tasks/:id/checklist/items/:itemId", s.handleUpdateChecklistItem)
-	v1.POST("/tasks/:id/checklist/accept", s.handleAcceptChecklist)
-	v1.POST("/tasks/:id/remediate", s.handleCreateRemediation)
+	protected.GET("/tasks/:id/checklist", s.handleGetChecklist)
+	protected.PUT("/tasks/:id/checklist/items/:itemId", s.handleUpdateChecklistItem)
+	protected.POST("/tasks/:id/checklist/accept", s.handleAcceptChecklist)
+	protected.POST("/tasks/:id/remediate", s.handleCreateRemediation)
 
 	// Quest endpoints
-	v1.GET("/projects/:id/quests", s.handleListQuests)
-	v1.POST("/projects/:id/quests", s.handleCreateQuest)
-	v1.GET("/quests/:id", s.handleGetQuest)
-	v1.DELETE("/quests/:id", s.handleDeleteQuest)
-	v1.POST("/quests/:id/messages", s.handleSendQuestMessage)
-	v1.POST("/quests/:id/complete", s.handleCompleteQuest)
-	v1.POST("/quests/:id/reopen", s.handleReopenQuest)
-	v1.PUT("/quests/:id/model", s.handleUpdateQuestModel)
-	v1.GET("/quests/:id/tasks", s.handleGetQuestTasks)
-	v1.POST("/quests/:id/objectives", s.handleCreateObjective)
-	v1.GET("/quests/:id/preflight", s.handleGetPreflightCheck)
+	protected.GET("/projects/:id/quests", s.handleListQuests)
+	protected.POST("/projects/:id/quests", s.handleCreateQuest)
+	protected.GET("/quests/:id", s.handleGetQuest)
+	protected.DELETE("/quests/:id", s.handleDeleteQuest)
+	protected.POST("/quests/:id/messages", s.handleSendQuestMessage)
+	protected.POST("/quests/:id/complete", s.handleCompleteQuest)
+	protected.POST("/quests/:id/reopen", s.handleReopenQuest)
+	protected.PUT("/quests/:id/model", s.handleUpdateQuestModel)
+	protected.GET("/quests/:id/tasks", s.handleGetQuestTasks)
+	protected.POST("/quests/:id/objectives", s.handleCreateObjective)
+	protected.GET("/quests/:id/preflight", s.handleGetPreflightCheck)
 
 	// Quest template endpoints
-	v1.GET("/projects/:id/quest-templates", s.handleListQuestTemplates)
-	v1.POST("/projects/:id/quest-templates", s.handleCreateQuestTemplate)
-	v1.GET("/quest-templates/:id", s.handleGetQuestTemplate)
-	v1.PUT("/quest-templates/:id", s.handleUpdateQuestTemplate)
-	v1.DELETE("/quest-templates/:id", s.handleDeleteQuestTemplate)
+	protected.GET("/projects/:id/quest-templates", s.handleListQuestTemplates)
+	protected.POST("/projects/:id/quest-templates", s.handleCreateQuestTemplate)
+	protected.GET("/quest-templates/:id", s.handleGetQuestTemplate)
+	protected.PUT("/quest-templates/:id", s.handleUpdateQuestTemplate)
+	protected.DELETE("/quest-templates/:id", s.handleDeleteQuestTemplate)
 
 	// Session management endpoints
-	v1.GET("/sessions", s.handleListSessions)
-	v1.GET("/sessions/:id", s.handleGetSession)
-	v1.POST("/sessions/:id/kill", s.handleKillSession)
+	protected.GET("/sessions", s.handleListSessions)
+	protected.GET("/sessions/:id", s.handleGetSession)
+	protected.POST("/sessions/:id/kill", s.handleKillSession)
 
 	// Activity endpoints
-	v1.GET("/sessions/:id/activity", s.handleGetSessionActivity)
-	v1.GET("/tasks/:id/activity", s.handleGetTaskActivity)
+	protected.GET("/sessions/:id/activity", s.handleGetSessionActivity)
+	protected.GET("/tasks/:id/activity", s.handleGetTaskActivity)
 
 	// WebSocket endpoint for real-time updates
-	v1.GET("/ws", func(c echo.Context) error {
+	protected.GET("/ws", func(c echo.Context) error {
 		return websocket.ServeWS(s.hub, c)
 	})
-
-	// Protected endpoints (require auth)
-	if s.tokenConfig != nil {
-		protected := v1.Group("")
-		protected.Use(middleware.JWTAuth(s.tokenConfig))
-		protected.GET("/me", s.handleMe)
-	}
 }
 
 // handleHealthCheck returns system health status
