@@ -281,7 +281,7 @@ From research:
 
 #### Option A: GitHub App (Strongly Recommended)
 
-Create a GitHub App that acts as Poindexter's identity.
+A centrally-owned GitHub App that acts as Poindexter's identity across all users.
 
 ```
 Benefits:
@@ -291,13 +291,14 @@ Benefits:
 - Fine-grained permissions
 - Survives employee turnover
 - Better security model
+- Consistent branding across all installations
 ```
 
 **How it works:**
-1. User creates GitHub App in their account/org
-2. App is installed on target repositories
-3. Poindexter authenticates as the App
-4. Commits show as "Poindexter[bot]" author
+1. Operator creates and owns the "Poindexter" GitHub App (one time)
+2. Users install the App on their repositories during onboarding
+3. Each installation gets its own installation ID and scoped access
+4. Commits show as "Poindexter[bot]" with consistent avatar/branding
 
 **Implementation:**
 
@@ -371,85 +372,88 @@ Flow:
 │                     GitHub App Architecture                         │
 ├────────────────────────────────────────────────────────────────────┤
 │                                                                     │
-│  User's GitHub Account                                              │
-│  └── Poindexter App (created via manifest)                         │
+│  OPERATOR (One-Time Setup)                                          │
+│  └── Creates "Poindexter" GitHub App                               │
 │      ├── App ID: 123456                                             │
-│      ├── Private Key: (stored in secrets.json)                     │
-│      └── Installations:                                             │
-│          ├── Repo: user/project-1                                   │
-│          ├── Repo: user/project-2                                   │
-│          └── Org: user-org (all repos)                             │
+│      ├── Custom Avatar: [Poindexter Logo]                          │
+│      ├── Description: "AI development assistant"                   │
+│      └── Private Key: (stored securely by operator)                │
 │                                                                     │
-│  Poindexter Actions:                                                │
-│  ├── Commits as: "Poindexter[bot] <123456+poindexter[bot]@...>"   │
-│  ├── PRs created by: "poindexter[bot]"                             │
-│  └── Issues by: "poindexter[bot]"                                  │
+│  USER A's GitHub                     USER B's GitHub                │
+│  └── Installs Poindexter App         └── Installs Poindexter App   │
+│      ├── Installation ID: 111            ├── Installation ID: 222  │
+│      ├── Repos: user-a/proj-1            ├── Repos: user-b/app     │
+│      └── Repos: user-a/proj-2            └── Org: user-b-org       │
+│                                                                     │
+│  All Actions Appear As:                                             │
+│  ├── Commits: "Poindexter[bot] <123456+poindexter[bot]@...>"       │
+│  ├── PRs: "poindexter[bot]"                                        │
+│  └── Same avatar everywhere (brand recognition)                    │
 │                                                                     │
 └────────────────────────────────────────────────────────────────────┘
 ```
 
 ### Implementation Plan
 
-**Step 1: GitHub App Manifest**
+**Step 1: Operator Creates GitHub App (One-Time)**
 
-Create a manifest for one-click App creation:
+The operator (you) creates the Poindexter GitHub App once:
 
-```json
-// /static/github-app-manifest.json
-{
-  "name": "Poindexter",
-  "url": "https://poindexter.ai",
-  "callback_urls": ["https://dex.tailnet.ts.net/api/github/callback"],
-  "setup_url": "https://dex.tailnet.ts.net/api/github/setup",
-  "redirect_url": "https://dex.tailnet.ts.net/api/github/redirect",
-  "public": false,
-  "default_permissions": {
-    "contents": "write",
-    "issues": "write",
-    "pull_requests": "write",
-    "workflows": "write",
-    "metadata": "read"
-  },
-  "default_events": [
-    "push",
-    "pull_request",
-    "issues"
-  ]
+1. Go to https://github.com/settings/apps/new
+2. Configure the App:
+   ```
+   Name:        Poindexter
+   Description: AI-powered development assistant
+   Homepage:    https://poindexter.ai
+   Logo:        [Upload Poindexter avatar]
+   Public:      Yes (so users can install it)
+   ```
+3. Set permissions:
+   ```
+   Repository permissions:
+   - Contents: Read & Write
+   - Issues: Read & Write
+   - Pull requests: Read & Write
+   - Workflows: Read & Write
+   - Metadata: Read-only
+   ```
+4. Generate and securely store the private key
+5. Note the App ID and publish the App
+
+**Step 2: Store App Credentials (Operator-Side)**
+
+The App's private key is stored centrally or distributed to instances:
+
+```go
+// /internal/toolbelt/github_app.go
+
+type GitHubAppConfig struct {
+    AppID         int64  `json:"app_id"`
+    PrivateKeyPEM string `json:"private_key"` // Or path to key file
 }
+
+// Loaded from operator-provisioned config (like Anthropic key)
+func LoadGitHubAppConfig(path string) (*GitHubAppConfig, error)
 ```
 
-**Step 2: App Creation Flow**
+**Step 3: User Installation Flow (Onboarding)**
+
+During onboarding, the user installs the pre-existing App:
 
 ```go
 // /internal/api/github_app.go
 
-func (s *Server) handleGitHubAppCreate(w http.ResponseWriter, r *http.Request) {
-    // Generate manifest with dynamic callback URL
-    manifest := generateManifest(s.baseURL)
-
-    // Redirect to GitHub App creation
-    // https://github.com/settings/apps/new?manifest=<encoded>
+func (s *Server) handleGitHubAppInstallRedirect(w http.ResponseWriter, r *http.Request) {
+    // Redirect user to install the Poindexter App
+    // https://github.com/apps/poindexter/installations/new
+    http.Redirect(w, r, "https://github.com/apps/poindexter/installations/new", http.StatusFound)
 }
 
-func (s *Server) handleGitHubAppCallback(w http.ResponseWriter, r *http.Request) {
-    code := r.URL.Query().Get("code")
-
-    // Exchange code for App credentials
-    // POST https://api.github.com/app-manifests/{code}/conversions
-
-    // Store App ID, Client ID, Client Secret, Private Key, Webhook Secret
-    // in secrets.json
-}
-```
-
-**Step 3: Installation Handling**
-
-```go
-func (s *Server) handleGitHubAppInstall(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleGitHubAppInstallCallback(w http.ResponseWriter, r *http.Request) {
     installationID := r.URL.Query().Get("installation_id")
 
-    // Store installation ID
-    // Allow user to select which installation to use (if multiple)
+    // Store this user's installation ID
+    // This scopes Poindexter's access to just their repos
 }
 ```
 
@@ -499,16 +503,14 @@ func (c *GitHubAppClient) getInstallationToken(ctx context.Context) (string, err
 │  │   ├── If pre-configured: Skip (show "Provided by Operator")     │
 │  │   └── If not: User provides key (current flow)                  │
 │  │                                                                   │
-│  ├── 3. GitHub App Setup (NEW)                                      │
-│  │   ├── Option A: Create new GitHub App (guided flow)              │
-│  │   │   ├── Click "Create Poindexter App"                          │
-│  │   │   ├── Redirected to GitHub (pre-filled manifest)            │
-│  │   │   ├── Approve App creation                                   │
-│  │   │   ├── Install on repositories                                │
-│  │   │   └── Redirected back with credentials                      │
-│  │   │                                                               │
-│  │   └── Option B: Use existing PAT (legacy/fallback)               │
-│  │       └── Current flow for users who prefer it                   │
+│  ├── 3. GitHub App Installation (NEW)                               │
+│  │   ├── Click "Connect GitHub"                                     │
+│  │   ├── Redirected to GitHub App installation page                │
+│  │   ├── User selects repos to grant access                        │
+│  │   ├── Redirected back with installation ID                      │
+│  │   └── Poindexter now has scoped access to those repos           │
+│  │                                                                   │
+│  │   (Fallback: Use existing PAT for legacy/self-hosted)            │
 │  │                                                                   │
 │  ├── 4. Email Setup (NEW - Optional)                                │
 │  │   ├── Default: Use built-in email (Resend)                      │
@@ -678,8 +680,9 @@ Currently, `secrets.json` stores credentials in **plaintext**. The redesign shou
    - User might want custom naming
 
 3. **Multi-Instance Scenarios**: Will users run multiple Poindexter instances?
-   - Affects GitHub App design (one App vs one per instance)
-   - Affects email address allocation
+   - **Decision**: One central GitHub App with consistent branding
+   - Each instance gets its own installation ID (scoped access)
+   - Same "Poindexter[bot]" identity across all users (brand recognition)
 
 4. **Operator Model**: Is there a central operator provisioning instances?
    - If yes: Consider centralized credential management
