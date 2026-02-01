@@ -66,6 +66,7 @@ func (s *Server) GetGitHubClientForInstallation(ctx context.Context, login strin
 }
 
 // GetToolbeltGitHubClient returns a toolbelt.GitHubClient for the specified installation login.
+// If login is empty, returns a client for the first available installation.
 // This wraps the GitHub App installation token in a toolbelt-compatible client.
 func (s *Server) GetToolbeltGitHubClient(ctx context.Context, login string) (*toolbelt.GitHubClient, error) {
 	s.githubAppMu.RLock()
@@ -74,6 +75,19 @@ func (s *Server) GetToolbeltGitHubClient(ctx context.Context, login string) (*to
 
 	if appManager == nil {
 		return nil, fmt.Errorf("GitHub App not configured")
+	}
+
+	// If no login specified, use the first available installation
+	if login == "" {
+		installations, err := s.db.ListGitHubInstallations()
+		if err != nil {
+			return nil, fmt.Errorf("failed to list installations: %w", err)
+		}
+		if len(installations) == 0 {
+			return nil, fmt.Errorf("no GitHub App installations found")
+		}
+		login = installations[0].Login
+		fmt.Printf("GetToolbeltGitHubClient: using default installation %s\n", login)
 	}
 
 	// Get installation ID for login

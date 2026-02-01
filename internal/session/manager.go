@@ -418,14 +418,15 @@ func (m *Manager) runSession(ctx context.Context, session *ActiveSession) {
 
 				// Get GitHub client - try static client first, then fetcher
 				githubClient := m.githubClient
-				if githubClient == nil && m.githubClientFetcher != nil && owner != "" {
+				if githubClient == nil && m.githubClientFetcher != nil {
 					// Try to get a client from the fetcher (e.g., GitHub App installation)
+					// If owner is empty, the fetcher will use the first available installation
 					fetchedClient, err := m.githubClientFetcher(ctx, owner)
 					if err != nil {
-						fmt.Printf("runSession: warning - failed to fetch GitHub client for %s: %v\n", owner, err)
+						fmt.Printf("runSession: warning - failed to fetch GitHub client for %q: %v\n", owner, err)
 					} else {
 						githubClient = fetchedClient
-						fmt.Printf("runSession: using GitHub App client for %s\n", owner)
+						fmt.Printf("runSession: using GitHub App client for %q\n", owner)
 					}
 				}
 
