@@ -294,11 +294,21 @@ export interface Quest {
   summary?: QuestSummary;
 }
 
+// Tool call made during Quest chat
+export interface QuestToolCall {
+  tool_name: string;
+  input: Record<string, unknown>;
+  output: string;
+  is_error: boolean;
+  duration_ms: number;
+}
+
 export interface QuestMessage {
   id: string;
   quest_id: string;
   role: 'user' | 'assistant';
   content: string;
+  tool_calls?: QuestToolCall[];
   created_at: string;
 }
 
@@ -342,7 +352,7 @@ export interface QuestTemplate {
 
 // Quest WebSocket events
 export interface QuestEvent extends WebSocketEvent {
-  type: 'quest.created' | 'quest.message' | 'quest.completed' | 'quest.reopened' | 'quest.deleted' | 'quest.objective_draft' | 'quest.question' | 'quest.ready';
+  type: 'quest.created' | 'quest.message' | 'quest.completed' | 'quest.reopened' | 'quest.deleted' | 'quest.objective_draft' | 'quest.question' | 'quest.ready' | 'quest.tool_call' | 'quest.tool_result';
   payload: {
     quest_id: string;
     project_id?: string;
@@ -351,5 +361,11 @@ export interface QuestEvent extends WebSocketEvent {
     question?: { question: string; options?: string[] };
     drafts?: string[];
     summary?: string;
+    // Tool call events
+    tool_name?: string;
+    status?: 'running';
+    output?: string;
+    is_error?: boolean;
+    duration_ms?: number;
   };
 }

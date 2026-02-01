@@ -7,6 +7,7 @@ import { Onboarding } from './components/Onboarding';
 import { ActivityFeed } from './components/ActivityFeed';
 import { PlanningPanel } from './components/PlanningPanel';
 import { ObjectiveDraftCard } from './components/ObjectiveDraftCard';
+import { ToolCallList } from './components/ToolCallList';
 import type { Task, TasksResponse, SystemStatus, TaskStatus, WebSocketEvent, SessionEvent, Approval, Quest, QuestMessage, QuestResponse, ObjectiveDraft, QuestModel, PreflightCheck } from './lib/types';
 
 // Setup status type
@@ -2030,6 +2031,12 @@ function QuestDetailPage() {
                           : 'bg-gray-800 text-gray-200'
                       }`}
                     >
+                      {/* Tool calls (assistant only) */}
+                      {msg.role === 'assistant' && msg.tool_calls && msg.tool_calls.length > 0 && (
+                        <div className="mb-3">
+                          <ToolCallList toolCalls={msg.tool_calls} />
+                        </div>
+                      )}
                       <p className="whitespace-pre-wrap">{displayContent}</p>
                       <p className={`text-xs mt-1 ${msg.role === 'user' ? 'text-blue-200' : 'text-gray-500'}`}>
                         {formatTime(msg.created_at)}

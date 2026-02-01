@@ -3,6 +3,7 @@ package db
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"time"
 )
@@ -220,18 +221,33 @@ func (db *DB) DeleteQuest(id string) error {
 
 // CreateQuestMessage creates a new message in a Quest conversation
 func (db *DB) CreateQuestMessage(questID, role, content string) (*QuestMessage, error) {
+	return db.CreateQuestMessageWithToolCalls(questID, role, content, nil)
+}
+
+// CreateQuestMessageWithToolCalls creates a new message with optional tool calls
+func (db *DB) CreateQuestMessageWithToolCalls(questID, role, content string, toolCalls []QuestToolCall) (*QuestMessage, error) {
 	msg := &QuestMessage{
 		ID:        NewPrefixedID("qmsg"),
 		QuestID:   questID,
 		Role:      role,
 		Content:   content,
+		ToolCalls: toolCalls,
 		CreatedAt: time.Now(),
 	}
 
+	var toolCallsJSON sql.NullString
+	if len(toolCalls) > 0 {
+		data, err := json.Marshal(toolCalls)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal tool calls: %w", err)
+		}
+		toolCallsJSON = sql.NullString{String: string(data), Valid: true}
+	}
+
 	_, err := db.Exec(
-		`INSERT INTO quest_messages (id, quest_id, role, content, created_at)
-		 VALUES (?, ?, ?, ?, ?)`,
-		msg.ID, msg.QuestID, msg.Role, msg.Content, msg.CreatedAt,
+		`INSERT INTO quest_messages (id, quest_id, role, content, tool_calls, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?)`,
+		msg.ID, msg.QuestID, msg.Role, msg.Content, toolCallsJSON, msg.CreatedAt,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create quest message: %w", err)
@@ -243,7 +259,7 @@ func (db *DB) CreateQuestMessage(questID, role, content string) (*QuestMessage, 
 // GetQuestMessages retrieves all messages for a Quest in chronological order
 func (db *DB) GetQuestMessages(questID string) ([]*QuestMessage, error) {
 	rows, err := db.Query(
-		`SELECT id, quest_id, role, content, created_at
+		`SELECT id, quest_id, role, content, tool_calls, created_at
 		 FROM quest_messages WHERE quest_id = ?
 		 ORDER BY created_at ASC`,
 		questID,
@@ -256,10 +272,20 @@ func (db *DB) GetQuestMessages(questID string) ([]*QuestMessage, error) {
 	var messages []*QuestMessage
 	for rows.Next() {
 		msg := &QuestMessage{}
-		err := rows.Scan(&msg.ID, &msg.QuestID, &msg.Role, &msg.Content, &msg.CreatedAt)
+		var toolCallsJSON sql.NullString
+		err := rows.Scan(&msg.ID, &msg.QuestID, &msg.Role, &msg.Content, &toolCallsJSON, &msg.CreatedAt)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan quest message: %w", err)
 		}
+
+		// Parse tool_calls JSON if present
+		if toolCallsJSON.Valid && toolCallsJSON.String != "" {
+			if err := json.Unmarshal([]byte(toolCallsJSON.String), &msg.ToolCalls); err != nil {
+				// Log but don't fail - could be legacy data
+				fmt.Printf("warning: failed to parse tool_calls for message %s: %v\n", msg.ID, err)
+			}
+		}
+
 		messages = append(messages, msg)
 	}
 
