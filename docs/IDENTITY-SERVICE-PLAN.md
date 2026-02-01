@@ -7,7 +7,16 @@ A managed service that provisions complete digital identities for Poindexter ins
 - Phone number + Signal account
 - AI API access (proxied, metered, billed)
 
-Users can either use the managed service OR bring their own credentials.
+**Two User Options:**
+1. **Self Setup** - User configures their own Gmail, Signal, Anthropic API key, etc.
+2. **Hosted Service** - We provide everything, two tiers:
+   - **Basic ($50/mo)** - Includes 5M tokens + identity
+   - **Pro ($250/mo)** - Includes 30M tokens + identity + priority support
+
+**Architecture Notes:**
+- User portal is part of the main Poindexter app (not separate)
+- Backend is Go (not open source, operator-only)
+- AI proxy uses Bifrost (Go-based, fastest) + Stripe metered billing
 
 ---
 
@@ -80,62 +89,88 @@ Users can either use the managed service OR bring their own credentials.
 
 ## User Journey
 
-### Flow 1: Managed Identity (Recommended)
+### Option 1: Hosted Service (Recommended)
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                        MANAGED ONBOARDING FLOW                               │
+│                      HOSTED SERVICE ONBOARDING                               │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                              │
-│  1. USER SIGNS UP                                                            │
-│     └── identity.poindexter.ai/signup                                       │
-│         ├── Email + Password (or OAuth with GitHub/Google)                  │
-│         ├── Payment method (Stripe)                                         │
-│         └── Choose plan (Basic / Pro / Enterprise)                          │
+│  IN POINDEXTER APP (during Dex onboarding)                                  │
 │                                                                              │
-│  2. IDENTITY PROVISIONED (automatic, ~30 seconds)                           │
-│     ├── Google Workspace account created                                    │
-│     │   └── dex-{user_id}@poindexter.ai                                    │
-│     ├── Phone number assigned from pool                                     │
-│     │   └── +1-555-xxx-xxxx (Telnyx)                                       │
-│     ├── Signal account registered                                           │
-│     │   └── Using assigned phone number                                     │
-│     └── API key generated                                                   │
-│         └── pk_live_xxxxxxxxxxxx                                            │
+│  1. USER CHOOSES HOSTED SERVICE                                             │
+│     ┌─────────────────────────────────────────────────────────────────┐    │
+│     │  How would you like to set up Poindexter's identity?            │    │
+│     │                                                                  │    │
+│     │  ○ Self Setup (bring your own API keys and accounts)            │    │
+│     │  ● Hosted Service (we handle everything)     [Recommended]      │    │
+│     │                                                                  │    │
+│     │  ┌─────────────────┐  ┌─────────────────┐                       │    │
+│     │  │ Basic - $50/mo  │  │ Pro - $250/mo   │                       │    │
+│     │  │ 5M tokens       │  │ 30M tokens      │                       │    │
+│     │  │ Email + Signal  │  │ Email + Signal  │                       │    │
+│     │  │ Email support   │  │ Priority support│                       │    │
+│     │  │ [Select]        │  │ [Select]        │                       │    │
+│     │  └─────────────────┘  └─────────────────┘                       │    │
+│     └─────────────────────────────────────────────────────────────────┘    │
 │                                                                              │
-│  3. USER CONFIGURES DEX INSTANCE                                            │
-│     └── In Dex onboarding, choose "Use Poindexter Identity Service"        │
-│         ├── Enter API key: pk_live_xxxxxxxxxxxx                            │
-│         ├── Dex fetches identity details from service                      │
-│         └── All integrations configured automatically                       │
+│  2. STRIPE CHECKOUT (embedded in app)                                       │
+│     └── Credit card → Subscription created                                  │
 │                                                                              │
-│  4. ONGOING USAGE                                                            │
-│     ├── AI requests proxied through service (metered)                      │
-│     ├── Email/Signal/Calendar via service API                              │
-│     ├── Monthly billing based on usage                                      │
-│     └── Dashboard shows usage, costs, logs                                  │
+│  3. IDENTITY PROVISIONED (automatic, ~30 seconds)                           │
+│     ├── Google Workspace account: dex-{id}@poindexter.ai                   │
+│     ├── Phone number assigned: +1-555-xxx-xxxx                             │
+│     ├── Signal registered automatically                                     │
+│     └── API key generated: pk_live_xxxxxxxxxxxx                            │
+│                                                                              │
+│  4. DEX CONFIGURED AUTOMATICALLY                                            │
+│     └── No manual steps - app stores API key, fetches identity             │
+│                                                                              │
+│  5. READY TO USE                                                             │
+│     ├── AI requests proxied + metered                                       │
+│     ├── Email/Signal/Calendar working                                       │
+│     └── Usage visible in dashboard                                          │
 │                                                                              │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Flow 2: Bring Your Own Keys (BYOK)
+### Option 2: Self Setup (BYOK)
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                           BYOK ONBOARDING FLOW                               │
+│                         SELF SETUP ONBOARDING                                │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                              │
-│  1. USER SKIPS MANAGED SERVICE                                              │
-│     └── In Dex onboarding, choose "I'll configure my own credentials"      │
+│  IN POINDEXTER APP (during Dex onboarding)                                  │
 │                                                                              │
-│  2. MANUAL CONFIGURATION                                                     │
-│     ├── Anthropic API Key: (user provides)                                  │
-│     ├── Google Workspace: (user creates account, provides OAuth)            │
-│     ├── Telnyx/Twilio: (user provides account + phone number)              │
-│     └── Signal: (user registers manually)                                   │
+│  1. USER CHOOSES SELF SETUP                                                 │
+│     └── "I'll configure my own credentials"                                │
 │                                                                              │
-│  3. NO DEPENDENCY ON IDENTITY SERVICE                                        │
-│     └── Dex operates fully independently                                    │
+│  2. STEP-BY-STEP CONFIGURATION                                              │
+│     ┌─────────────────────────────────────────────────────────────────┐    │
+│     │  Configure Your Identity                                         │    │
+│     │                                                                  │    │
+│     │  AI API Key                                                      │    │
+│     │  ┌──────────────────────────────────────────────────────────┐  │    │
+│     │  │ sk-ant-api03-xxxxxxxxxxxxx                               │  │    │
+│     │  └──────────────────────────────────────────────────────────┘  │    │
+│     │  Provider: ○ Anthropic  ○ OpenAI  ○ Other                      │    │
+│     │                                                                  │    │
+│     │  Email (Optional)                                                │    │
+│     │  ┌──────────────────────────────────────────────────────────┐  │    │
+│     │  │ [Connect Google Account]  or  [Skip]                     │  │    │
+│     │  └──────────────────────────────────────────────────────────┘  │    │
+│     │                                                                  │    │
+│     │  Phone/Signal (Optional)                                         │    │
+│     │  ┌──────────────────────────────────────────────────────────┐  │    │
+│     │  │ Telnyx API Key: ___________  Phone: +1-555-xxx-xxxx     │  │    │
+│     │  └──────────────────────────────────────────────────────────┘  │    │
+│     │                                                                  │    │
+│     │  [Complete Setup]                                                │    │
+│     └─────────────────────────────────────────────────────────────────┘    │
+│                                                                              │
+│  3. DEX OPERATES INDEPENDENTLY                                              │
+│     └── No dependency on Poindexter Identity Service                       │
 │                                                                              │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -353,19 +388,129 @@ func (p *Provisioner) ProvisionIdentity(ctx context.Context, userID string) (*Id
 
 ### 3. AI Proxy Service
 
-**Tech Stack:** Go + Redis (rate limiting) + PostgreSQL (usage tracking)
+**Tech Stack:** Bifrost (Go) + Stripe Metered Billing
 
-**Features:**
-- Proxies requests to Anthropic/OpenAI
-- Authenticates via API key
-- Tracks token usage per request
-- Enforces rate limits and spending caps
-- Streams responses back to client
+**Why Bifrost:**
+- Written in Go (matches our stack)
+- 50x faster than LiteLLM (<100µs overhead at 5K RPS)
+- Built-in failover, load balancing, caching
+- OpenAI-compatible API for all providers
+- Virtual keys with budget tracking
 
-**API:**
+**Architecture:**
 
 ```
-POST /v1/ai/chat
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         AI PROXY ARCHITECTURE                                │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  Dex Instance                                                                │
+│       │                                                                      │
+│       │ POST /v1/chat/completions                                           │
+│       │ Authorization: Bearer pk_live_xxx                                   │
+│       ▼                                                                      │
+│  ┌──────────────────────────────────────────────────────────────────────┐   │
+│  │                     AUTH + METERING LAYER (Go)                        │   │
+│  │  1. Validate API key → get user_id, plan                             │   │
+│  │  2. Check if user has remaining included tokens                       │   │
+│  │  3. Forward to Bifrost                                                │   │
+│  │  4. On response: extract token counts                                 │   │
+│  │  5. Report usage to Stripe Metering API                              │   │
+│  └──────────────────────────────────────────────────────────────────────┘   │
+│       │                                                                      │
+│       ▼                                                                      │
+│  ┌──────────────────────────────────────────────────────────────────────┐   │
+│  │                         BIFROST PROXY                                 │   │
+│  │  - Routes to Anthropic/OpenAI/etc.                                   │   │
+│  │  - Handles failover, retries, caching                                │   │
+│  │  - Returns OpenAI-compatible response                                │   │
+│  └──────────────────────────────────────────────────────────────────────┘   │
+│       │                                                                      │
+│       ▼                                                                      │
+│  Anthropic / OpenAI / etc.                                                  │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Stripe Metered Billing Integration:**
+
+```go
+// Stripe Products Setup (one-time)
+//
+// Product: "Poindexter Basic"
+//   Price: $50/month (subscription)
+//   Metered Price: $0.000003/input_token (overage)
+//   Metered Price: $0.000015/output_token (overage)
+//   Free tier: 5M tokens included
+//
+// Product: "Poindexter Pro"
+//   Price: $250/month (subscription)
+//   Metered Price: $0.0000025/input_token (overage)
+//   Metered Price: $0.000012/output_token (overage)
+//   Free tier: 30M tokens included
+
+// /internal/billing/stripe.go
+
+type StripeBilling struct {
+    client *stripe.Client
+}
+
+// Report usage after each AI request
+func (s *StripeBilling) ReportUsage(ctx context.Context, subscriptionItemID string, tokens int64) error {
+    _, err := s.client.UsageRecords.New(&stripe.UsageRecordParams{
+        SubscriptionItem: stripe.String(subscriptionItemID),
+        Quantity:         stripe.Int64(tokens),
+        Timestamp:        stripe.Int64(time.Now().Unix()),
+        Action:           stripe.String("increment"),
+    })
+    return err
+}
+
+// Check included tokens remaining
+func (s *StripeBilling) GetIncludedTokensRemaining(ctx context.Context, userID string) (int64, error) {
+    // Query usage this billing period
+    // Subtract from plan's included amount
+    // Return remaining (can be negative = overage)
+}
+```
+
+**Metering Flow:**
+
+```
+Request comes in
+    │
+    ▼
+┌─────────────────────────────────────────┐
+│ 1. Auth: Validate pk_live_xxx           │
+│    → Get user_id, stripe_subscription   │
+└─────────────────────────────────────────┘
+    │
+    ▼
+┌─────────────────────────────────────────┐
+│ 2. Proxy request through Bifrost        │
+│    → Get response + token counts        │
+└─────────────────────────────────────────┘
+    │
+    ▼
+┌─────────────────────────────────────────┐
+│ 3. Report to Stripe (async)             │
+│    → UsageRecords.New(input_tokens)     │
+│    → UsageRecords.New(output_tokens)    │
+└─────────────────────────────────────────┘
+    │
+    ▼
+┌─────────────────────────────────────────┐
+│ 4. Stripe handles billing:              │
+│    - Tracks cumulative usage            │
+│    - Subtracts included tier amount     │
+│    - Bills overage at invoice time      │
+└─────────────────────────────────────────┘
+```
+
+**API (OpenAI-compatible):**
+
+```
+POST /v1/chat/completions
 Authorization: Bearer pk_live_xxxxxxxxxxxx
 
 {
@@ -374,72 +519,7 @@ Authorization: Bearer pk_live_xxxxxxxxxxxx
   "max_tokens": 4096
 }
 
-Response: Proxied response from Anthropic (streaming supported)
-```
-
-**Implementation:**
-
-```go
-// /internal/proxy/ai_proxy.go
-
-type AIProxy struct {
-    anthropic    *anthropic.Client
-    openai       *openai.Client
-    usageTracker *UsageTracker
-    rateLimiter  *RateLimiter
-}
-
-func (p *AIProxy) HandleChatRequest(w http.ResponseWriter, r *http.Request) {
-    // 1. Authenticate
-    userID, err := p.authenticate(r)
-    if err != nil {
-        http.Error(w, "Unauthorized", 401)
-        return
-    }
-
-    // 2. Check rate limits / spending caps
-    if err := p.rateLimiter.Check(userID); err != nil {
-        http.Error(w, "Rate limit exceeded", 429)
-        return
-    }
-
-    // 3. Parse request
-    var req ChatRequest
-    json.NewDecoder(r.Body).Decode(&req)
-
-    // 4. Proxy to upstream provider
-    startTime := time.Now()
-    resp, inputTokens, outputTokens, err := p.callUpstream(r.Context(), req)
-    latency := time.Since(startTime)
-
-    // 5. Track usage
-    cost := p.calculateCost(req.Model, inputTokens, outputTokens)
-    p.usageTracker.Record(userID, UsageEvent{
-        Type:         "ai_request",
-        Model:        req.Model,
-        InputTokens:  inputTokens,
-        OutputTokens: outputTokens,
-        CostCents:    cost,
-        LatencyMs:    latency.Milliseconds(),
-    })
-
-    // 6. Return response
-    json.NewEncoder(w).Encode(resp)
-}
-
-func (p *AIProxy) calculateCost(model string, input, output int) int {
-    // Pricing per 1M tokens (in cents)
-    pricing := map[string]struct{ input, output int }{
-        "claude-sonnet-4-20250514": {300, 1500},   // $3/$15 per 1M
-        "claude-opus-4-20250514":   {1500, 7500},  // $15/$75 per 1M
-        "claude-3-haiku":           {25, 125},     // $0.25/$1.25 per 1M
-    }
-
-    p := pricing[model]
-    inputCost := (input * p.input) / 1_000_000
-    outputCost := (output * p.output) / 1_000_000
-    return inputCost + outputCost
-}
+Response: Standard OpenAI-format response (streaming supported)
 ```
 
 ---
@@ -482,26 +562,56 @@ func (e *EmailService) SendEmail(ctx context.Context, userID, to, subject, body 
 
 ### Plans
 
-| Feature | Basic | Pro | Enterprise |
-|---------|-------|-----|------------|
-| **Base Price** | $15/mo | $35/mo | Custom |
-| **Identity** | Full | Full | Full |
-| **AI Tokens (included)** | 1M | 5M | Custom |
-| **AI Overage** | $3/1M in, $15/1M out | $2.50/1M in, $12/1M out | Volume pricing |
-| **Email** | 500/mo | Unlimited | Unlimited |
-| **Signal** | 100 msgs/mo | 500 msgs/mo | Unlimited |
-| **Support** | Community | Email | Dedicated |
-| **SLA** | None | 99.9% | 99.99% |
+| Feature | Basic | Pro |
+|---------|-------|-----|
+| **Price** | $50/mo | $250/mo |
+| **Included Tokens** | 5M | 30M |
+| **Overage (input)** | $3/1M | $2.50/1M |
+| **Overage (output)** | $15/1M | $12/1M |
+| **Identity** | Full (email, phone, Signal) | Full |
+| **Email** | Unlimited | Unlimited |
+| **Signal** | Unlimited | Unlimited |
+| **Support** | Email | Priority |
+| **SLA** | 99.9% | 99.99% |
 
-### Cost Structure (Our Costs)
+### Token Economics
 
-| Component | Our Cost | User Price | Margin |
-|-----------|----------|------------|--------|
-| Google Workspace | ~$3.50/user | Included | -$3.50 |
-| Telnyx Number | $1/mo | Included | -$1.00 |
-| Telnyx SMS | $0.004/msg | Included | ~-$0.20/mo |
-| Anthropic API | Wholesale | +20% markup | +20% |
-| **Net per Basic user** | ~$5/mo | $15/mo | **+$10/mo** |
+```
+Claude Sonnet pricing (our cost): $3 input / $15 output per 1M tokens
+
+Basic Plan ($50/mo):
+├── 5M tokens included ≈ $15-75 in AI costs (depending on in/out ratio)
+├── Identity costs: ~$5/mo (Workspace + Telnyx)
+├── Margin on base: $50 - $20 = ~$30
+└── Overage: Pass-through at cost (no margin, but increases stickiness)
+
+Pro Plan ($250/mo):
+├── 30M tokens included ≈ $90-450 in AI costs
+├── Identity costs: ~$5/mo
+├── Margin on base: $250 - $100 = ~$150 (assuming 50/50 in/out)
+└── Overage: Slight discount (customer loyalty)
+```
+
+### Cost Structure (Per User)
+
+| Component | Our Cost | Included In |
+|-----------|----------|-------------|
+| Google Workspace | ~$3.50/user | Base price |
+| Telnyx Number | $1/mo | Base price |
+| Telnyx SMS (~100 msgs) | ~$0.40/mo | Base price |
+| Anthropic (5M tokens) | ~$45/mo* | Basic tier |
+| Anthropic (30M tokens) | ~$135/mo* | Pro tier |
+
+*Assuming 50/50 input/output ratio
+
+### Margin Analysis
+
+| Plan | Revenue | Costs | Margin |
+|------|---------|-------|--------|
+| Basic (light user) | $50 | ~$20 | **+$30** |
+| Basic (heavy user) | $50 + overage | ~$50 | **+$0** (but overage profit) |
+| Pro (light user) | $250 | ~$50 | **+$200** |
+| Pro (heavy user) | $250 + overage | ~$150 | **+$100** |
 
 ---
 
