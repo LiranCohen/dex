@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"regexp"
 	"strings"
@@ -222,10 +223,12 @@ func (h *Handler) ProcessMessage(ctx context.Context, questID, content string) (
 	systemPrompt := questSystemPrompt + h.buildToolContext() + h.buildUserContext(ctx) + h.buildCrossQuestContext(quest.ProjectID, questID)
 
 	// Create tool executor for this project (read-only mode)
-	var executor *tools.Executor
+	// Always create an executor - use project path if available, otherwise use temp dir for web tools
+	workDir := os.TempDir()
 	if project != nil && project.RepoPath != "" && h.isValidProjectPath(project.RepoPath) {
-		executor = tools.NewExecutor(project.RepoPath, h.toolSet, true)
+		workDir = project.RepoPath
 	}
+	executor := tools.NewExecutor(workDir, h.toolSet, true)
 
 	// Collect tool calls for this response
 	var allToolCalls []db.QuestToolCall
@@ -246,7 +249,7 @@ func (h *Handler) ProcessMessage(ctx context.Context, questID, content string) (
 		}
 
 		// Check if model wants to use tools
-		if response.HasToolUse() && executor != nil {
+		if response.HasToolUse() {
 			toolBlocks := response.ToolUseBlocks()
 
 			// Add assistant message with tool_use blocks
