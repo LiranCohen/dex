@@ -406,7 +406,7 @@ func (h *Handler) buildToolContext() string {
 
 	return `
 
-## Available Tools
+## Your Tools (Read-Only for Exploration)
 You have access to read-only tools for exploring the codebase before proposing objectives:
 - read_file: Read file contents
 - list_files: List directory contents
@@ -418,7 +418,23 @@ You have access to read-only tools for exploring the codebase before proposing o
 - web_search: Search the web for information
 - web_fetch: Fetch URL content
 
-Use these tools to understand the codebase before making recommendations. The tools are read-only and cannot modify files.
+Use these tools to understand the codebase before making recommendations.
+
+## Objective Capabilities (Full Write Access)
+When you create objectives, the AI agents that execute them have FULL capabilities including:
+- Writing and editing files
+- Running bash commands
+- Git operations (init, commit, push)
+- GitHub operations (create repos, create PRs, create issues)
+
+So while YOU can only read and explore, the objectives you create CAN:
+- Create new GitHub repositories (private or public)
+- Initialize projects with files and structure
+- Create pull requests and issues
+- Execute any shell commands
+- Commit and push code changes
+
+When a user asks to create a GitHub repo, initialize a project, or perform other write operations, create an objective for it - the executing agent has the tools to do it.
 `
 }
 
