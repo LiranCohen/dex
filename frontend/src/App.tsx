@@ -1628,7 +1628,9 @@ function QuestDetailPage() {
       setMessageInput('');
       // Message will be added via WebSocket event
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to send message';
+      // err could be ApiError (with message property) or Error
+      const apiErr = err as { message?: string };
+      const message = apiErr?.message || (err instanceof Error ? err.message : 'Failed to send message');
       setError(message);
     } finally {
       setIsSending(false);

@@ -17,8 +17,8 @@ import (
 
 // Model constants for quest conversations
 const (
-	ModelSonnet = "claude-sonnet-4-20250514"
-	ModelOpus   = "claude-opus-4-20250514"
+	ModelSonnet = "claude-sonnet-4-5-20250929"
+	ModelOpus   = "claude-opus-4-5-20251101"
 )
 
 // ObjectiveDraft represents a draft objective (task) proposed by Dex

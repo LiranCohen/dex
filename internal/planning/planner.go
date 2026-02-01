@@ -56,7 +56,7 @@ Guidelines for the checklist:
 
 Keep responses concise. Focus on understanding intent and breaking down into clear steps.`
 
-const planningModel = "claude-sonnet-4-20250514"
+const planningModel = "claude-sonnet-4-5-20250929"
 
 // Planner handles the planning phase for tasks
 type Planner struct {

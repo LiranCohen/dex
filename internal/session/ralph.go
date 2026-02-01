@@ -425,7 +425,7 @@ func (r *RalphLoop) buildPrompt() (string, error) {
 // sendMessage sends the current conversation to Claude
 func (r *RalphLoop) sendMessage(ctx context.Context, systemPrompt string) (*toolbelt.AnthropicChatResponse, error) {
 	req := &toolbelt.AnthropicChatRequest{
-		Model:     "claude-sonnet-4-20250514",
+		Model:     "claude-sonnet-4-5-20250929",
 		MaxTokens: 8192,
 		System:    systemPrompt,
 		Messages:  r.messages,
