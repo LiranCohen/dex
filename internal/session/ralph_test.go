@@ -9,7 +9,7 @@ func TestNewRalphLoop(t *testing.T) {
 	session := &ActiveSession{
 		ID:            "test-session-id",
 		TaskID:        "test-task-id",
-		Hat:           "implementer",
+		Hat:           "creator",
 		State:         StateCreated,
 		WorktreePath:  "/tmp/test-worktree",
 		MaxIterations: 10,
@@ -191,15 +191,13 @@ func TestDetectHatTransition_ValidHats(t *testing.T) {
 		response    string
 		expectedHat string
 	}{
-		{"Code is done. HAT_TRANSITION:reviewer", "reviewer"},
-		{"HAT_TRANSITION:implementer", "implementer"},
-		{"Let's move on. HAT_TRANSITION:tester now", "tester"},
-		{"HAT_TRANSITION:architect\nmore text", "architect"},
+		{"Work is done. HAT_TRANSITION:critic", "critic"},
+		{"HAT_TRANSITION:creator", "creator"},
+		{"Let's move on. HAT_TRANSITION:editor now", "editor"},
+		{"HAT_TRANSITION:designer\nmore text", "designer"},
 		{"HAT_TRANSITION:planner", "planner"},
-		{"HAT_TRANSITION:debugger", "debugger"},
-		{"HAT_TRANSITION:documenter", "documenter"},
-		{"HAT_TRANSITION:devops", "devops"},
-		{"HAT_TRANSITION:conflict_manager", "conflict_manager"},
+		{"HAT_TRANSITION:explorer", "explorer"},
+		{"HAT_TRANSITION:resolver", "resolver"},
 	}
 
 	for _, tt := range tests {
@@ -219,8 +217,8 @@ func TestDetectHatTransition_InvalidHats(t *testing.T) {
 		{"HAT_TRANSITION:invalid_hat"},
 		{"HAT_TRANSITION:foobar"},
 		{"HAT_TRANSITION:"},
-		{"HAT_TRANSITION: implementer"}, // space before hat name
-		{"hat_transition:implementer"},  // lowercase
+		{"HAT_TRANSITION: creator"}, // space before hat name
+		{"hat_transition:creator"},  // lowercase
 		{"no transition here"},
 		{""},
 	}
@@ -237,27 +235,27 @@ func TestDetectHatTransition_EdgeCases(t *testing.T) {
 	loop := &RalphLoop{}
 
 	// Hat name at end of string
-	result := loop.detectHatTransition("HAT_TRANSITION:reviewer")
-	if result != "reviewer" {
-		t.Errorf("expected 'reviewer' for end-of-string case, got %q", result)
+	result := loop.detectHatTransition("HAT_TRANSITION:critic")
+	if result != "critic" {
+		t.Errorf("expected 'critic' for end-of-string case, got %q", result)
 	}
 
 	// Hat name followed by newline
-	result = loop.detectHatTransition("HAT_TRANSITION:implementer\n")
-	if result != "implementer" {
-		t.Errorf("expected 'implementer' for newline case, got %q", result)
+	result = loop.detectHatTransition("HAT_TRANSITION:creator\n")
+	if result != "creator" {
+		t.Errorf("expected 'creator' for newline case, got %q", result)
 	}
 
 	// Hat name followed by tab
-	result = loop.detectHatTransition("HAT_TRANSITION:tester\textra")
-	if result != "tester" {
-		t.Errorf("expected 'tester' for tab case, got %q", result)
+	result = loop.detectHatTransition("HAT_TRANSITION:editor\textra")
+	if result != "editor" {
+		t.Errorf("expected 'editor' for tab case, got %q", result)
 	}
 
 	// Hat name followed by carriage return
-	result = loop.detectHatTransition("HAT_TRANSITION:architect\r\n")
-	if result != "architect" {
-		t.Errorf("expected 'architect' for CR case, got %q", result)
+	result = loop.detectHatTransition("HAT_TRANSITION:designer\r\n")
+	if result != "designer" {
+		t.Errorf("expected 'designer' for CR case, got %q", result)
 	}
 }
 
@@ -347,7 +345,7 @@ func TestBuildPrompt_NilManager(t *testing.T) {
 	session := &ActiveSession{
 		ID:     "test-session",
 		TaskID: "test-task",
-		Hat:    "implementer",
+		Hat:    "creator",
 	}
 
 	// Test with nil manager
@@ -380,15 +378,13 @@ func TestBuildPrompt_NilManager(t *testing.T) {
 
 func TestIsValidHat(t *testing.T) {
 	validHats := []string{
+		"explorer",
 		"planner",
-		"architect",
-		"implementer",
-		"reviewer",
-		"tester",
-		"debugger",
-		"documenter",
-		"devops",
-		"conflict_manager",
+		"designer",
+		"creator",
+		"critic",
+		"editor",
+		"resolver",
 	}
 
 	for _, hat := range validHats {
@@ -399,8 +395,8 @@ func TestIsValidHat(t *testing.T) {
 
 	invalidHats := []string{
 		"invalid",
-		"Implementer", // case sensitive
-		"REVIEWER",
+		"Creator", // case sensitive
+		"EXPLORER",
 		"",
 		"planner ",
 		" planner",

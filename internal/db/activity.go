@@ -13,6 +13,7 @@ type SessionActivity struct {
 	SessionID    string
 	Iteration    int
 	EventType    string // "user_message", "assistant_response", "tool_call", "tool_result", "completion_signal", "hat_transition"
+	Hat          sql.NullString
 	Content      sql.NullString
 	TokensInput  sql.NullInt64
 	TokensOutput sql.NullInt64
@@ -32,13 +33,17 @@ const (
 )
 
 // CreateSessionActivity inserts a new activity record
-func (db *DB) CreateSessionActivity(sessionID string, iteration int, eventType string, content string, tokensInput, tokensOutput *int) (*SessionActivity, error) {
+func (db *DB) CreateSessionActivity(sessionID string, iteration int, eventType string, hat string, content string, tokensInput, tokensOutput *int) (*SessionActivity, error) {
 	activity := &SessionActivity{
 		ID:        NewPrefixedID("act"),
 		SessionID: sessionID,
 		Iteration: iteration,
 		EventType: eventType,
 		CreatedAt: time.Now(),
+	}
+
+	if hat != "" {
+		activity.Hat = sql.NullString{String: hat, Valid: true}
 	}
 
 	if content != "" {
@@ -56,10 +61,10 @@ func (db *DB) CreateSessionActivity(sessionID string, iteration int, eventType s
 	}
 
 	_, err := db.Exec(
-		`INSERT INTO session_activity (id, session_id, iteration, event_type, content, tokens_input, tokens_output, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO session_activity (id, session_id, iteration, event_type, hat, content, tokens_input, tokens_output, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		activity.ID, activity.SessionID, activity.Iteration, activity.EventType,
-		activity.Content, inputVal, outputVal, activity.CreatedAt,
+		activity.Hat, activity.Content, inputVal, outputVal, activity.CreatedAt,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create session activity: %w", err)
@@ -71,7 +76,7 @@ func (db *DB) CreateSessionActivity(sessionID string, iteration int, eventType s
 // ListSessionActivity returns all activity for a session, ordered by creation time
 func (db *DB) ListSessionActivity(sessionID string) ([]*SessionActivity, error) {
 	rows, err := db.Query(
-		`SELECT id, session_id, iteration, event_type, content, tokens_input, tokens_output, created_at
+		`SELECT id, session_id, iteration, event_type, hat, content, tokens_input, tokens_output, created_at
 		 FROM session_activity WHERE session_id = ?
 		 ORDER BY created_at ASC`,
 		sessionID,
@@ -86,7 +91,7 @@ func (db *DB) ListSessionActivity(sessionID string) ([]*SessionActivity, error) 
 		activity := &SessionActivity{}
 		err := rows.Scan(
 			&activity.ID, &activity.SessionID, &activity.Iteration,
-			&activity.EventType, &activity.Content, &activity.TokensInput,
+			&activity.EventType, &activity.Hat, &activity.Content, &activity.TokensInput,
 			&activity.TokensOutput, &activity.CreatedAt,
 		)
 		if err != nil {
@@ -105,7 +110,7 @@ func (db *DB) ListSessionActivity(sessionID string) ([]*SessionActivity, error) 
 // ListTaskActivity returns all activity for all sessions of a task
 func (db *DB) ListTaskActivity(taskID string) ([]*SessionActivity, error) {
 	rows, err := db.Query(
-		`SELECT a.id, a.session_id, a.iteration, a.event_type, a.content, a.tokens_input, a.tokens_output, a.created_at
+		`SELECT a.id, a.session_id, a.iteration, a.event_type, a.hat, a.content, a.tokens_input, a.tokens_output, a.created_at
 		 FROM session_activity a
 		 JOIN sessions s ON a.session_id = s.id
 		 WHERE s.task_id = ?
@@ -122,7 +127,7 @@ func (db *DB) ListTaskActivity(taskID string) ([]*SessionActivity, error) {
 		activity := &SessionActivity{}
 		err := rows.Scan(
 			&activity.ID, &activity.SessionID, &activity.Iteration,
-			&activity.EventType, &activity.Content, &activity.TokensInput,
+			&activity.EventType, &activity.Hat, &activity.Content, &activity.TokensInput,
 			&activity.TokensOutput, &activity.CreatedAt,
 		)
 		if err != nil {

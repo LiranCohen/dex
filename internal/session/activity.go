@@ -13,6 +13,7 @@ type ActivityRecorder struct {
 	db        *db.DB
 	sessionID string
 	taskID    string
+	hat       string
 	broadcast func(eventType string, payload map[string]any)
 }
 
@@ -26,6 +27,11 @@ func NewActivityRecorder(database *db.DB, sessionID, taskID string, broadcast fu
 	}
 }
 
+// SetHat sets the current hat for activity tracking
+func (r *ActivityRecorder) SetHat(hat string) {
+	r.hat = hat
+}
+
 // broadcastActivity sends an activity event through WebSocket
 func (r *ActivityRecorder) broadcastActivity(activity *db.SessionActivity) {
 	if r.broadcast == nil {
@@ -33,6 +39,10 @@ func (r *ActivityRecorder) broadcastActivity(activity *db.SessionActivity) {
 	}
 
 	// Extract values from nullable types to avoid serializing as {String, Valid} objects
+	var hat *string
+	if activity.Hat.Valid {
+		hat = &activity.Hat.String
+	}
 	var content *string
 	if activity.Content.Valid {
 		content = &activity.Content.String
@@ -53,6 +63,7 @@ func (r *ActivityRecorder) broadcastActivity(activity *db.SessionActivity) {
 			"session_id":    activity.SessionID,
 			"iteration":     activity.Iteration,
 			"event_type":    activity.EventType,
+			"hat":           hat,
 			"content":       content,
 			"tokens_input":  tokensInput,
 			"tokens_output": tokensOutput,
@@ -67,6 +78,7 @@ func (r *ActivityRecorder) RecordUserMessage(iteration int, content string) erro
 		r.sessionID,
 		iteration,
 		db.ActivityTypeUserMessage,
+		r.hat,
 		content,
 		nil,
 		nil,
@@ -84,6 +96,7 @@ func (r *ActivityRecorder) RecordAssistantResponse(iteration int, content string
 		r.sessionID,
 		iteration,
 		db.ActivityTypeAssistantResponse,
+		r.hat,
 		content,
 		&inputTokens,
 		&outputTokens,
@@ -116,6 +129,7 @@ func (r *ActivityRecorder) RecordToolCall(iteration int, toolName string, input 
 		r.sessionID,
 		iteration,
 		db.ActivityTypeToolCall,
+		r.hat,
 		string(content),
 		nil,
 		nil,
@@ -148,6 +162,7 @@ func (r *ActivityRecorder) RecordToolResult(iteration int, toolName string, resu
 		r.sessionID,
 		iteration,
 		db.ActivityTypeToolResult,
+		r.hat,
 		string(content),
 		nil,
 		nil,
@@ -165,6 +180,7 @@ func (r *ActivityRecorder) RecordCompletion(iteration int, signal string) error 
 		r.sessionID,
 		iteration,
 		db.ActivityTypeCompletion,
+		r.hat,
 		signal,
 		nil,
 		nil,
@@ -197,6 +213,7 @@ func (r *ActivityRecorder) RecordHatTransition(iteration int, fromHat, toHat str
 		r.sessionID,
 		iteration,
 		db.ActivityTypeHatTransition,
+		r.hat,
 		string(content),
 		nil,
 		nil,
@@ -233,6 +250,7 @@ func (r *ActivityRecorder) RecordDebugLog(iteration int, level, message string, 
 		r.sessionID,
 		iteration,
 		db.ActivityTypeDebugLog,
+		r.hat,
 		string(content),
 		nil,
 		nil,
@@ -292,6 +310,7 @@ func (r *ActivityRecorder) RecordChecklistUpdate(iteration int, itemID, status, 
 		r.sessionID,
 		iteration,
 		db.ActivityTypeChecklistUpdate,
+		r.hat,
 		string(content),
 		nil,
 		nil,

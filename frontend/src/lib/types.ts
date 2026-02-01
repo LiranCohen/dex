@@ -144,6 +144,7 @@ export interface Activity {
   session_id: string;
   iteration: number;
   event_type: ActivityEventType;
+  hat?: string;
   content?: string;
   tokens_input?: number;
   tokens_output?: number;

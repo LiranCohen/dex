@@ -182,16 +182,15 @@ func (p *PromptLoader) Reload() error {
 }
 
 // ValidHats returns the list of valid hat names
+// These are general-purpose roles that apply to any domain, not just software
 var ValidHats = []string{
-	"planner",
-	"architect",
-	"implementer",
-	"reviewer",
-	"tester",
-	"debugger",
-	"documenter",
-	"devops",
-	"conflict_manager",
+	"explorer", // Research, investigate, gather information
+	"planner",  // Strategy, breakdown, sequencing
+	"designer", // High-level structure, approach, architecture
+	"creator",  // Build, write, implement the actual work
+	"critic",   // Review, evaluate, check quality
+	"editor",   // Refine, polish, document
+	"resolver", // Handle conflicts, blockers, dependencies
 }
 
 // IsValidHat checks if the given hat name is valid

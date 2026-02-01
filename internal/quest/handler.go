@@ -125,7 +125,7 @@ OBJECTIVE_DRAFT:{
   "draft_id": "draft-1",
   "title": "Short descriptive title",
   "description": "Detailed description of what this objective accomplishes",
-  "hat": "implementer",
+  "hat": "creator",
   "checklist": {
     "must_have": ["Required step 1", "Required step 2"],
     "optional": ["Nice-to-have enhancement"]
@@ -141,7 +141,7 @@ Guidelines for objectives:
 - Each objective should be atomic and independently completable
 - Title should be action-oriented (e.g., "Add user authentication", "Fix login bug")
 - Description provides context for the executing agent
-- Hat options: "architect" (design/planning), "implementer" (coding), "reviewer" (verification)
+- Hat options: "explorer" (research), "planner" (strategy), "designer" (structure), "creator" (building), "critic" (review), "editor" (refinement), "resolver" (issues)
 - Checklist must_have items are required for completion (3-5 items ideal)
 - Checklist optional items are nice-to-have enhancements
 - Use blocked_by to reference other draft_ids if there are dependencies
