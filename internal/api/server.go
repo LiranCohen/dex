@@ -20,6 +20,7 @@ import (
 	"github.com/lirancohen/dex/internal/auth"
 	"github.com/lirancohen/dex/internal/db"
 	"github.com/lirancohen/dex/internal/git"
+	"github.com/lirancohen/dex/internal/github"
 	"github.com/lirancohen/dex/internal/orchestrator"
 	"github.com/lirancohen/dex/internal/planning"
 	"github.com/lirancohen/dex/internal/quest"
@@ -44,6 +45,7 @@ type Server struct {
 	sessionManager *session.Manager
 	planner        *planning.Planner
 	questHandler   *quest.Handler
+	githubApp      *github.AppManager
 	hub            *websocket.Hub
 	addr           string
 	certFile       string
@@ -54,6 +56,7 @@ type Server struct {
 	challenges     map[string]challengeEntry // challenge -> expiry
 	challengesMu   sync.RWMutex
 	toolbeltMu     sync.RWMutex // Protects toolbelt updates
+	githubAppMu    sync.RWMutex // Protects GitHub App manager
 }
 
 // Config holds server configuration
@@ -142,6 +145,9 @@ func NewServer(database *db.DB, cfg Config) *Server {
 		}
 	}
 
+	// Initialize GitHub App manager if configured
+	s.initGitHubApp()
+
 	// Register routes
 	s.registerRoutes()
 
@@ -180,6 +186,15 @@ func (s *Server) registerRoutes() {
 	v1.POST("/setup/github-token", s.handleSetupGitHubToken)
 	v1.POST("/setup/anthropic-key", s.handleSetupAnthropicKey)
 	v1.POST("/setup/complete", s.handleSetupComplete)
+
+	// GitHub App endpoints (for one-click GitHub integration)
+	v1.GET("/setup/github/app/status", s.handleGitHubAppStatus)
+	v1.GET("/setup/github/app/manifest", s.handleGitHubAppManifest)
+	v1.GET("/setup/github/app/callback", s.handleGitHubAppCallback)
+	v1.GET("/setup/github/install/callback", s.handleGitHubInstallCallback)
+	v1.GET("/setup/github/installations", s.handleGitHubInstallations)
+	v1.POST("/setup/github/installations/sync", s.handleGitHubSyncInstallations)
+	v1.DELETE("/setup/github/app", s.handleGitHubDeleteApp)
 
 	// Task endpoints (public for now, will add auth later)
 	v1.GET("/tasks", s.handleListTasks)

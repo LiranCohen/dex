@@ -20,6 +20,9 @@ import (
 type SetupStatus struct {
 	PasskeyRegistered bool   `json:"passkey_registered"`
 	GitHubTokenSet    bool   `json:"github_token_set"`
+	GitHubAppSet      bool   `json:"github_app_set"`
+	GitHubAppSlug     string `json:"github_app_slug,omitempty"`
+	GitHubAuthMethod  string `json:"github_auth_method"` // "app", "token", or "none"
 	AnthropicKeySet   bool   `json:"anthropic_key_set"`
 	SetupComplete     bool   `json:"setup_complete"`
 	AccessMethod      string `json:"access_method,omitempty"` // "tailscale" or "cloudflare"
@@ -42,7 +45,9 @@ func DefaultSetupConfig() *SetupConfig {
 
 // handleSetupStatus returns the current setup status
 func (s *Server) handleSetupStatus(c echo.Context) error {
-	status := SetupStatus{}
+	status := SetupStatus{
+		GitHubAuthMethod: "none",
+	}
 	dataDir := s.getDataDir()
 
 	// Check if any passkeys are registered
@@ -51,9 +56,19 @@ func (s *Server) handleSetupStatus(c echo.Context) error {
 		status.PasskeyRegistered = true
 	}
 
-	// Check if toolbelt has GitHub configured
+	// Check for GitHub App configuration (preferred)
+	if appConfig, err := s.db.GetGitHubAppConfig(); err == nil && appConfig != nil {
+		status.GitHubAppSet = true
+		status.GitHubAppSlug = appConfig.AppSlug
+		status.GitHubAuthMethod = "app"
+	}
+
+	// Check if toolbelt has GitHub configured (legacy token)
 	if s.toolbelt != nil && s.toolbelt.GitHub != nil {
 		status.GitHubTokenSet = true
+		if status.GitHubAuthMethod == "none" {
+			status.GitHubAuthMethod = "token"
+		}
 	}
 
 	// Check if toolbelt has Anthropic configured
@@ -68,6 +83,9 @@ func (s *Server) handleSetupStatus(c echo.Context) error {
 		if json.Unmarshal(data, &secrets) == nil {
 			if secrets["github_token"] != "" {
 				status.GitHubTokenSet = true
+				if status.GitHubAuthMethod == "none" {
+					status.GitHubAuthMethod = "token"
+				}
 			}
 			if secrets["anthropic_key"] != "" {
 				status.AnthropicKeySet = true
@@ -233,12 +251,15 @@ func (s *Server) handleSetupComplete(c echo.Context) error {
 		}
 	}
 
+	// Check for GitHub App configuration
+	hasGitHubApp := s.db.HasGitHubApp()
+
 	// Validate all steps are complete
 	if !status.PasskeyRegistered {
 		return echo.NewHTTPError(http.StatusBadRequest, "passkey not registered")
 	}
-	if !status.GitHubTokenSet {
-		return echo.NewHTTPError(http.StatusBadRequest, "GitHub token not set")
+	if !status.GitHubTokenSet && !hasGitHubApp {
+		return echo.NewHTTPError(http.StatusBadRequest, "GitHub not configured (use App or token)")
 	}
 	if !status.AnthropicKeySet {
 		return echo.NewHTTPError(http.StatusBadRequest, "Anthropic key not set")

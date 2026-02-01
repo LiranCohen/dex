@@ -61,6 +61,7 @@ func (db *DB) Migrate() error {
 		migrationQuests,
 		migrationQuestMessages,
 		migrationQuestTemplates,
+		migrationGitHubApp,
 	}
 
 	for i, migration := range migrations {
@@ -359,4 +360,30 @@ CREATE TABLE IF NOT EXISTS quest_templates (
 );
 
 CREATE INDEX IF NOT EXISTS idx_quest_templates_project ON quest_templates(project_id);
+`
+
+const migrationGitHubApp = `
+-- GitHub App configuration (singleton - only one row)
+CREATE TABLE IF NOT EXISTS github_app_config (
+	id INTEGER PRIMARY KEY CHECK (id = 1),
+	app_id INTEGER NOT NULL,
+	app_slug TEXT NOT NULL,
+	client_id TEXT NOT NULL,
+	client_secret TEXT NOT NULL,
+	private_key TEXT NOT NULL,
+	webhook_secret TEXT,
+	created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+	updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- GitHub App installations (one per user/org that installs the app)
+CREATE TABLE IF NOT EXISTS github_installations (
+	id INTEGER PRIMARY KEY,
+	account_id INTEGER NOT NULL,
+	account_type TEXT NOT NULL,
+	login TEXT NOT NULL UNIQUE,
+	created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_github_installations_login ON github_installations(login);
 `
