@@ -662,38 +662,57 @@ export function Onboarding({ onComplete }: OnboardingProps) {
         {step === 'anthropic_key' && (
           <div className="bg-gray-800 rounded-lg p-6">
             <div className="text-center mb-6">
-              <svg className="w-16 h-16 mx-auto text-orange-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={1.5}
-                  d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
-                />
-              </svg>
+              {/* Anthropic logo */}
+              <div className="w-16 h-16 mx-auto mb-4 bg-[#D4A27F] rounded-full flex items-center justify-center">
+                <svg className="w-10 h-10 text-black" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M13.827 3.52h3.603L24 20.48h-3.603l-6.57-16.96zm-7.258 0h3.767L16.906 20.48h-3.674l-1.343-3.461H5.017l-1.344 3.46H0L6.57 3.522zm3.63 10.681l-2.106-5.428-2.106 5.428h4.212z"/>
+                </svg>
+              </div>
               <h2 className="text-xl font-semibold mb-2">Connect to Anthropic</h2>
               <p className="text-gray-400 text-sm">
-                Poindexter uses Claude AI to help with code and tasks.
+                Dex uses Claude to power AI-assisted development.
               </p>
             </div>
 
-            <div className="bg-gray-700 rounded-lg p-4 mb-6 text-sm">
-              <p className="font-medium text-gray-300 mb-2">How to get your API key:</p>
-              <ol className="list-decimal list-inside space-y-1 text-gray-400">
-                <li>
-                  Go to{' '}
-                  <a
-                    href="https://console.anthropic.com"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-blue-400 hover:underline"
-                  >
-                    console.anthropic.com
-                  </a>
-                </li>
-                <li>Navigate to Settings &rarr; API Keys</li>
-                <li>Click "Create Key"</li>
-                <li>Copy the key</li>
-              </ol>
+            {/* Step 1: Open Console */}
+            <div className="mb-4">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="w-6 h-6 rounded-full bg-blue-600 text-white text-sm flex items-center justify-center font-medium">1</span>
+                <span className="text-sm font-medium text-gray-300">Open the Anthropic Console</span>
+              </div>
+              <a
+                href="https://console.anthropic.com/settings/keys"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="w-full bg-[#D4A27F] hover:bg-[#C4926F] text-black font-semibold py-3 px-4 rounded-lg transition-colors flex items-center justify-center gap-2"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                </svg>
+                Open API Keys Page
+              </a>
+              <p className="text-xs text-gray-500 mt-2 text-center">
+                Sign up or log in if you don't have an account
+              </p>
+            </div>
+
+            {/* Step 2: Create & Copy */}
+            <div className="mb-4">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="w-6 h-6 rounded-full bg-blue-600 text-white text-sm flex items-center justify-center font-medium">2</span>
+                <span className="text-sm font-medium text-gray-300">Create a key and copy it</span>
+              </div>
+              <div className="bg-gray-700 rounded-lg p-3 text-sm text-gray-400">
+                Click <span className="text-white font-medium">"Create Key"</span>, give it a name like "Dex", then copy the key.
+              </div>
+            </div>
+
+            {/* Step 3: Paste */}
+            <div className="mb-4">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="w-6 h-6 rounded-full bg-blue-600 text-white text-sm flex items-center justify-center font-medium">3</span>
+                <span className="text-sm font-medium text-gray-300">Paste your key below</span>
+              </div>
             </div>
 
             {error && (
@@ -703,16 +722,13 @@ export function Onboarding({ onComplete }: OnboardingProps) {
             )}
 
             <form onSubmit={handleAnthropicSubmit}>
-              <label htmlFor="anthropic-key" className="block text-sm font-medium text-gray-300 mb-2">
-                Anthropic API Key
-              </label>
               <input
                 id="anthropic-key"
                 type="password"
                 value={anthropicKey}
                 onChange={(e) => setAnthropicKey(e.target.value)}
-                placeholder="sk-ant-api03-xxxxxxxxxxxx"
-                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-3 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent mb-4"
+                placeholder="sk-ant-api03-..."
+                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-3 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent mb-4 font-mono"
                 disabled={isLoading}
                 autoComplete="off"
               />
