@@ -145,124 +145,532 @@ Consider supporting **Tailscale OAuth** in future for identity verification:
 
 ---
 
-## Step 3: Gmail Account for Poindexter
+## Step 3: Poindexter's Full Digital Identity
 
-### Critical Constraints
+### Vision
 
-**Google does NOT allow programmatic creation of consumer Gmail accounts.**
+Each Poindexter instance should have its own complete digital identity:
+- **Email** - Send/receive emails, use as account recovery
+- **Calendar** - Schedule events, accept invitations
+- **Signal** - Secure messaging with users
+- **OAuth** - Authenticate to arbitrary third-party services
 
-From research:
-- No API exists for creating `@gmail.com` accounts
-- Browser automation violates Google ToS
-- Only Google Workspace Admin SDK can create accounts (within owned domains)
-
-### Viable Options
-
-#### Option A: Dedicated Gmail (Manual Creation + OAuth)
-
-User creates a dedicated Gmail account manually, then authorizes Poindexter.
+### Architecture Overview
 
 ```
-Onboarding Flow:
-1. User creates poindexter-<unique>@gmail.com manually
-2. User adds account to their password manager
-3. Poindexter initiates Google OAuth flow
-4. User authorizes Gmail read/send scopes
-5. OAuth refresh token stored in secrets.json
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    POINDEXTER IDENTITY STACK                             │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│  ┌─────────────────────────────────────────────────────────────────┐    │
+│  │                    IDENTITY FOUNDATION                           │    │
+│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐  │    │
+│  │  │ Phone #     │  │ Email       │  │ Calendar                │  │    │
+│  │  │ (Twilio)    │  │ (Workspace) │  │ (Google/CalDAV)         │  │    │
+│  │  │             │  │             │  │                         │  │    │
+│  │  │ +1-xxx-xxxx │  │ dex-id@     │  │ CalDAV endpoint or      │  │    │
+│  │  │ SMS receive │  │ poindexter  │  │ Google Calendar API     │  │    │
+│  │  │ Voice calls │  │ .ai         │  │                         │  │    │
+│  │  └─────────────┘  └─────────────┘  └─────────────────────────┘  │    │
+│  └─────────────────────────────────────────────────────────────────┘    │
+│                                                                          │
+│  ┌─────────────────────────────────────────────────────────────────┐    │
+│  │                    COMMUNICATION LAYER                           │    │
+│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐  │    │
+│  │  │ Signal      │  │ SMS/Voice   │  │ Email (SMTP/IMAP)       │  │    │
+│  │  │ (signal-cli)│  │ (Twilio)    │  │ (Gmail API/Resend)      │  │    │
+│  │  └─────────────┘  └─────────────┘  └─────────────────────────┘  │    │
+│  └─────────────────────────────────────────────────────────────────┘    │
+│                                                                          │
+│  ┌─────────────────────────────────────────────────────────────────┐    │
+│  │                    OAUTH INTEGRATION LAYER                       │    │
+│  │  ┌─────────────────────────────────────────────────────────────┐│    │
+│  │  │ OAuth Manager                                                ││    │
+│  │  │ - Client Credentials (M2M)                                   ││    │
+│  │  │ - Device Authorization Flow (user-delegated)                 ││    │
+│  │  │ - Token storage & refresh                                    ││    │
+│  │  │ - Per-service credential management                          ││    │
+│  │  └─────────────────────────────────────────────────────────────┘│    │
+│  │                                                                  │    │
+│  │  Connected Services: Linear, Notion, Slack, Jira, etc.          │    │
+│  └─────────────────────────────────────────────────────────────────┘    │
+│                                                                          │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
 
-**Pros:**
-- User has full access to the account
-- Standard OAuth flow
-- No ToS violations
+---
 
-**Cons:**
-- Manual account creation step
-- User must remember another password
-- Account could be flagged if used unusually
+### Component 1: Phone Number (Foundation)
 
-#### Option B: Google Workspace Domain (Recommended for Production)
+A dedicated phone number is the foundation - required for Signal and SMS-based 2FA.
 
-Operator provisions accounts on a dedicated domain (e.g., `poindexter.ai`).
+**Recommended: Twilio**
 
-```
-Setup Flow:
-1. Operator owns Google Workspace domain
-2. Admin SDK creates user@poindexter.ai
-3. Service account has domain-wide delegation
-4. OAuth tokens managed automatically
-```
+| Feature | Details |
+|---------|---------|
+| Cost | ~$1/month per number + $0.0075/SMS received |
+| Capabilities | SMS receive, voice calls, programmable |
+| API | REST API with Go SDK |
+| Coverage | 100+ countries |
 
-**Pros:**
-- Fully automated after initial setup
-- Professional appearance
-- Centralized management
-- Clear separation from user's personal email
-
-**Cons:**
-- Requires Google Workspace subscription (~$6/user/month)
-- Operator must manage the domain
-- More complex infrastructure
-
-#### Option C: No Gmail (Use Existing Email Infrastructure)
-
-Don't create a Gmail account. Use Resend for sending, webhooks for receiving.
-
-```
-Architecture:
-- Outbound: Resend API (already integrated)
-- Inbound: Webhook endpoint for receiving emails
-- Address: poindexter-<id>@mail.poindexter.ai (Resend domain)
-```
-
-**Pros:**
-- No Google dependency
-- Already have Resend integration
-- Full control over email identity
-
-**Cons:**
-- No access to existing Gmail features (Drive, Calendar, etc.)
-- Limited ecosystem integration
-- Custom infrastructure required
-
-### Recommendation: Phased Approach
-
-**Phase 1 (MVP):** Option C - Use existing email infrastructure
-- Leverage Resend for outbound
-- Add inbound webhook support
-- Custom domain for Poindexter email addresses
-
-**Phase 2 (Enhancement):** Option A - Add Google OAuth
-- For users who want Gmail integration
-- Optional feature, not required
-- User creates account manually, Poindexter gets OAuth access
-
-**Phase 3 (Enterprise):** Option B - Google Workspace
-- For operators running multiple instances
-- Admin SDK provisioning
-- Centralized account management
-
-### Implementation Plan (Phase 1)
+**Implementation:**
 
 ```go
-// New file: /internal/toolbelt/email.go
+// /internal/identity/phone.go
 
-type EmailService interface {
-    Send(ctx context.Context, email Email) error
-    // Future: Receive via webhook
+type PhoneService struct {
+    twilioClient *twilio.RestClient
+    phoneNumber  string // Poindexter's dedicated number
 }
 
-// Uses Resend as backend
-type ResendEmailService struct {
-    client *ResendClient
-    fromAddress string // e.g., poindexter@mail.dex.local
+// Receive SMS (webhook from Twilio)
+func (p *PhoneService) HandleIncomingSMS(from, body string) error {
+    // Parse verification codes, forward to appropriate handler
+}
+
+// For 2FA during account creation
+func (p *PhoneService) WaitForVerificationCode(ctx context.Context, timeout time.Duration) (string, error) {
+    // Poll or webhook-wait for incoming SMS with code pattern
 }
 ```
 
-**Files to create/modify:**
-- `/internal/email/service.go` - Unified email service interface
-- `/internal/api/webhooks.go` - Inbound email webhook handler
-- `/docs/EMAIL.md` - Documentation for email setup
+**Onboarding Flow:**
+1. Operator pre-provisions Twilio account with phone numbers
+2. During Dex setup, assign a number to this instance
+3. Configure Twilio webhook → Dex endpoint
+4. Phone number stored in `identity_config` table
+
+---
+
+### Component 2: Email (Google Workspace)
+
+**Recommended: Google Workspace with Admin SDK**
+
+| Feature | Details |
+|---------|---------|
+| Cost | ~$6/user/month (Workspace Starter) |
+| Domain | `poindexter.ai` or similar |
+| API | Admin SDK for account creation, Gmail API for email |
+| Benefits | Full Google ecosystem (Calendar, Drive included) |
+
+**Why Workspace over alternatives:**
+- Programmatic account creation via Admin SDK
+- Gmail API for full email management
+- Calendar included (no separate service needed)
+- Professional appearance (`dex-xxx@poindexter.ai`)
+- OAuth tokens for Google services come free
+
+**Implementation:**
+
+```go
+// /internal/identity/email.go
+
+type EmailIdentity struct {
+    address      string // dex-xxx@poindexter.ai
+    gmailService *gmail.Service
+    adminService *admin.Service // For account creation (operator-level)
+}
+
+// Create new email account (operator-level, during provisioning)
+func (e *EmailIdentity) CreateAccount(ctx context.Context, instanceID string) error {
+    user := &admin.User{
+        PrimaryEmail: fmt.Sprintf("dex-%s@poindexter.ai", instanceID),
+        Name: &admin.UserName{
+            GivenName:  "Poindexter",
+            FamilyName: instanceID,
+        },
+        Password: generateSecurePassword(),
+    }
+    _, err := e.adminService.Users.Insert(user).Do()
+    return err
+}
+
+// Send email
+func (e *EmailIdentity) Send(ctx context.Context, to, subject, body string) error
+
+// Read inbox
+func (e *EmailIdentity) GetUnread(ctx context.Context) ([]*gmail.Message, error)
+```
+
+**Alternative: Self-Hosted (Postal/Mailcow)**
+- Full control, no per-user cost
+- More operational overhead
+- Good for privacy-focused deployments
+
+---
+
+### Component 3: Calendar (Google Calendar or CalDAV)
+
+**Option A: Google Calendar (comes with Workspace)**
+
+```go
+// /internal/identity/calendar.go
+
+type CalendarService struct {
+    service *calendar.Service
+}
+
+func (c *CalendarService) CreateEvent(ctx context.Context, event Event) error
+func (c *CalendarService) GetUpcoming(ctx context.Context, days int) ([]Event, error)
+func (c *CalendarService) AcceptInvitation(ctx context.Context, eventID string) error
+```
+
+**Option B: Self-Hosted CalDAV (Baïkal or Nextcloud)**
+
+For users who want to avoid Google:
+
+```go
+// /internal/identity/caldav.go
+
+type CalDAVService struct {
+    client   *caldav.Client
+    calendar string // calendar URL
+}
+
+// Standard CalDAV operations
+func (c *CalDAVService) CreateEvent(ctx context.Context, event Event) error
+func (c *CalDAVService) GetEvents(ctx context.Context, start, end time.Time) ([]Event, error)
+```
+
+---
+
+### Component 4: Signal (Secure Messaging)
+
+**Implementation: signal-cli + REST wrapper**
+
+| Component | Purpose |
+|-----------|---------|
+| signal-cli | Core Signal protocol implementation |
+| signal-cli-rest-api | Docker container exposing REST API |
+| Twilio number | Phone number for Signal registration |
+
+**Setup Flow:**
+1. Provision Twilio number for this Poindexter
+2. Register Signal account using signal-cli
+3. Receive verification SMS via Twilio webhook
+4. Complete registration
+5. Run signal-cli-rest-api as sidecar container
+
+**Implementation:**
+
+```go
+// /internal/identity/signal.go
+
+type SignalService struct {
+    apiURL      string // signal-cli-rest-api endpoint
+    phoneNumber string // Poindexter's Signal number
+}
+
+func (s *SignalService) Register(ctx context.Context, verificationCode string) error {
+    // Complete Signal registration with code from Twilio SMS
+}
+
+func (s *SignalService) Send(ctx context.Context, to, message string) error {
+    // POST /v2/send
+}
+
+func (s *SignalService) Receive(ctx context.Context) ([]Message, error) {
+    // GET /v1/receive/{number}
+}
+```
+
+**Maintenance Requirements:**
+- Signal accounts expire after 120 days of inactivity
+- signal-cli needs updates when Signal protocol changes (~quarterly)
+- Consider Matrix/Element as more bot-friendly alternative
+
+---
+
+### Component 5: OAuth Integration Layer
+
+This is the key to Poindexter creating/managing accounts on arbitrary services.
+
+**Two OAuth Flows:**
+
+1. **Client Credentials** (Machine-to-Machine)
+   - For services with API access (no user delegation)
+   - Poindexter authenticates as itself
+
+2. **Device Authorization Flow** (User-Delegated)
+   - For services requiring user consent
+   - User authorizes on separate device
+   - Best for headless/CLI scenarios
+
+**Implementation:**
+
+```go
+// /internal/identity/oauth.go
+
+type OAuthManager struct {
+    db           *db.DB
+    tokenStore   *TokenStore
+    httpClient   *http.Client
+}
+
+// Service registration
+type OAuthService struct {
+    ID           string
+    Name         string
+    AuthURL      string
+    TokenURL     string
+    ClientID     string
+    ClientSecret string
+    Scopes       []string
+    FlowType     string // "client_credentials", "device", "authorization_code"
+}
+
+// Device Authorization Flow (RFC 8628)
+func (o *OAuthManager) StartDeviceFlow(ctx context.Context, service *OAuthService) (*DeviceCode, error) {
+    // POST to device_authorization_endpoint
+    // Returns: device_code, user_code, verification_uri
+}
+
+func (o *OAuthManager) PollForToken(ctx context.Context, service *OAuthService, deviceCode string) (*Token, error) {
+    // Poll token endpoint until user completes authorization
+}
+
+// Client Credentials Flow
+func (o *OAuthManager) GetClientCredentialsToken(ctx context.Context, service *OAuthService) (*Token, error) {
+    // Direct token request with client_id + client_secret
+}
+
+// Token management
+func (o *OAuthManager) GetToken(ctx context.Context, serviceID string) (*Token, error) {
+    // Get cached token, refresh if expired
+}
+
+func (o *OAuthManager) RefreshToken(ctx context.Context, serviceID string) (*Token, error) {
+    // Use refresh_token to get new access_token
+}
+```
+
+**Database Schema:**
+
+```sql
+CREATE TABLE oauth_services (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    auth_url TEXT,
+    token_url TEXT NOT NULL,
+    client_id TEXT NOT NULL,
+    client_secret TEXT,
+    scopes TEXT,  -- JSON array
+    flow_type TEXT NOT NULL,
+    created_at TIMESTAMP
+);
+
+CREATE TABLE oauth_tokens (
+    service_id TEXT PRIMARY KEY REFERENCES oauth_services(id),
+    access_token TEXT NOT NULL,
+    refresh_token TEXT,
+    token_type TEXT,
+    expires_at TIMESTAMP,
+    scopes TEXT,  -- JSON array of granted scopes
+    created_at TIMESTAMP,
+    updated_at TIMESTAMP
+);
+```
+
+**Pre-configured Services:**
+
+```go
+var KnownServices = map[string]*OAuthService{
+    "linear": {
+        Name:     "Linear",
+        AuthURL:  "https://linear.app/oauth/authorize",
+        TokenURL: "https://api.linear.app/oauth/token",
+        FlowType: "authorization_code",
+        Scopes:   []string{"read", "write"},
+    },
+    "notion": {
+        Name:     "Notion",
+        AuthURL:  "https://api.notion.com/v1/oauth/authorize",
+        TokenURL: "https://api.notion.com/v1/oauth/token",
+        FlowType: "authorization_code",
+    },
+    "slack": {
+        Name:     "Slack",
+        AuthURL:  "https://slack.com/oauth/v2/authorize",
+        TokenURL: "https://slack.com/api/oauth.v2.access",
+        FlowType: "authorization_code",
+        Scopes:   []string{"chat:write", "channels:read"},
+    },
+    // ... more services
+}
+```
+
+---
+
+### Account Creation Flow (Poindexter Creates Its Own Accounts)
+
+For services that allow email-based signup:
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│              Poindexter Self-Service Account Creation                │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                      │
+│  1. User requests: "Sign up for Linear"                             │
+│                                                                      │
+│  2. Poindexter navigates to signup page                             │
+│     └── Uses headless browser (Playwright/Rod)                      │
+│                                                                      │
+│  3. Fills signup form:                                               │
+│     ├── Email: dex-xxx@poindexter.ai                                │
+│     ├── Name: Poindexter                                             │
+│     └── Password: (generated, stored in vault)                      │
+│                                                                      │
+│  4. Handles verification:                                            │
+│     ├── Email verification → Gmail API reads code                   │
+│     ├── SMS verification → Twilio receives code                     │
+│     └── CAPTCHA → (manual intervention or solving service)          │
+│                                                                      │
+│  5. Completes OAuth authorization:                                   │
+│     └── Stores tokens in oauth_tokens table                         │
+│                                                                      │
+│  6. Account ready for use                                            │
+│                                                                      │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+**Implementation:**
+
+```go
+// /internal/identity/accounts.go
+
+type AccountManager struct {
+    email    *EmailIdentity
+    phone    *PhoneService
+    oauth    *OAuthManager
+    browser  *rod.Browser // Headless browser for signup flows
+}
+
+func (a *AccountManager) CreateAccount(ctx context.Context, service string) error {
+    switch service {
+    case "linear":
+        return a.createLinearAccount(ctx)
+    case "notion":
+        return a.createNotionAccount(ctx)
+    // ...
+    }
+}
+
+func (a *AccountManager) createLinearAccount(ctx context.Context) error {
+    // 1. Navigate to linear.app/signup
+    // 2. Fill form with Poindexter's email
+    // 3. Wait for verification email
+    // 4. Extract verification link from email
+    // 5. Complete verification
+    // 6. Store credentials
+}
+```
+
+---
+
+### Onboarding Flow (Revised with Full Identity)
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                    Identity-Aware Onboarding                         │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                      │
+│  PHASE 1: Core Setup (unchanged)                                     │
+│  ├── Tailscale connection                                           │
+│  ├── Passkey registration                                           │
+│  └── Anthropic API key                                              │
+│                                                                      │
+│  PHASE 2: Identity Provisioning (NEW)                                │
+│  │                                                                   │
+│  ├── 2a. Phone Number Assignment                                    │
+│  │   ├── Operator has pool of Twilio numbers                        │
+│  │   ├── Assign one to this instance                                │
+│  │   ├── Configure webhook → Dex                                    │
+│  │   └── Test SMS reception                                         │
+│  │                                                                   │
+│  ├── 2b. Email Account Creation                                     │
+│  │   ├── Admin SDK creates dex-xxx@poindexter.ai                   │
+│  │   ├── Generate app password or OAuth token                       │
+│  │   ├── Verify email works (send test)                             │
+│  │   └── Calendar auto-provisioned with Workspace                   │
+│  │                                                                   │
+│  ├── 2c. Signal Registration (Optional)                             │
+│  │   ├── Start signal-cli registration                              │
+│  │   ├── Receive verification code via Twilio                       │
+│  │   ├── Complete registration                                      │
+│  │   └── Start signal-cli-rest-api sidecar                          │
+│  │                                                                   │
+│  PHASE 3: GitHub App (existing)                                      │
+│  └── Create/install GitHub App                                      │
+│                                                                      │
+│  PHASE 4: Additional Services (Optional)                             │
+│  ├── "Connect Linear" → OAuth flow                                  │
+│  ├── "Connect Slack" → OAuth flow                                   │
+│  └── "Create account on X" → Automated signup                       │
+│                                                                      │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+### Database Schema for Identity
+
+```sql
+-- Core identity configuration
+CREATE TABLE identity_config (
+    id INTEGER PRIMARY KEY DEFAULT 1,
+
+    -- Phone
+    phone_number TEXT,
+    twilio_account_sid TEXT,
+    twilio_auth_token TEXT,
+
+    -- Email (Google Workspace)
+    email_address TEXT,
+    google_service_account_json TEXT,  -- For API access
+
+    -- Signal
+    signal_registered BOOLEAN DEFAULT FALSE,
+    signal_device_id INTEGER,
+
+    created_at TIMESTAMP,
+    updated_at TIMESTAMP
+);
+
+-- OAuth services and tokens (from above)
+CREATE TABLE oauth_services (...);
+CREATE TABLE oauth_tokens (...);
+
+-- Account credentials for services where Poindexter has its own account
+CREATE TABLE service_accounts (
+    id TEXT PRIMARY KEY,
+    service_name TEXT NOT NULL,
+    email TEXT,
+    password_encrypted TEXT,  -- For non-OAuth services
+    api_key_encrypted TEXT,   -- For API key services
+    notes TEXT,
+    created_at TIMESTAMP
+);
+```
+
+---
+
+### Cost Estimate (Per Poindexter Instance)
+
+| Component | Monthly Cost |
+|-----------|-------------|
+| Twilio Phone Number | ~$1 |
+| Twilio SMS (est. 100 msgs) | ~$0.75 |
+| Google Workspace | ~$6 |
+| Signal | Free |
+| **Total** | **~$8/month** |
+
+Self-hosted alternative (email + calendar):
+| Component | Monthly Cost |
+|-----------|-------------|
+| Twilio Phone + SMS | ~$1.75 |
+| Self-hosted email (Postal) | ~$0 (server costs) |
+| Self-hosted CalDAV (Baïkal) | ~$0 (server costs) |
+| **Total** | **~$2/month** + server |
 
 ---
 
