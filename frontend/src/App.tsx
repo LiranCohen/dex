@@ -14,6 +14,7 @@ import type { Task, TasksResponse, SystemStatus, TaskStatus, WebSocketEvent, Ses
 interface SetupStatus {
   passkey_registered: boolean;
   github_token_set: boolean;
+  github_app_set: boolean;
   anthropic_key_set: boolean;
   setup_complete: boolean;
 }
@@ -2447,7 +2448,9 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
       setSetupStatus(status);
 
       // Show onboarding if setup is not complete
-      if (!status.setup_complete && (!status.github_token_set || !status.anthropic_key_set)) {
+      // Check for either GitHub auth method (app or token)
+      const hasGitHubAuth = status.github_token_set || status.github_app_set;
+      if (!status.setup_complete && (!hasGitHubAuth || !status.anthropic_key_set)) {
         setShowOnboarding(true);
       }
     } catch (err) {

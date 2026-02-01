@@ -218,7 +218,7 @@ func (s *Server) handleGitHubAppCallback(c echo.Context) error {
 	installURL := fmt.Sprintf("https://github.com/apps/%s/installations/new", appConfig.AppSlug)
 
 	// Redirect to frontend with success parameter (URL-encode the install_url)
-	return c.Redirect(http.StatusFound, "/setup?github_app=created&install_url="+url.QueryEscape(installURL))
+	return c.Redirect(http.StatusFound, "/?github_app=created&install_url="+url.QueryEscape(installURL))
 }
 
 // handleGitHubInstallCallback handles the callback after app installation
@@ -286,7 +286,8 @@ func (s *Server) handleGitHubInstallCallback(c echo.Context) error {
 	}
 
 	// Redirect to frontend with success
-	return c.Redirect(http.StatusFound, "/setup?github_installed=true")
+	// Redirect to frontend root (SPA will handle the params)
+	return c.Redirect(http.StatusFound, "/?github_installed=true")
 }
 
 // handleGitHubInstallations returns the list of GitHub App installations

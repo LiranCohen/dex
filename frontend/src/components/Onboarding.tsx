@@ -106,6 +106,11 @@ export function Onboarding({ onComplete }: OnboardingProps) {
       const githubInstalled = params.get('github_installed');
       const installUrl = params.get('install_url');
 
+      // Debug logging
+      console.log('Onboarding fetchStatus - URL:', window.location.href);
+      console.log('Onboarding fetchStatus - params:', { githubAppCreated, githubInstalled, installUrl });
+      console.log('Onboarding fetchStatus - status:', data);
+
       // Determine which step we should be on
       if (data.setup_complete) {
         onComplete();
