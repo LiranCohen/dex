@@ -143,7 +143,12 @@ IMPORTANT SIGNAL RULES:
 - If you need to ask a question, ONLY output the QUESTION signal, nothing else
 - Keep any conversational text brief and separate from signals
 
-Keep your conversational responses concise and focused. You can include multiple signals in one response if proposing several related objectives.`
+CRITICAL: Do NOT mix QUESTION and OBJECTIVE_DRAFT signals in the same response.
+- If you still need information, ask questions FIRST (no drafts)
+- Once you have enough information, propose objectives WITHOUT asking more questions
+- When you output an OBJECTIVE_DRAFT, you are committing to that proposal - no follow-up questions in the same message
+
+Keep your conversational responses concise and focused. You can include multiple OBJECTIVE_DRAFT signals in one response if proposing several related objectives.`
 
 // ProcessMessage handles a user message in a quest conversation
 func (h *Handler) ProcessMessage(ctx context.Context, questID, content string) (*db.QuestMessage, error) {
