@@ -266,26 +266,21 @@ func (m *AppManager) InstallURL() string {
 }
 
 // AppManifest returns the manifest for creating a new GitHub App via the manifest flow
-func AppManifest(name, callbackURL, setupURL, webhookURL string) map[string]any {
+func AppManifest(name, callbackURL, setupURL string) map[string]any {
 	return map[string]any{
-		"name":               name,
-		"url":                "https://github.com/lirancohen/dex",
-		"logo_url":           "https://raw.githubusercontent.com/lirancohen/dex/master/images/headshot.png",
-		"callback_urls":      []string{callbackURL},
-		"setup_url":          setupURL,
-		"setup_on_update":    true,
-		"redirect_url":       callbackURL,
-		"public":             false,
-		"webhook_active":     webhookURL != "",
-		"webhook_url":        webhookURL,
-		"default_events":     []string{},
+		"name":             name,
+		"url":              "https://github.com/lirancohen/dex",
+		"callback_urls":    []string{callbackURL},
+		"setup_url":        setupURL,
+		"setup_on_update":  true,
+		"redirect_url":     callbackURL,
+		"public":           false,
+		"default_events":   []string{},
 		"default_permissions": map[string]string{
-			"contents":       "write", // Read/write repo contents
-			"metadata":       "read",  // Read repo metadata
-			"issues":         "write", // Create/update issues
-			"pull_requests":  "write", // Create PRs
-			"administration": "write", // Create repos
-			"workflows":      "write", // Trigger actions (optional)
+			"contents":      "write", // Read/write repo contents
+			"metadata":      "read",  // Read repo metadata
+			"issues":        "write", // Create/update issues
+			"pull_requests": "write", // Create PRs
 		},
 	}
 }

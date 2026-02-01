@@ -139,7 +139,6 @@ func (s *Server) handleGitHubAppManifest(c echo.Context) error {
 		appName,
 		fullBaseURL+"/api/v1/setup/github/app/callback",
 		fullBaseURL+"/api/v1/setup/github/install/callback",
-		"", // No webhooks for now
 	)
 
 	// Return the manifest and the URL to redirect to
