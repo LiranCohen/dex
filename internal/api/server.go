@@ -1627,6 +1627,12 @@ func (s *Server) ReloadToolbelt() error {
 			s.planner = planning.NewPlanner(s.db, tb.Anthropic, s.hub)
 			fmt.Println("ReloadToolbelt: Planner created")
 		}
+
+		// Update quest handler with new Anthropic client
+		if s.questHandler == nil {
+			s.questHandler = quest.NewHandler(s.db, tb.Anthropic, s.hub)
+			fmt.Println("ReloadToolbelt: Quest handler created")
+		}
 	}
 	if tb.GitHub != nil {
 		fmt.Println("ReloadToolbelt: GitHub client initialized, updating session manager")
