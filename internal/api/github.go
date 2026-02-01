@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"time"
@@ -216,8 +217,8 @@ func (s *Server) handleGitHubAppCallback(c echo.Context) error {
 	// Return success and redirect URL to install the app
 	installURL := fmt.Sprintf("https://github.com/apps/%s/installations/new", appConfig.AppSlug)
 
-	// Redirect to frontend with success parameter
-	return c.Redirect(http.StatusFound, "/setup?github_app=created&install_url="+installURL)
+	// Redirect to frontend with success parameter (URL-encode the install_url)
+	return c.Redirect(http.StatusFound, "/setup?github_app=created&install_url="+url.QueryEscape(installURL))
 }
 
 // handleGitHubInstallCallback handles the callback after app installation
