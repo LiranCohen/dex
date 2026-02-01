@@ -77,6 +77,24 @@ export function Onboarding({ onComplete }: OnboardingProps) {
     fetchStatus();
   }, []);
 
+  // Auto-advance from github_success after countdown
+  useEffect(() => {
+    if (step === 'github_success') {
+      setCountdown(3);
+      const interval = setInterval(() => {
+        setCountdown(prev => {
+          if (prev <= 1) {
+            clearInterval(interval);
+            setStep('anthropic_key');
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+      return () => clearInterval(interval);
+    }
+  }, [step]);
+
   const fetchStatus = async () => {
     try {
       const data = await api.get<SetupStatus>('/setup/status');
@@ -570,24 +588,6 @@ export function Onboarding({ onComplete }: OnboardingProps) {
       </div>
     );
   }
-
-  // Auto-advance from github_success after countdown
-  useEffect(() => {
-    if (step === 'github_success') {
-      setCountdown(3);
-      const interval = setInterval(() => {
-        setCountdown(prev => {
-          if (prev <= 1) {
-            clearInterval(interval);
-            setStep('anthropic_key');
-            return 0;
-          }
-          return prev - 1;
-        });
-      }, 1000);
-      return () => clearInterval(interval);
-    }
-  }, [step]);
 
   if (step === 'github_success') {
     return (
