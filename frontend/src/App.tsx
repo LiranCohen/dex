@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Routes, Route, Navigate, useNavigate, useParams, Link } from 'react-router-dom';
 import { useAuthStore } from './stores/auth';
 import { api, fetchApprovals, approveApproval, rejectApproval, fetchQuests, createQuest, fetchQuest, sendQuestMessage, completeQuest, reopenQuest, deleteQuest, createObjective, updateQuestModel, fetchPreflightCheck } from './lib/api';
@@ -1565,6 +1565,9 @@ function QuestDetailPage() {
   const [isUpdatingModel, setIsUpdatingModel] = useState(false);
   const [preflight, setPreflight] = useState<PreflightCheck | null>(null);
 
+  // Track accepted/rejected drafts to avoid re-showing them after loadQuest
+  const handledDraftIds = useRef<Set<string>>(new Set());
+
   const { connected, subscribe } = useWebSocket();
   const navigate = useNavigate();
 
@@ -1583,7 +1586,9 @@ function QuestDetailPage() {
       for (const msg of data.messages) {
         if (msg.role === 'assistant') {
           const msgDrafts = parseObjectiveDrafts(msg.content);
-          allDrafts.push(...msgDrafts);
+          // Filter out drafts that have been accepted or rejected
+          const unhandledDrafts = msgDrafts.filter((d) => !handledDraftIds.current.has(d.draft_id));
+          allDrafts.push(...unhandledDrafts);
           // Only keep questions from the last assistant message
           const msgQuestions = parseQuestions(msg.content);
           if (msgQuestions.length > 0) {
@@ -1779,6 +1784,8 @@ function QuestDetailPage() {
 
     try {
       await createObjective(id, draft, selectedOptional);
+      // Mark draft as handled so it won't reappear after loadQuest
+      handledDraftIds.current.add(draft.draft_id);
       // Remove the accepted draft from the list
       setDrafts((prev) => prev.filter((d) => d.draft_id !== draft.draft_id));
       // Reload quest to get updated summary
@@ -1793,6 +1800,8 @@ function QuestDetailPage() {
 
   // Reject draft (just remove from UI)
   const handleRejectDraft = (draftId: string) => {
+    // Mark draft as handled so it won't reappear after loadQuest
+    handledDraftIds.current.add(draftId);
     setDrafts((prev) => prev.filter((d) => d.draft_id !== draftId));
   };
 

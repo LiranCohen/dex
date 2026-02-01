@@ -612,6 +612,96 @@ func (s *Server) handleDeleteTask(c echo.Context) error {
 	return c.NoContent(http.StatusNoContent)
 }
 
+// startTaskResult contains the result of starting a task
+type startTaskResult struct {
+	Task         *db.Task
+	WorktreePath string
+	SessionID    string
+}
+
+// startTaskInternal starts a task by ID with an optional base branch
+// This is a shared helper used by handleStartTask and auto-start logic
+func (s *Server) startTaskInternal(ctx context.Context, taskID string, baseBranch string) (*startTaskResult, error) {
+	// Get the task first
+	t, err := s.taskService.Get(taskID)
+	if err != nil {
+		return nil, fmt.Errorf("task not found: %w", err)
+	}
+
+	// Get the project to find repo_path
+	project, err := s.db.GetProjectByID(t.ProjectID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get project: %w", err)
+	}
+	if project == nil {
+		return nil, fmt.Errorf("project not found")
+	}
+
+	projectPath := project.RepoPath
+	if baseBranch == "" {
+		baseBranch = project.DefaultBranch
+		if baseBranch == "" {
+			baseBranch = "main"
+		}
+	}
+
+	// Check if already has a worktree
+	if t.WorktreePath.Valid && t.WorktreePath.String != "" {
+		return nil, fmt.Errorf("task already has a worktree")
+	}
+
+	// Create worktree
+	if s.gitService == nil {
+		return nil, fmt.Errorf("git service not configured")
+	}
+
+	worktreePath, err := s.gitService.SetupTaskWorktree(projectPath, taskID, baseBranch)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create worktree: %w", err)
+	}
+
+	// Transition through ready to running status
+	// First: pending -> ready
+	if t.Status == "pending" {
+		if err := s.taskService.UpdateStatus(taskID, "ready"); err != nil {
+			_ = s.gitService.CleanupTaskWorktree(projectPath, taskID, true)
+			return nil, fmt.Errorf("failed to transition to ready: %w", err)
+		}
+	}
+	// Then: ready -> running
+	if err := s.taskService.UpdateStatus(taskID, "running"); err != nil {
+		// Try to clean up the worktree we just created
+		_ = s.gitService.CleanupTaskWorktree(projectPath, taskID, true)
+		return nil, fmt.Errorf("failed to transition to running: %w", err)
+	}
+
+	// Create and start a session for this task
+	hat := "implementer" // Default hat - could be determined from task type
+	if t.Hat.Valid && t.Hat.String != "" {
+		hat = t.Hat.String
+	}
+
+	session, err := s.sessionManager.CreateSession(taskID, hat, worktreePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create session: %w", err)
+	}
+
+	// Start the session (runs Ralph loop in background)
+	// Use background context since the session should live beyond the HTTP request
+	if err := s.sessionManager.Start(ctx, session.ID); err != nil {
+		return nil, fmt.Errorf("failed to start session: %w", err)
+	}
+
+	// Fetch updated task
+	updated, _ := s.taskService.Get(taskID)
+
+	return &startTaskResult{
+		Task:         updated,
+		WorktreePath: worktreePath,
+		SessionID:    session.ID,
+	}, nil
+}
+
 // handleStartTask transitions a task to running and sets up its worktree
 func (s *Server) handleStartTask(c echo.Context) error {
 	taskID := c.Param("id")
@@ -623,84 +713,25 @@ func (s *Server) handleStartTask(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
 	}
 
-	// Get the task first
-	t, err := s.taskService.Get(taskID)
+	result, err := s.startTaskInternal(context.Background(), taskID, req.BaseBranch)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusNotFound, err.Error())
-	}
-
-	// Get the project to find repo_path
-	project, err := s.db.GetProjectByID(t.ProjectID)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to get project")
-	}
-	if project == nil {
-		return echo.NewHTTPError(http.StatusNotFound, "project not found")
-	}
-
-	projectPath := project.RepoPath
-	baseBranch := req.BaseBranch
-	if baseBranch == "" {
-		baseBranch = project.DefaultBranch
-		if baseBranch == "" {
-			baseBranch = "main"
+		// Determine appropriate HTTP status based on error
+		if strings.Contains(err.Error(), "not found") {
+			return echo.NewHTTPError(http.StatusNotFound, err.Error())
 		}
-	}
-
-	// Check if already has a worktree
-	if t.WorktreePath.Valid && t.WorktreePath.String != "" {
-		return echo.NewHTTPError(http.StatusConflict, "task already has a worktree")
-	}
-
-	// Create worktree
-	if s.gitService == nil {
-		return echo.NewHTTPError(http.StatusServiceUnavailable, "git service not configured")
-	}
-
-	worktreePath, err := s.gitService.SetupTaskWorktree(projectPath, taskID, baseBranch)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("failed to create worktree: %v", err))
-	}
-
-	// Transition through ready to running status
-	// First: pending -> ready
-	if t.Status == "pending" {
-		if err := s.taskService.UpdateStatus(taskID, "ready"); err != nil {
-			_ = s.gitService.CleanupTaskWorktree(projectPath, taskID, true)
-			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		if strings.Contains(err.Error(), "already has a worktree") {
+			return echo.NewHTTPError(http.StatusConflict, err.Error())
 		}
+		if strings.Contains(err.Error(), "not configured") {
+			return echo.NewHTTPError(http.StatusServiceUnavailable, err.Error())
+		}
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
-	// Then: ready -> running
-	if err := s.taskService.UpdateStatus(taskID, "running"); err != nil {
-		// Try to clean up the worktree we just created
-		_ = s.gitService.CleanupTaskWorktree(projectPath, taskID, true)
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	}
-
-	// Create and start a session for this task
-	hat := "implementer" // Default hat - could be determined from task type
-	if t.Hat.Valid && t.Hat.String != "" {
-		hat = t.Hat.String
-	}
-
-	session, err := s.sessionManager.CreateSession(taskID, hat, worktreePath)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("failed to create session: %v", err))
-	}
-
-	// Start the session (runs Ralph loop in background)
-	// Use background context since the session should live beyond the HTTP request
-	if err := s.sessionManager.Start(context.Background(), session.ID); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("failed to start session: %v", err))
-	}
-
-	// Fetch updated task
-	updated, _ := s.taskService.Get(taskID)
 
 	return c.JSON(http.StatusOK, map[string]any{
-		"task":          updated,
-		"worktree_path": worktreePath,
-		"session_id":    session.ID,
+		"task":          result.Task,
+		"worktree_path": result.WorktreePath,
+		"session_id":    result.SessionID,
 	})
 }
 
@@ -2641,15 +2672,32 @@ func (s *Server) handleCreateObjective(c echo.Context) error {
 	}
 
 	// Create the objective (task) from the draft
-	task, err := s.questHandler.CreateObjectiveFromDraft(c.Request().Context(), questID, draft, req.SelectedOptional)
+	createdTask, err := s.questHandler.CreateObjectiveFromDraft(c.Request().Context(), questID, draft, req.SelectedOptional)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 
-	return c.JSON(http.StatusCreated, map[string]any{
+	response := map[string]any{
 		"message": "objective created",
-		"task":    toTaskResponse(task),
-	})
+		"task":    toTaskResponse(createdTask),
+	}
+
+	// Auto-start the task if requested
+	if req.AutoStart {
+		startResult, err := s.startTaskInternal(context.Background(), createdTask.ID, "")
+		if err != nil {
+			// Task was created but couldn't be started - return partial success
+			response["auto_start_error"] = err.Error()
+			fmt.Printf("auto-start failed for task %s: %v\n", createdTask.ID, err)
+		} else {
+			response["task"] = toTaskResponse(startResult.Task)
+			response["worktree_path"] = startResult.WorktreePath
+			response["session_id"] = startResult.SessionID
+			response["auto_started"] = true
+		}
+	}
+
+	return c.JSON(http.StatusCreated, response)
 }
 
 // handleGetPreflightCheck returns pre-flight check results for a quest's project

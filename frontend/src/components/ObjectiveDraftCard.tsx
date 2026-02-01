@@ -26,6 +26,7 @@ function HatBadge({ hat }: { hat: string }) {
 export function ObjectiveDraftCard({ draft, onAccept, onReject, isAccepting }: ObjectiveDraftCardProps) {
   const [selectedOptional, setSelectedOptional] = useState<number[]>([]);
   const [isExpanded, setIsExpanded] = useState(true);
+  const [autoStart, setAutoStart] = useState(draft.auto_start);
 
   const handleOptionalToggle = (index: number) => {
     setSelectedOptional((prev) =>
@@ -34,7 +35,9 @@ export function ObjectiveDraftCard({ draft, onAccept, onReject, isAccepting }: O
   };
 
   const handleAccept = async () => {
-    await onAccept(draft, selectedOptional);
+    // Pass the updated auto_start value
+    const updatedDraft = { ...draft, auto_start: autoStart };
+    await onAccept(updatedDraft, selectedOptional);
   };
 
   return (
@@ -114,26 +117,34 @@ export function ObjectiveDraftCard({ draft, onAccept, onReject, isAccepting }: O
             </div>
           )}
 
-          {/* Budget estimates and auto-start */}
-          <div className="flex items-center justify-between text-xs">
-            <span className={draft.auto_start ? 'text-green-500' : 'text-gray-500'}>
-              {draft.auto_start ? '⚡ Auto-start enabled' : '⏸ Manual start'}
+          {/* Budget estimates */}
+          {(draft.estimated_iterations || draft.estimated_budget) && (
+            <div className="flex items-center gap-3 text-xs text-gray-400">
+              {draft.estimated_iterations && (
+                <span title="Estimated iterations">
+                  ~{draft.estimated_iterations} iterations
+                </span>
+              )}
+              {draft.estimated_budget && (
+                <span title="Estimated cost" className="text-yellow-500">
+                  ~${draft.estimated_budget.toFixed(2)}
+                </span>
+              )}
+            </div>
+          )}
+
+          {/* Auto-start toggle */}
+          <label className="flex items-center gap-2 text-sm cursor-pointer">
+            <input
+              type="checkbox"
+              checked={autoStart}
+              onChange={(e) => setAutoStart(e.target.checked)}
+              className="rounded border-gray-600 bg-gray-700 text-green-500 focus:ring-green-500 focus:ring-offset-gray-800"
+            />
+            <span className={autoStart ? 'text-green-400' : 'text-gray-400'}>
+              Auto-start when created
             </span>
-            {(draft.estimated_iterations || draft.estimated_budget) && (
-              <div className="flex items-center gap-3 text-gray-400">
-                {draft.estimated_iterations && (
-                  <span title="Estimated iterations">
-                    ~{draft.estimated_iterations} iterations
-                  </span>
-                )}
-                {draft.estimated_budget && (
-                  <span title="Estimated cost" className="text-yellow-500">
-                    ~${draft.estimated_budget.toFixed(2)}
-                  </span>
-                )}
-              </div>
-            )}
-          </div>
+          </label>
 
           {/* Actions */}
           <div className="flex gap-2 pt-2">
