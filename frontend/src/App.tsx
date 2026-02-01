@@ -1728,7 +1728,14 @@ function QuestDetailPage() {
   // Send message
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!id || !messageInput.trim() || isSending) return;
+    const trimmedMessage = messageInput.trim();
+    if (!id || !trimmedMessage || isSending) return;
+
+    // Clear input immediately for better UX
+    setMessageInput('');
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+    }
 
     setIsSending(true);
     setError(null);
@@ -1736,18 +1743,15 @@ function QuestDetailPage() {
     setQuestions([]);
 
     try {
-      await sendQuestMessage(id, messageInput.trim());
-      setMessageInput('');
-      // Reset textarea height
-      if (textareaRef.current) {
-        textareaRef.current.style.height = 'auto';
-      }
+      await sendQuestMessage(id, trimmedMessage);
       // Message will be added via WebSocket event
     } catch (err) {
       // err could be ApiError (with message property) or Error
       const apiErr = err as { message?: string };
       const message = apiErr?.message || (err instanceof Error ? err.message : 'Failed to send message');
       setError(message);
+      // Restore the message on error so user doesn't lose it
+      setMessageInput(trimmedMessage);
     } finally {
       setIsSending(false);
     }
@@ -2003,27 +2007,31 @@ function QuestDetailPage() {
               </div>
             ) : (
               <div className="space-y-4">
-              {messages.map((msg) => (
-                <div
-                  key={msg.id}
-                  className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
-                >
+              {messages.map((msg) => {
+                // Format assistant messages and skip if empty (e.g., only contained objective drafts)
+                const displayContent = msg.role === 'assistant' ? formatMessageContent(msg.content) : msg.content;
+                if (!displayContent) return null;
+
+                return (
                   <div
-                    className={`max-w-[80%] rounded-lg p-3 ${
-                      msg.role === 'user'
-                        ? 'bg-blue-600 text-white'
-                        : 'bg-gray-800 text-gray-200'
-                    }`}
+                    key={msg.id}
+                    className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
                   >
-                    <p className="whitespace-pre-wrap">
-                      {msg.role === 'assistant' ? formatMessageContent(msg.content) : msg.content}
-                    </p>
-                    <p className={`text-xs mt-1 ${msg.role === 'user' ? 'text-blue-200' : 'text-gray-500'}`}>
-                      {formatTime(msg.created_at)}
-                    </p>
+                    <div
+                      className={`max-w-[80%] rounded-lg p-3 ${
+                        msg.role === 'user'
+                          ? 'bg-blue-600 text-white'
+                          : 'bg-gray-800 text-gray-200'
+                      }`}
+                    >
+                      <p className="whitespace-pre-wrap">{displayContent}</p>
+                      <p className={`text-xs mt-1 ${msg.role === 'user' ? 'text-blue-200' : 'text-gray-500'}`}>
+                        {formatTime(msg.created_at)}
+                      </p>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
               </div>
             )}
           </div>
