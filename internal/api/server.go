@@ -148,6 +148,14 @@ func NewServer(database *db.DB, cfg Config) *Server {
 	// Initialize GitHub App manager if configured
 	s.initGitHubApp()
 
+	// If GitHub App is configured, set up the client fetcher for sessions
+	if s.githubApp != nil {
+		sessionMgr.SetGitHubClientFetcher(func(ctx context.Context, login string) (*toolbelt.GitHubClient, error) {
+			return s.GetToolbeltGitHubClient(ctx, login)
+		})
+		fmt.Println("GitHub App configured - session manager will use App-based authentication")
+	}
+
 	// Register routes
 	s.registerRoutes()
 

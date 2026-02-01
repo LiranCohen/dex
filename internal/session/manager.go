@@ -67,6 +67,10 @@ func (s *ActiveSession) Cost() float64 {
 }
 
 // Manager manages Claude Code session lifecycle
+// GitHubClientFetcher is a function that returns a GitHub client for a given login/org
+// This allows the session manager to get installation-specific clients for GitHub Apps
+type GitHubClientFetcher func(ctx context.Context, login string) (*toolbelt.GitHubClient, error)
+
 type Manager struct {
 	db           *db.DB
 	scheduler    *orchestrator.Scheduler
@@ -78,8 +82,9 @@ type Manager struct {
 	transitionHandler *orchestrator.TransitionHandler
 
 	// Git and GitHub for PR creation on completion
-	gitOps       *git.Operations
-	githubClient *toolbelt.GitHubClient
+	gitOps              *git.Operations
+	githubClient        *toolbelt.GitHubClient // Static client (PAT-based)
+	githubClientFetcher GitHubClientFetcher    // Dynamic client fetcher (GitHub App)
 
 	mu       sync.RWMutex
 	sessions map[string]*ActiveSession // sessionID -> session
@@ -152,6 +157,14 @@ func (m *Manager) SetGitHubClient(client *toolbelt.GitHubClient) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.githubClient = client
+}
+
+// SetGitHubClientFetcher sets a function to dynamically fetch GitHub clients
+// This is used for GitHub App installations where each org/user has a separate client
+func (m *Manager) SetGitHubClientFetcher(fetcher GitHubClientFetcher) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.githubClientFetcher = fetcher
 }
 
 // CreateSession creates a new session for a task
@@ -402,8 +415,22 @@ func (m *Manager) runSession(ctx context.Context, session *ActiveSession) {
 				if project.GitHubRepo.Valid {
 					repo = project.GitHubRepo.String
 				}
-				loop.InitExecutor(session.WorktreePath, m.gitOps, m.githubClient, owner, repo)
-				fmt.Printf("runSession: initialized tool executor (owner=%s, repo=%s)\n", owner, repo)
+
+				// Get GitHub client - try static client first, then fetcher
+				githubClient := m.githubClient
+				if githubClient == nil && m.githubClientFetcher != nil && owner != "" {
+					// Try to get a client from the fetcher (e.g., GitHub App installation)
+					fetchedClient, err := m.githubClientFetcher(ctx, owner)
+					if err != nil {
+						fmt.Printf("runSession: warning - failed to fetch GitHub client for %s: %v\n", owner, err)
+					} else {
+						githubClient = fetchedClient
+						fmt.Printf("runSession: using GitHub App client for %s\n", owner)
+					}
+				}
+
+				loop.InitExecutor(session.WorktreePath, m.gitOps, githubClient, owner, repo)
+				fmt.Printf("runSession: initialized tool executor (owner=%s, repo=%s, hasGitHub=%v)\n", owner, repo, githubClient != nil)
 			}
 		}
 

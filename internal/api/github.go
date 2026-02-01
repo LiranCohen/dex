@@ -16,6 +16,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/lirancohen/dex/internal/db"
 	"github.com/lirancohen/dex/internal/github"
+	"github.com/lirancohen/dex/internal/toolbelt"
 )
 
 // initGitHubApp initializes the GitHub App manager from database configuration
@@ -61,6 +62,33 @@ func (s *Server) GetGitHubClientForInstallation(ctx context.Context, login strin
 	}
 
 	return appManager.GetClientForInstallation(ctx, installID)
+}
+
+// GetToolbeltGitHubClient returns a toolbelt.GitHubClient for the specified installation login.
+// This wraps the GitHub App installation token in a toolbelt-compatible client.
+func (s *Server) GetToolbeltGitHubClient(ctx context.Context, login string) (*toolbelt.GitHubClient, error) {
+	s.githubAppMu.RLock()
+	appManager := s.githubApp
+	s.githubAppMu.RUnlock()
+
+	if appManager == nil {
+		return nil, fmt.Errorf("GitHub App not configured")
+	}
+
+	// Get installation ID for login
+	installID, err := appManager.GetInstallationIDForLogin(ctx, login)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get installation for %s: %w", login, err)
+	}
+
+	// Get installation token
+	token, err := appManager.GetInstallationToken(ctx, installID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get installation token: %w", err)
+	}
+
+	// Create toolbelt client from token
+	return toolbelt.NewGitHubClientFromToken(token, login), nil
 }
 
 // GitHubAppStatus represents the GitHub App configuration status
