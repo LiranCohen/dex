@@ -5,12 +5,14 @@ go 1.24.3
 require golang.org/x/crypto v0.47.0 // indirect
 
 require (
+	github.com/bmatcuk/doublestar/v4 v4.10.0
 	github.com/go-webauthn/webauthn v0.15.0
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/go-github/v68 v68.0.0
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/labstack/echo/v4 v4.13.4
+	github.com/lirancohen/promptloom v0.0.0-20260127214346-bf4f3fe1562c
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.44.3
 )
@@ -24,7 +26,6 @@ require (
 	github.com/google/go-querystring v1.1.0 // indirect
 	github.com/google/go-tpm v0.9.6 // indirect
 	github.com/labstack/gommon v0.4.2 // indirect
-	github.com/lirancohen/promptloom v0.0.0-20260127214346-bf4f3fe1562c // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect

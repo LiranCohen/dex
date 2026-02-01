@@ -2295,12 +2295,21 @@ type questSummaryResponse struct {
 	TotalDollarsUsed float64 `json:"total_dollars_used"`
 }
 
+type questToolCallResponse struct {
+	ToolName   string         `json:"tool_name"`
+	Input      map[string]any `json:"input"`
+	Output     string         `json:"output"`
+	IsError    bool           `json:"is_error"`
+	DurationMs int64          `json:"duration_ms"`
+}
+
 type questMessageResponse struct {
-	ID        string    `json:"id"`
-	QuestID   string    `json:"quest_id"`
-	Role      string    `json:"role"`
-	Content   string    `json:"content"`
-	CreatedAt time.Time `json:"created_at"`
+	ID        string                  `json:"id"`
+	QuestID   string                  `json:"quest_id"`
+	Role      string                  `json:"role"`
+	Content   string                  `json:"content"`
+	ToolCalls []questToolCallResponse `json:"tool_calls,omitempty"`
+	CreatedAt time.Time               `json:"created_at"`
 }
 
 func toQuestResponse(q *db.Quest, summary *db.QuestSummary) questResponse {
@@ -2331,13 +2340,29 @@ func toQuestResponse(q *db.Quest, summary *db.QuestSummary) questResponse {
 }
 
 func toQuestMessageResponse(m *db.QuestMessage) questMessageResponse {
-	return questMessageResponse{
+	resp := questMessageResponse{
 		ID:        m.ID,
 		QuestID:   m.QuestID,
 		Role:      m.Role,
 		Content:   m.Content,
 		CreatedAt: m.CreatedAt,
 	}
+
+	// Convert tool calls
+	if len(m.ToolCalls) > 0 {
+		resp.ToolCalls = make([]questToolCallResponse, len(m.ToolCalls))
+		for i, tc := range m.ToolCalls {
+			resp.ToolCalls[i] = questToolCallResponse{
+				ToolName:   tc.ToolName,
+				Input:      tc.Input,
+				Output:     tc.Output,
+				IsError:    tc.IsError,
+				DurationMs: tc.DurationMs,
+			}
+		}
+	}
+
+	return resp
 }
 
 // ensureDefaultProject creates the default project if it doesn't exist

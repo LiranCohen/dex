@@ -326,12 +326,22 @@ func (q *Quest) GetTitle() string {
 	return ""
 }
 
+// QuestToolCall represents a tool invocation during Quest chat
+type QuestToolCall struct {
+	ToolName   string         `json:"tool_name"`
+	Input      map[string]any `json:"input"`
+	Output     string         `json:"output"`
+	IsError    bool           `json:"is_error"`
+	DurationMs int64          `json:"duration_ms"`
+}
+
 // QuestMessage represents a message in a Quest conversation
 type QuestMessage struct {
 	ID        string
 	QuestID   string
 	Role      string // user, assistant
 	Content   string
+	ToolCalls []QuestToolCall // Tool calls made during this message (assistant only)
 	CreatedAt time.Time
 }
 

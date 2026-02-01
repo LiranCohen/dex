@@ -9,10 +9,12 @@ import (
 	"os/exec"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/lirancohen/dex/internal/api/websocket"
 	"github.com/lirancohen/dex/internal/db"
 	"github.com/lirancohen/dex/internal/toolbelt"
+	"github.com/lirancohen/dex/internal/tools"
 )
 
 // Model constants for quest conversations
@@ -60,15 +62,30 @@ type Handler struct {
 	client         *toolbelt.AnthropicClient
 	github         *toolbelt.GitHubClient
 	hub            *websocket.Hub
-	githubUsername string // cached GitHub username
+	githubUsername string        // cached GitHub username
+	toolSet        *tools.Set    // Read-only tools for Quest exploration
+	readOnlyTools  []toolbelt.AnthropicTool
 }
 
 // NewHandler creates a new Quest handler
 func NewHandler(database *db.DB, client *toolbelt.AnthropicClient, hub *websocket.Hub) *Handler {
+	// Build read-only tools for Quest exploration
+	toolSet := tools.ReadOnlyTools()
+	readOnlyTools := make([]toolbelt.AnthropicTool, 0, len(toolSet.All()))
+	for _, t := range toolSet.All() {
+		readOnlyTools = append(readOnlyTools, toolbelt.AnthropicTool{
+			Name:        t.Name,
+			Description: t.Description,
+			InputSchema: t.InputSchema,
+		})
+	}
+
 	return &Handler{
-		db:     database,
-		client: client,
-		hub:    hub,
+		db:            database,
+		client:        client,
+		hub:           hub,
+		toolSet:       toolSet,
+		readOnlyTools: readOnlyTools,
 	}
 }
 
@@ -173,6 +190,12 @@ func (h *Handler) ProcessMessage(ctx context.Context, questID, content string) (
 		return nil, fmt.Errorf("quest is not active")
 	}
 
+	// Get project for tool execution context
+	project, err := h.db.GetProjectByID(quest.ProjectID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get project: %w", err)
+	}
+
 	// User message was already saved by the API handler
 	// Get all messages for context
 	messages, err := h.db.GetQuestMessages(questID)
@@ -195,92 +218,213 @@ func (h *Handler) ProcessMessage(ctx context.Context, questID, content string) (
 		model = ModelOpus
 	}
 
-	// Build system prompt with user context and cross-quest awareness
-	systemPrompt := questSystemPrompt + h.buildUserContext(ctx) + h.buildCrossQuestContext(quest.ProjectID, questID)
+	// Build system prompt with user context, cross-quest awareness, and tool instructions
+	systemPrompt := questSystemPrompt + h.buildToolContext() + h.buildUserContext(ctx) + h.buildCrossQuestContext(quest.ProjectID, questID)
 
-	// Call the model
-	response, err := h.client.Chat(ctx, &toolbelt.AnthropicChatRequest{
-		Model:     model,
-		MaxTokens: 2048,
-		System:    systemPrompt,
-		Messages:  anthropicMessages,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to get response from Dex: %w", err)
+	// Create tool executor for this project (read-only mode)
+	var executor *tools.Executor
+	if project != nil && project.RepoPath != "" && h.isValidProjectPath(project.RepoPath) {
+		executor = tools.NewExecutor(project.RepoPath, h.toolSet, true)
 	}
 
-	// Store assistant's response
-	assistantContent := response.Text()
-	assistantMsg, err := h.db.CreateQuestMessage(questID, "assistant", assistantContent)
-	if err != nil {
-		return nil, fmt.Errorf("failed to store assistant response: %w", err)
-	}
+	// Collect tool calls for this response
+	var allToolCalls []db.QuestToolCall
 
-	// Parse signals from the response
-	drafts := h.parseObjectiveDrafts(assistantContent)
-	questions := h.parseQuestions(assistantContent)
-	questReady := h.parseQuestReady(assistantContent)
-
-	// Broadcast the assistant message
-	if h.hub != nil {
-		h.hub.Broadcast(websocket.Message{
-			Type: "quest.message",
-			Payload: map[string]any{
-				"quest_id": questID,
-				"message": map[string]any{
-					"id":         assistantMsg.ID,
-					"quest_id":   assistantMsg.QuestID,
-					"role":       assistantMsg.Role,
-					"content":    assistantMsg.Content,
-					"created_at": assistantMsg.CreatedAt,
-				},
-			},
+	// Tool use loop - continue until we get a non-tool response
+	maxToolIterations := 10
+	for i := 0; i < maxToolIterations; i++ {
+		// Call the model
+		response, err := h.client.Chat(ctx, &toolbelt.AnthropicChatRequest{
+			Model:     model,
+			MaxTokens: 4096,
+			System:    systemPrompt,
+			Messages:  anthropicMessages,
+			Tools:     h.readOnlyTools,
 		})
-
-		// Broadcast any draft objectives
-		for _, draft := range drafts {
-			h.hub.Broadcast(websocket.Message{
-				Type: "quest.objective_draft",
-				Payload: map[string]any{
-					"quest_id": questID,
-					"draft":    draft,
-				},
-			})
+		if err != nil {
+			return nil, fmt.Errorf("failed to get response from Dex: %w", err)
 		}
 
-		// Broadcast any questions
-		for _, q := range questions {
-			h.hub.Broadcast(websocket.Message{
-				Type: "quest.question",
-				Payload: map[string]any{
-					"quest_id": questID,
-					"question": q,
-				},
+		// Check if model wants to use tools
+		if response.HasToolUse() && executor != nil {
+			toolBlocks := response.ToolUseBlocks()
+
+			// Add assistant message with tool_use blocks
+			anthropicMessages = append(anthropicMessages, toolbelt.AnthropicMessage{
+				Role:    "assistant",
+				Content: response.NormalizedContent(),
 			})
+
+			// Execute tools and collect results
+			var results []toolbelt.ContentBlock
+			for _, block := range toolBlocks {
+				// Broadcast tool call start
+				if h.hub != nil {
+					h.hub.Broadcast(websocket.Message{
+						Type: "quest.tool_call",
+						Payload: map[string]any{
+							"quest_id":  questID,
+							"tool_name": block.Name,
+							"status":    "running",
+						},
+					})
+				}
+
+				// Execute the tool
+				start := time.Now()
+				result := executor.Execute(ctx, block.Name, block.Input)
+				durationMs := time.Since(start).Milliseconds()
+
+				// Record tool call
+				toolCall := db.QuestToolCall{
+					ToolName:   block.Name,
+					Input:      block.Input,
+					Output:     result.Output,
+					IsError:    result.IsError,
+					DurationMs: durationMs,
+				}
+				allToolCalls = append(allToolCalls, toolCall)
+
+				// Broadcast tool result
+				if h.hub != nil {
+					h.hub.Broadcast(websocket.Message{
+						Type: "quest.tool_result",
+						Payload: map[string]any{
+							"quest_id":    questID,
+							"tool_name":   block.Name,
+							"output":      truncateForBroadcast(result.Output, 1000),
+							"is_error":    result.IsError,
+							"duration_ms": durationMs,
+						},
+					})
+				}
+
+				results = append(results, toolbelt.ContentBlock{
+					Type:      "tool_result",
+					ToolUseID: block.ID,
+					Content:   result.Output,
+					IsError:   result.IsError,
+				})
+			}
+
+			// Add tool results as user message
+			anthropicMessages = append(anthropicMessages, toolbelt.AnthropicMessage{
+				Role:    "user",
+				Content: results,
+			})
+
+			// Continue loop to get model's response to tool results
+			continue
 		}
 
-		// Broadcast quest ready signal
-		if questReady != nil {
+		// No tool use - this is the final response
+		assistantContent := response.Text()
+		assistantMsg, err := h.db.CreateQuestMessageWithToolCalls(questID, "assistant", assistantContent, allToolCalls)
+		if err != nil {
+			return nil, fmt.Errorf("failed to store assistant response: %w", err)
+		}
+
+		// Parse signals from the response
+		drafts := h.parseObjectiveDrafts(assistantContent)
+		questions := h.parseQuestions(assistantContent)
+		questReady := h.parseQuestReady(assistantContent)
+
+		// Broadcast the assistant message
+		if h.hub != nil {
 			h.hub.Broadcast(websocket.Message{
-				Type: "quest.ready",
+				Type: "quest.message",
 				Payload: map[string]any{
 					"quest_id": questID,
-					"drafts":   questReady["drafts"],
-					"summary":  questReady["summary"],
+					"message": map[string]any{
+						"id":         assistantMsg.ID,
+						"quest_id":   assistantMsg.QuestID,
+						"role":       assistantMsg.Role,
+						"content":    assistantMsg.Content,
+						"tool_calls": allToolCalls,
+						"created_at": assistantMsg.CreatedAt,
+					},
 				},
 			})
+
+			// Broadcast any draft objectives
+			for _, draft := range drafts {
+				h.hub.Broadcast(websocket.Message{
+					Type: "quest.objective_draft",
+					Payload: map[string]any{
+						"quest_id": questID,
+						"draft":    draft,
+					},
+				})
+			}
+
+			// Broadcast any questions
+			for _, q := range questions {
+				h.hub.Broadcast(websocket.Message{
+					Type: "quest.question",
+					Payload: map[string]any{
+						"quest_id": questID,
+						"question": q,
+					},
+				})
+			}
+
+			// Broadcast quest ready signal
+			if questReady != nil {
+				h.hub.Broadcast(websocket.Message{
+					Type: "quest.ready",
+					Payload: map[string]any{
+						"quest_id": questID,
+						"drafts":   questReady["drafts"],
+						"summary":  questReady["summary"],
+					},
+				})
+			}
 		}
+
+		// Auto-generate title from first user message if not set
+		if !quest.Title.Valid && len(messages) >= 1 {
+			title := h.generateTitle(messages[0].Content)
+			if title != "" {
+				h.db.UpdateQuestTitle(questID, title)
+			}
+		}
+
+		return assistantMsg, nil
 	}
 
-	// Auto-generate title from first user message if not set
-	if !quest.Title.Valid && len(messages) >= 1 {
-		title := h.generateTitle(messages[0].Content)
-		if title != "" {
-			h.db.UpdateQuestTitle(questID, title)
-		}
+	return nil, fmt.Errorf("tool execution loop exceeded maximum iterations")
+}
+
+// buildToolContext creates instructions for using tools
+func (h *Handler) buildToolContext() string {
+	if len(h.readOnlyTools) == 0 {
+		return ""
 	}
 
-	return assistantMsg, nil
+	return `
+
+## Available Tools
+You have access to read-only tools for exploring the codebase before proposing objectives:
+- read_file: Read file contents
+- list_files: List directory contents
+- glob: Find files by pattern
+- grep: Search file contents
+- git_status: Show git status
+- git_diff: Show git changes
+- git_log: Show commit history
+- web_search: Search the web for information
+- web_fetch: Fetch URL content
+
+Use these tools to understand the codebase before making recommendations. The tools are read-only and cannot modify files.
+`
+}
+
+// truncateForBroadcast truncates a string for WebSocket broadcast
+func truncateForBroadcast(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
 }
 
 // parseObjectiveDrafts extracts OBJECTIVE_DRAFT signals from a response
