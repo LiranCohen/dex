@@ -389,32 +389,11 @@ function PriorityDot({ priority }: { priority: number }) {
   );
 }
 
-// Task creation form state type
-interface CreateTaskForm {
-  title: string;
-  description: string;
-  priority: number;
-  autonomy: string;
-}
-
-const initialFormState: CreateTaskForm = {
-  title: '',
-  description: '',
-  priority: 3,
-  autonomy: 'suggest',
-};
-
 function DashboardPage() {
   const [systemStatus, setSystemStatus] = useState<SystemStatus | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
-  // Task creation modal state
-  const [showCreateModal, setShowCreateModal] = useState(false);
-  const [createForm, setCreateForm] = useState<CreateTaskForm>(initialFormState);
-  const [createError, setCreateError] = useState<string | null>(null);
-  const [isCreating, setIsCreating] = useState(false);
 
   const logout = useAuthStore((state) => state.logout);
   const navigate = useNavigate();
@@ -463,66 +442,6 @@ function DashboardPage() {
   const handleLogout = () => {
     logout();
     navigate('/login', { replace: true });
-  };
-
-  // Task creation handlers
-  const handleOpenCreateModal = () => {
-    setCreateForm(initialFormState);
-    setCreateError(null);
-    setShowCreateModal(true);
-  };
-
-  const handleCloseCreateModal = () => {
-    setShowCreateModal(false);
-    setCreateForm(initialFormState);
-    setCreateError(null);
-  };
-
-  const handleCreateFormChange = (
-    field: keyof CreateTaskForm,
-    value: string | number
-  ) => {
-    setCreateForm((prev) => ({ ...prev, [field]: value }));
-  };
-
-  const handleCreateTask = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setCreateError(null);
-
-    // Validate
-    if (!createForm.title.trim()) {
-      setCreateError('Title is required');
-      return;
-    }
-
-    if (createForm.priority < 1 || createForm.priority > 5) {
-      setCreateError('Priority must be between 1 and 5');
-      return;
-    }
-
-    setIsCreating(true);
-
-    try {
-      await api.post('/tasks', {
-        title: createForm.title.trim(),
-        description: createForm.description.trim() || null,
-        priority: createForm.priority,
-        autonomy: createForm.autonomy,
-        project_id: 1, // Default project for now
-      });
-
-      // Refetch tasks
-      const tasksData = await api.get<TasksResponse>('/tasks');
-      setTasks(tasksData.tasks || []);
-
-      // Close modal
-      handleCloseCreateModal();
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to create task';
-      setCreateError(message);
-    } finally {
-      setIsCreating(false);
-    }
   };
 
   // Calculate stats
@@ -613,12 +532,12 @@ function DashboardPage() {
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-semibold">Objectives</h2>
             <div className="flex items-center gap-3">
-              <button
-                onClick={handleOpenCreateModal}
+              <Link
+                to="/quests"
                 className="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-3 py-1.5 rounded-lg transition-colors"
               >
-                + Create Task
-              </button>
+                + Start Quest
+              </Link>
               <Link
                 to="/tasks"
                 className="text-blue-400 hover:text-blue-300 text-sm transition-colors"
@@ -631,7 +550,7 @@ function DashboardPage() {
           {tasks.length === 0 ? (
             <div className="text-center py-8">
               <p className="text-gray-400 mb-2">No objectives yet</p>
-              <p className="text-sm text-gray-500">Create a task to get started</p>
+              <p className="text-sm text-gray-500">Start a quest to plan your work with Dex</p>
             </div>
           ) : (
             <div className="space-y-2">
@@ -670,120 +589,6 @@ function DashboardPage() {
           )}
         </div>
 
-        {/* Create Task Modal */}
-        {showCreateModal && (
-          <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
-            <div className="bg-gray-800 rounded-lg w-full max-w-md">
-              <div className="flex items-center justify-between p-4 border-b border-gray-700">
-                <h3 className="text-lg font-semibold">Create Task</h3>
-                <button
-                  onClick={handleCloseCreateModal}
-                  className="text-gray-400 hover:text-white transition-colors"
-                >
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-
-              <form onSubmit={handleCreateTask} className="p-4 space-y-4">
-                {createError && (
-                  <div className="bg-red-900/50 border border-red-500 rounded-lg p-3">
-                    <p className="text-red-400 text-sm">{createError}</p>
-                  </div>
-                )}
-
-                <div>
-                  <label htmlFor="task-title" className="block text-sm font-medium text-gray-300 mb-1">
-                    Title <span className="text-red-400">*</span>
-                  </label>
-                  <input
-                    id="task-title"
-                    type="text"
-                    value={createForm.title}
-                    onChange={(e) => handleCreateFormChange('title', e.target.value)}
-                    placeholder="Enter task title"
-                    className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    disabled={isCreating}
-                    autoFocus
-                  />
-                </div>
-
-                <div>
-                  <label htmlFor="task-description" className="block text-sm font-medium text-gray-300 mb-1">
-                    Description
-                  </label>
-                  <textarea
-                    id="task-description"
-                    value={createForm.description}
-                    onChange={(e) => handleCreateFormChange('description', e.target.value)}
-                    placeholder="Describe the task (optional)"
-                    rows={3}
-                    className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
-                    disabled={isCreating}
-                  />
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label htmlFor="task-priority" className="block text-sm font-medium text-gray-300 mb-1">
-                      Priority
-                    </label>
-                    <select
-                      id="task-priority"
-                      value={createForm.priority}
-                      onChange={(e) => handleCreateFormChange('priority', parseInt(e.target.value, 10))}
-                      className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      disabled={isCreating}
-                    >
-                      <option value={1}>1 - Critical</option>
-                      <option value={2}>2 - High</option>
-                      <option value={3}>3 - Medium</option>
-                      <option value={4}>4 - Low</option>
-                      <option value={5}>5 - Lowest</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label htmlFor="task-autonomy" className="block text-sm font-medium text-gray-300 mb-1">
-                      Autonomy
-                    </label>
-                    <select
-                      id="task-autonomy"
-                      value={createForm.autonomy}
-                      onChange={(e) => handleCreateFormChange('autonomy', e.target.value)}
-                      className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      disabled={isCreating}
-                    >
-                      <option value="full">Full</option>
-                      <option value="suggest">Suggest</option>
-                      <option value="supervised">Supervised</option>
-                      <option value="manual">Manual</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div className="flex gap-3 pt-2">
-                  <button
-                    type="button"
-                    onClick={handleCloseCreateModal}
-                    className="flex-1 bg-gray-600 hover:bg-gray-500 text-white font-medium py-2 px-4 rounded-lg transition-colors"
-                    disabled={isCreating}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={isCreating || !createForm.title.trim()}
-                    className="flex-1 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-700 disabled:cursor-not-allowed text-white font-medium py-2 px-4 rounded-lg transition-colors"
-                  >
-                    {isCreating ? 'Creating...' : 'Create Task'}
-                  </button>
-                </div>
-              </form>
-            </div>
-          </div>
-        )}
       </main>
     </div>
   );

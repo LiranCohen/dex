@@ -2208,9 +2208,34 @@ func toQuestMessageResponse(m *db.QuestMessage) questMessageResponse {
 	}
 }
 
+// ensureDefaultProject creates the default project if it doesn't exist
+func (s *Server) ensureDefaultProject(projectID string) error {
+	if projectID != "proj_default" {
+		return nil
+	}
+
+	project, err := s.db.GetProjectByID(projectID)
+	if err != nil {
+		return err
+	}
+	if project == nil {
+		// Create the default project
+		_, err = s.db.CreateProjectWithID(projectID, "Default Project", ".")
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // handleListQuests returns all quests for a project
 func (s *Server) handleListQuests(c echo.Context) error {
 	projectID := c.Param("id")
+
+	// Auto-create default project if needed
+	if err := s.ensureDefaultProject(projectID); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
 
 	// Verify project exists
 	project, err := s.db.GetProjectByID(projectID)
@@ -2239,6 +2264,11 @@ func (s *Server) handleListQuests(c echo.Context) error {
 // handleCreateQuest creates a new quest for a project
 func (s *Server) handleCreateQuest(c echo.Context) error {
 	projectID := c.Param("id")
+
+	// Auto-create default project if needed
+	if err := s.ensureDefaultProject(projectID); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
 
 	// Verify project exists
 	project, err := s.db.GetProjectByID(projectID)
