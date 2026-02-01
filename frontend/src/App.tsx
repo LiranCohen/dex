@@ -1514,13 +1514,26 @@ function parseObjectiveDrafts(content: string): ObjectiveDraft[] {
   return drafts;
 }
 
-// Helper to strip signals from message content for display
-// Questions are shown in the sticky UI, not inline
+// Helper to format signals for display
+// Questions are formatted inline for history, drafts are shown in sidebar
 function formatMessageContent(content: string): string {
   // Remove OBJECTIVE_DRAFT signals (shown in sidebar)
   let formatted = content.replace(/OBJECTIVE_DRAFT:\s*\{[\s\S]*?\}\s*(?=OBJECTIVE_DRAFT:|QUESTION:|QUEST_READY:|$)/g, '');
-  // Remove QUESTION signals (shown in sticky UI at bottom)
-  formatted = formatted.replace(/QUESTION:\s*\{[^}]*\}/g, '');
+
+  // Format QUESTION signals as readable text for message history
+  formatted = formatted.replace(/QUESTION:\s*(\{[^}]*\})/g, (_match, jsonStr) => {
+    try {
+      const q = JSON.parse(jsonStr);
+      let questionText = `\n**${q.question}**`;
+      if (q.options && q.options.length > 0) {
+        questionText += '\n' + q.options.map((opt: string) => `• ${opt}`).join('\n');
+      }
+      return questionText;
+    } catch {
+      return '';
+    }
+  });
+
   // Remove QUEST_READY signals
   formatted = formatted.replace(/QUEST_READY:\s*\{[^}]*\}/g, '');
   // Clean up extra whitespace
