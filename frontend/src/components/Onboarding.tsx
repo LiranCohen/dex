@@ -570,13 +570,24 @@ export function Onboarding({ onComplete }: OnboardingProps) {
     );
   }
 
-  // Auto-advance from github_success after 3 seconds
+  // Countdown state for github_success auto-advance
+  const [countdown, setCountdown] = useState(3);
+
+  // Auto-advance from github_success after countdown
   useEffect(() => {
     if (step === 'github_success') {
-      const timer = setTimeout(() => {
-        setStep('anthropic_key');
-      }, 3000);
-      return () => clearTimeout(timer);
+      setCountdown(3);
+      const interval = setInterval(() => {
+        setCountdown(prev => {
+          if (prev <= 1) {
+            clearInterval(interval);
+            setStep('anthropic_key');
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+      return () => clearInterval(interval);
     }
   }, [step]);
 
@@ -590,15 +601,18 @@ export function Onboarding({ onComplete }: OnboardingProps) {
             <p className="text-gray-400 mb-6">
               Your GitHub App is installed and ready to use.
             </p>
-            <div className="flex items-center justify-center gap-2 text-gray-500 mb-6">
-              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-gray-500" />
-              <span className="text-sm">Continuing in a moment...</span>
-            </div>
             <button
               onClick={() => setStep('anthropic_key')}
-              className="text-blue-400 hover:text-blue-300 text-sm font-medium"
+              className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-4 rounded-lg transition-colors relative overflow-hidden"
             >
-              Continue now &rarr;
+              {/* Progress bar overlay */}
+              <div
+                className="absolute inset-0 bg-blue-500 transition-all duration-1000 ease-linear"
+                style={{ width: `${((3 - countdown) / 3) * 100}%` }}
+              />
+              <span className="relative z-10">
+                Continue ({countdown}s)
+              </span>
             </button>
           </div>
         </div>

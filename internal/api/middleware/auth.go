@@ -21,19 +21,26 @@ const (
 func JWTAuth(tokenConfig *auth.TokenConfig) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
+			var tokenString string
+
 			// Get Authorization header
 			authHeader := c.Request().Header.Get("Authorization")
-			if authHeader == "" {
+			if authHeader != "" {
+				// Check for Bearer prefix
+				parts := strings.SplitN(authHeader, " ", 2)
+				if len(parts) == 2 && strings.ToLower(parts[0]) == "bearer" {
+					tokenString = parts[1]
+				}
+			}
+
+			// Fall back to query parameter (for WebSocket connections)
+			if tokenString == "" {
+				tokenString = c.QueryParam("token")
+			}
+
+			if tokenString == "" {
 				return echo.NewHTTPError(http.StatusUnauthorized, "missing authorization header")
 			}
-
-			// Check for Bearer prefix
-			parts := strings.SplitN(authHeader, " ", 2)
-			if len(parts) != 2 || strings.ToLower(parts[0]) != "bearer" {
-				return echo.NewHTTPError(http.StatusUnauthorized, "invalid authorization header format")
-			}
-
-			tokenString := parts[1]
 
 			// Validate token
 			claims, err := auth.ValidateToken(tokenString, tokenConfig)
