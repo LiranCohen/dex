@@ -37,6 +37,12 @@ export function ObjectiveDraftCard({ draft, onAccept, onReject, isAccepting }: O
   const handleAccept = async () => {
     // Pass the updated auto_start value
     const updatedDraft = { ...draft, auto_start: autoStart };
+    console.log('ObjectiveDraftCard.handleAccept called with:', {
+      draft_id: updatedDraft.draft_id,
+      title: updatedDraft.title,
+      auto_start: updatedDraft.auto_start,
+      selectedOptional,
+    });
     await onAccept(updatedDraft, selectedOptional);
   };
 
