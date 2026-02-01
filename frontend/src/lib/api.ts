@@ -181,7 +181,7 @@ export async function createObjective(
   draft: import('./types').ObjectiveDraft,
   selectedOptional: number[]
 ): Promise<CreateObjectiveResult> {
-  return api.post(`/quests/${questId}/objectives`, {
+  const payload = {
     draft_id: draft.draft_id,
     title: draft.title,
     description: draft.description,
@@ -190,7 +190,11 @@ export async function createObjective(
     optional: draft.checklist.optional || [],
     selected_optional: selectedOptional,
     auto_start: draft.auto_start,
-  });
+  };
+  console.log('createObjective API call:', { questId, payload });
+  const result = await api.post<CreateObjectiveResult>(`/quests/${questId}/objectives`, payload);
+  console.log('createObjective API response:', result);
+  return result;
 }
 
 export async function fetchPreflightCheck(questId: string): Promise<import('./types').PreflightCheck> {
