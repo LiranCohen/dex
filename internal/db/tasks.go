@@ -36,7 +36,13 @@ func (db *DB) CreateTask(projectID, title string, taskType string, priority int)
 
 // CreateTaskForQuest creates a new task spawned by a Quest
 // Tasks from Quests are created with status 'ready' (or 'blocked' if they have dependencies)
-func (db *DB) CreateTaskForQuest(questID, projectID, title, description, hat, taskType string, priority int) (*Task, error) {
+// model should be "sonnet" (default) or "opus" (complex tasks)
+func (db *DB) CreateTaskForQuest(questID, projectID, title, description, hat, taskType, model string, priority int) (*Task, error) {
+	// Default to sonnet if not specified
+	if model == "" {
+		model = TaskModelSonnet
+	}
+
 	task := &Task{
 		ID:            NewPrefixedID("task"),
 		ProjectID:     projectID,
@@ -44,6 +50,7 @@ func (db *DB) CreateTaskForQuest(questID, projectID, title, description, hat, ta
 		Title:         title,
 		Description:   sql.NullString{String: description, Valid: description != ""},
 		Hat:           sql.NullString{String: hat, Valid: hat != ""},
+		Model:         sql.NullString{String: model, Valid: true},
 		Type:          taskType,
 		Priority:      priority,
 		AutonomyLevel: 1,
@@ -53,9 +60,9 @@ func (db *DB) CreateTaskForQuest(questID, projectID, title, description, hat, ta
 	}
 
 	_, err := db.Exec(
-		`INSERT INTO tasks (id, project_id, quest_id, title, description, hat, type, priority, autonomy_level, status, base_branch, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		task.ID, task.ProjectID, task.QuestID, task.Title, task.Description, task.Hat,
+		`INSERT INTO tasks (id, project_id, quest_id, title, description, hat, model, type, priority, autonomy_level, status, base_branch, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		task.ID, task.ProjectID, task.QuestID, task.Title, task.Description, task.Hat, task.Model,
 		task.Type, task.Priority, task.AutonomyLevel, task.Status, task.BaseBranch, task.CreatedAt,
 	)
 	if err != nil {
@@ -70,7 +77,7 @@ func (db *DB) GetTaskByID(id string) (*Task, error) {
 	task := &Task{}
 	err := db.QueryRow(
 		`SELECT id, project_id, quest_id, github_issue_number, title, description, parent_id,
-		        type, hat, priority, autonomy_level, status, base_branch,
+		        type, hat, model, priority, autonomy_level, status, base_branch,
 		        worktree_path, branch_name, pr_number,
 		        token_budget, token_used, time_budget_min, time_used_min,
 		        dollar_budget, dollar_used, created_at, started_at, completed_at
@@ -78,7 +85,7 @@ func (db *DB) GetTaskByID(id string) (*Task, error) {
 		id,
 	).Scan(
 		&task.ID, &task.ProjectID, &task.QuestID, &task.GitHubIssueNumber, &task.Title, &task.Description, &task.ParentID,
-		&task.Type, &task.Hat, &task.Priority, &task.AutonomyLevel, &task.Status, &task.BaseBranch,
+		&task.Type, &task.Hat, &task.Model, &task.Priority, &task.AutonomyLevel, &task.Status, &task.BaseBranch,
 		&task.WorktreePath, &task.BranchName, &task.PRNumber,
 		&task.TokenBudget, &task.TokenUsed, &task.TimeBudgetMin, &task.TimeUsedMin,
 		&task.DollarBudget, &task.DollarUsed, &task.CreatedAt, &task.StartedAt, &task.CompletedAt,

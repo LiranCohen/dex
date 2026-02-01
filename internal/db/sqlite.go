@@ -75,6 +75,7 @@ func (db *DB) Migrate() error {
 		"ALTER TABLE webauthn_credentials ADD COLUMN backup_eligible INTEGER NOT NULL DEFAULT 0",
 		"ALTER TABLE webauthn_credentials ADD COLUMN backup_state INTEGER NOT NULL DEFAULT 0",
 		"ALTER TABLE tasks ADD COLUMN quest_id TEXT REFERENCES quests(id)",
+		"ALTER TABLE tasks ADD COLUMN model TEXT DEFAULT 'sonnet'",
 	}
 	for _, migration := range optionalMigrations {
 		db.Exec(migration) // Ignore errors - column may already exist

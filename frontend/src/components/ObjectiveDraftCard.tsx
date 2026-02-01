@@ -23,6 +23,22 @@ function HatBadge({ hat }: { hat: string }) {
   );
 }
 
+// Complexity badge component
+function ComplexityBadge({ complexity }: { complexity?: string }) {
+  if (!complexity || complexity === 'simple') {
+    return (
+      <span className="px-2 py-0.5 rounded text-xs font-medium bg-gray-600" title="Uses Sonnet (fast)">
+        simple
+      </span>
+    );
+  }
+  return (
+    <span className="px-2 py-0.5 rounded text-xs font-medium bg-orange-600" title="Uses Opus (advanced)">
+      complex
+    </span>
+  );
+}
+
 export function ObjectiveDraftCard({ draft, onAccept, onReject, isAccepting }: ObjectiveDraftCardProps) {
   const [selectedOptional, setSelectedOptional] = useState<number[]>([]);
   const [isExpanded, setIsExpanded] = useState(true);
@@ -57,6 +73,7 @@ export function ObjectiveDraftCard({ draft, onAccept, onReject, isAccepting }: O
           <span className="text-yellow-500">📋</span>
           <span className="font-medium truncate">{draft.title}</span>
           <HatBadge hat={draft.hat} />
+          <ComplexityBadge complexity={draft.complexity} />
         </div>
         <svg
           className={`w-5 h-5 text-gray-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`}

@@ -30,6 +30,7 @@ type ObjectiveDraft struct {
 	Checklist           Checklist `json:"checklist"`
 	BlockedBy           []string  `json:"blocked_by,omitempty"`
 	AutoStart           bool      `json:"auto_start"`
+	Complexity          string    `json:"complexity,omitempty"`          // "simple" or "complex" - determines AI model
 	EstimatedIterations int       `json:"estimated_iterations,omitempty"`
 	EstimatedBudget     float64   `json:"estimated_budget,omitempty"` // estimated cost in dollars
 }
@@ -114,6 +115,7 @@ OBJECTIVE_DRAFT:{
   },
   "blocked_by": [],
   "auto_start": true,
+  "complexity": "simple",
   "estimated_iterations": 3,
   "estimated_budget": 0.50
 }
@@ -127,8 +129,11 @@ Guidelines for objectives:
 - Checklist optional items are nice-to-have enhancements
 - Use blocked_by to reference other draft_ids if there are dependencies
 - auto_start: true means start immediately when ready, false requires manual start
+- complexity: "simple" or "complex" - determines which AI model executes the objective:
+  * "simple": Fast model (Sonnet) - straightforward tasks, single files, clear requirements
+  * "complex": Advanced model (Opus) - architectural decisions, multi-file refactoring, ambiguous requirements, debugging intricate issues
 - estimated_iterations: estimated number of iterations needed (1-5 for simple, 5-10 for moderate, 10-20 for complex)
-- estimated_budget: estimated cost in USD based on complexity ($0.20-$0.50 for simple, $0.50-$1.50 for moderate, $1.50-$5.00 for complex)
+- estimated_budget: estimated cost in USD based on complexity ($0.20-$0.50 for simple, $0.50-$2.00 for moderate, $2.00-$10.00 for complex with Opus)
 
 When asking a clarifying question, output ONLY the signal on its own line (no surrounding text):
 QUESTION:{"question": "Your question here?", "options": ["Option 1", "Option 2"]}
@@ -404,6 +409,12 @@ func (h *Handler) CreateObjectiveFromDraft(ctx context.Context, questID string, 
 		return nil, fmt.Errorf("quest not found: %s", questID)
 	}
 
+	// Determine model based on complexity
+	model := db.TaskModelSonnet
+	if draft.Complexity == "complex" {
+		model = db.TaskModelOpus
+	}
+
 	// Create the task
 	task, err := h.db.CreateTaskForQuest(
 		questID,
@@ -412,6 +423,7 @@ func (h *Handler) CreateObjectiveFromDraft(ctx context.Context, questID string, 
 		draft.Description,
 		draft.Hat,
 		db.TaskTypeTask,
+		model,
 		3, // Default priority
 	)
 	if err != nil {

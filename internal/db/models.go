@@ -62,8 +62,9 @@ type Task struct {
 	ParentID          sql.NullString
 	Type              string // epic, feature, bug, task, chore
 	Hat               sql.NullString
-	Priority          int // 1-5 (1 highest)
-	AutonomyLevel     int // 0-3
+	Model             sql.NullString // AI model to use: "sonnet" (default) or "opus" (complex tasks)
+	Priority          int            // 1-5 (1 highest)
+	AutonomyLevel     int            // 0-3
 	Status            string
 	BaseBranch        string
 	WorktreePath      sql.NullString
@@ -79,6 +80,12 @@ type Task struct {
 	StartedAt         sql.NullTime
 	CompletedAt       sql.NullTime
 }
+
+// Task model constants
+const (
+	TaskModelSonnet = "sonnet" // Fast, capable - for simple/medium tasks
+	TaskModelOpus   = "opus"   // Extended thinking - for complex tasks
+)
 
 // TaskDependency represents a blocker relationship between tasks
 type TaskDependency struct {

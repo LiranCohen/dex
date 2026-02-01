@@ -52,6 +52,9 @@ type RalphLoop struct {
 	// Activity recorder for visibility
 	activity *ActivityRecorder
 
+	// AI model to use for this loop (sonnet or opus)
+	model string
+
 	// Tool use support
 	executor *ToolExecutor
 	tools    []toolbelt.AnthropicTool
@@ -74,6 +77,12 @@ func NewRalphLoop(manager *Manager, session *ActiveSession, client *toolbelt.Ant
 // InitExecutor initializes the tool executor with project context
 func (r *RalphLoop) InitExecutor(worktreePath string, gitOps *git.Operations, githubClient *toolbelt.GitHubClient, owner, repo string) {
 	r.executor = NewToolExecutor(worktreePath, gitOps, githubClient, owner, repo)
+}
+
+// SetModel sets the AI model to use for this loop
+// model should be "sonnet" or "opus"
+func (r *RalphLoop) SetModel(model string) {
+	r.model = model
 }
 
 // Run executes the Ralph loop until completion, error, or budget exceeded
@@ -433,8 +442,14 @@ func (r *RalphLoop) buildPrompt() (string, error) {
 
 // sendMessage sends the current conversation to Claude
 func (r *RalphLoop) sendMessage(ctx context.Context, systemPrompt string) (*toolbelt.AnthropicChatResponse, error) {
+	// Determine model based on task settings
+	model := "claude-sonnet-4-5-20250929" // default
+	if r.model == db.TaskModelOpus {
+		model = "claude-opus-4-5-20251101"
+	}
+
 	req := &toolbelt.AnthropicChatRequest{
-		Model:     "claude-sonnet-4-5-20250929",
+		Model:     model,
 		MaxTokens: 8192,
 		System:    systemPrompt,
 		Messages:  r.messages,

@@ -368,6 +368,12 @@ func (m *Manager) runSession(ctx context.Context, session *ActiveSession) {
 			fmt.Printf("runSession: warning - failed to get task for executor: %v\n", err)
 		}
 		if task != nil {
+			// Set the AI model to use based on task complexity
+			if task.Model.Valid && task.Model.String != "" {
+				loop.SetModel(task.Model.String)
+				fmt.Printf("runSession: using model %s for task %s\n", task.Model.String, task.ID)
+			}
+
 			project, err := m.db.GetProjectByID(task.ProjectID)
 			if err != nil {
 				fmt.Printf("runSession: warning - failed to get project for executor: %v\n", err)

@@ -318,6 +318,7 @@ export interface ObjectiveDraft {
   };
   blocked_by?: string[];
   auto_start: boolean;
+  complexity?: 'simple' | 'complex'; // determines AI model: simple=Sonnet, complex=Opus
   estimated_iterations?: number;
   estimated_budget?: number; // estimated cost in dollars
 }
