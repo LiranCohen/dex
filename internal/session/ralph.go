@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -17,9 +19,11 @@ import (
 
 // Completion/transition signals that Ralph looks for in responses
 const (
-	SignalTaskComplete = "TASK_COMPLETE"
-	SignalHatComplete  = "HAT_COMPLETE"
-	SignalHatTransition = "HAT_TRANSITION:"
+	SignalTaskComplete    = "TASK_COMPLETE"
+	SignalHatComplete     = "HAT_COMPLETE"
+	SignalHatTransition   = "HAT_TRANSITION:"
+	SignalChecklistDone   = "CHECKLIST_DONE:"
+	SignalChecklistFailed = "CHECKLIST_FAILED:"
 )
 
 // Budget limit errors
@@ -48,6 +52,9 @@ type RalphLoop struct {
 	// Activity recorder for visibility
 	activity *ActivityRecorder
 
+	// AI model to use for this loop (sonnet or opus)
+	model string
+
 	// Tool use support
 	executor *ToolExecutor
 	tools    []toolbelt.AnthropicTool
@@ -70,6 +77,24 @@ func NewRalphLoop(manager *Manager, session *ActiveSession, client *toolbelt.Ant
 // InitExecutor initializes the tool executor with project context
 func (r *RalphLoop) InitExecutor(worktreePath string, gitOps *git.Operations, githubClient *toolbelt.GitHubClient, owner, repo string) {
 	r.executor = NewToolExecutor(worktreePath, gitOps, githubClient, owner, repo)
+}
+
+// SetModel sets the AI model to use for this loop and captures the rates
+// model should be "sonnet" or "opus"
+func (r *RalphLoop) SetModel(model string) {
+	r.model = model
+	// Capture rates at session start for historical accuracy
+	if model == db.TaskModelOpus {
+		r.session.InputRate = getEnvFloat("DEX_OPUS_INPUT_COST", 5.0)
+		r.session.OutputRate = getEnvFloat("DEX_OPUS_OUTPUT_COST", 25.0)
+	} else {
+		r.session.InputRate = getEnvFloat("DEX_SONNET_INPUT_COST", 3.0)
+		r.session.OutputRate = getEnvFloat("DEX_SONNET_OUTPUT_COST", 15.0)
+	}
+	// Persist rates to database
+	if r.db != nil {
+		r.db.SetSessionRates(r.session.ID, r.session.InputRate, r.session.OutputRate)
+	}
 }
 
 // Run executes the Ralph loop until completion, error, or budget exceeded
@@ -101,9 +126,16 @@ func (r *RalphLoop) Run(ctx context.Context) error {
 	})
 
 	// Initialize conversation with context message
-	// Check if there's a refined prompt from the planning phase
+	// Check if there's a checklist or refined prompt from the planning phase
 	initialMessage := "Begin working on the task. Follow your hat instructions and report progress."
-	if planningSession, err := r.db.GetPlanningSessionByTaskID(r.session.TaskID); err == nil && planningSession != nil {
+
+	// Check for checklist first
+	if checklist, err := r.db.GetChecklistByTaskID(r.session.TaskID); err == nil && checklist != nil {
+		if items, err := r.db.GetChecklistItems(checklist.ID); err == nil && len(items) > 0 {
+			initialMessage = r.buildChecklistPrompt(items)
+			fmt.Printf("RalphLoop.Run: using checklist context (%d items)\n", len(items))
+		}
+	} else if planningSession, err := r.db.GetPlanningSessionByTaskID(r.session.TaskID); err == nil && planningSession != nil {
 		if planningSession.RefinedPrompt.Valid && planningSession.RefinedPrompt.String != "" {
 			initialMessage = fmt.Sprintf("## Task Instructions (from planning phase)\n\n%s\n\n---\n\nBegin working on this task. Follow your hat instructions and report progress.", planningSession.RefinedPrompt.String)
 			fmt.Printf("RalphLoop.Run: using refined prompt from planning phase\n")
@@ -155,8 +187,8 @@ func (r *RalphLoop) Run(ctx context.Context) error {
 		fmt.Printf("RalphLoop.Run: received response (input tokens: %d, output tokens: %d)\n", response.Usage.InputTokens, response.Usage.OutputTokens)
 
 		// 4. Update usage tracking
-		r.session.TokensUsed += int64(response.Usage.InputTokens + response.Usage.OutputTokens)
-		r.session.DollarsUsed += r.estimateCost(response.Usage)
+		r.session.InputTokens += int64(response.Usage.InputTokens)
+		r.session.OutputTokens += int64(response.Usage.OutputTokens)
 		r.session.IterationCount++
 		r.session.LastActivity = time.Now()
 
@@ -164,7 +196,7 @@ func (r *RalphLoop) Run(ctx context.Context) error {
 		r.broadcastEvent(websocket.EventSessionIteration, map[string]any{
 			"session_id": r.session.ID,
 			"iteration":  r.session.IterationCount,
-			"tokens":     r.session.TokensUsed,
+			"tokens":     r.session.TotalTokens(),
 		})
 
 		// 5. Handle tool use if requested
@@ -267,17 +299,32 @@ func (r *RalphLoop) Run(ctx context.Context) error {
 			fmt.Printf("RalphLoop.Run: warning - failed to record assistant response: %v\n", err)
 		}
 
+		// 7.5. Process checklist signals
+		r.processChecklistSignals(responseText)
+
 		// 8. Check for task completion
 		if r.detectCompletion(responseText) {
+			// Verify checklist completion
+			allComplete, issues := r.verifyChecklist()
+
+			// Determine outcome
+			outcome := "completed"
+			if !allComplete {
+				outcome = "completed_with_issues"
+				fmt.Printf("RalphLoop.Run: task completed with %d checklist issues\n", len(issues))
+			}
+
 			// Record completion signal
 			if err := r.activity.RecordCompletion(r.session.IterationCount, SignalTaskComplete); err != nil {
 				fmt.Printf("RalphLoop.Run: warning - failed to record completion: %v\n", err)
 			}
 
 			r.broadcastEvent(websocket.EventSessionCompleted, map[string]any{
-				"session_id": r.session.ID,
-				"outcome":    "completed",
-				"iterations": r.session.IterationCount,
+				"session_id":   r.session.ID,
+				"outcome":      outcome,
+				"iterations":   r.session.IterationCount,
+				"has_issues":   !allComplete,
+				"issues_count": len(issues),
 			})
 			return nil
 		}
@@ -338,12 +385,12 @@ func (r *RalphLoop) checkBudget() error {
 	}
 
 	// Check token budget
-	if r.session.TokensBudget != nil && r.session.TokensUsed >= *r.session.TokensBudget {
+	if r.session.TokensBudget != nil && r.session.TotalTokens() >= *r.session.TokensBudget {
 		return ErrTokenBudget
 	}
 
 	// Check dollar budget
-	if r.session.DollarsBudget != nil && r.session.DollarsUsed >= *r.session.DollarsBudget {
+	if r.session.DollarsBudget != nil && r.session.Cost() >= *r.session.DollarsBudget {
 		return ErrDollarBudget
 	}
 
@@ -380,6 +427,13 @@ func (r *RalphLoop) buildPrompt() (string, error) {
 		if project.GitHubRepo.Valid {
 			projectCtx.GitHubRepo = project.GitHubRepo.String
 		}
+		// Check if this is a new project (no .git directory in worktree)
+		if r.session.WorktreePath != "" {
+			gitDir := filepath.Join(r.session.WorktreePath, ".git")
+			if _, err := os.Stat(gitDir); os.IsNotExist(err) {
+				projectCtx.IsNewProject = true
+			}
+		}
 	}
 
 	// Build list of available tools
@@ -400,8 +454,14 @@ func (r *RalphLoop) buildPrompt() (string, error) {
 
 // sendMessage sends the current conversation to Claude
 func (r *RalphLoop) sendMessage(ctx context.Context, systemPrompt string) (*toolbelt.AnthropicChatResponse, error) {
+	// Determine model based on task settings
+	model := "claude-sonnet-4-5-20250929" // default
+	if r.model == db.TaskModelOpus {
+		model = "claude-opus-4-5-20251101"
+	}
+
 	req := &toolbelt.AnthropicChatRequest{
-		Model:     "claude-sonnet-4-20250514",
+		Model:     model,
 		MaxTokens: 8192,
 		System:    systemPrompt,
 		Messages:  r.messages,
@@ -449,16 +509,21 @@ func (r *RalphLoop) detectHatTransition(response string) string {
 func (r *RalphLoop) checkpoint() error {
 	// Build checkpoint state
 	state := map[string]any{
-		"iteration":    r.session.IterationCount,
-		"tokens_used":  r.session.TokensUsed,
-		"dollars_used": r.session.DollarsUsed,
-		"hat":          r.session.Hat,
-		"messages":     r.messages,
+		"iteration":     r.session.IterationCount,
+		"input_tokens":  r.session.InputTokens,
+		"output_tokens": r.session.OutputTokens,
+		"hat":           r.session.Hat,
+		"messages":      r.messages,
 	}
 
 	stateJSON, err := json.Marshal(state)
 	if err != nil {
 		return fmt.Errorf("failed to marshal checkpoint state: %w", err)
+	}
+
+	// Also persist to sessions table for real-time queries
+	if err := r.db.UpdateSessionUsage(r.session.ID, r.session.InputTokens, r.session.OutputTokens); err != nil {
+		fmt.Printf("Warning: failed to update session usage: %v\n", err)
 	}
 
 	_, err = r.db.CreateSessionCheckpoint(r.session.ID, r.session.IterationCount, stateJSON)
@@ -478,18 +543,27 @@ func (r *RalphLoop) broadcastEvent(eventType string, payload map[string]any) {
 	})
 }
 
-// estimateCost calculates the estimated cost in dollars for the API usage
-// Uses approximate pricing: $3 per 1M input tokens, $15 per 1M output tokens for Sonnet
-func (r *RalphLoop) estimateCost(usage toolbelt.AnthropicUsage) float64 {
-	inputCost := float64(usage.InputTokens) * 3.0 / 1_000_000
-	outputCost := float64(usage.OutputTokens) * 15.0 / 1_000_000
-	return inputCost + outputCost
+// getEnvFloat reads a float64 from an environment variable, returning defaultVal if not set or invalid
+// Used for model pricing rates (DEX_SONNET_INPUT_COST, DEX_OPUS_OUTPUT_COST, etc.)
+func getEnvFloat(key string, defaultVal float64) float64 {
+	val := os.Getenv(key)
+	if val == "" {
+		return defaultVal
+	}
+	var f float64
+	if _, err := fmt.Sscanf(val, "%f", &f); err != nil {
+		return defaultVal
+	}
+	return f
 }
 
 // RestoreFromCheckpoint restores session state from a checkpoint
 func (r *RalphLoop) RestoreFromCheckpoint(checkpoint *db.SessionCheckpoint) error {
 	var state struct {
-		Iteration   int                          `json:"iteration"`
+		Iteration    int                         `json:"iteration"`
+		InputTokens  int64                       `json:"input_tokens"`
+		OutputTokens int64                       `json:"output_tokens"`
+		// Legacy fields for backwards compatibility
 		TokensUsed  int64                        `json:"tokens_used"`
 		DollarsUsed float64                      `json:"dollars_used"`
 		Hat         string                       `json:"hat"`
@@ -501,10 +575,147 @@ func (r *RalphLoop) RestoreFromCheckpoint(checkpoint *db.SessionCheckpoint) erro
 	}
 
 	r.session.IterationCount = state.Iteration
-	r.session.TokensUsed = state.TokensUsed
-	r.session.DollarsUsed = state.DollarsUsed
 	r.session.Hat = state.Hat
 	r.messages = state.Messages
 
+	// Use new fields if available, otherwise estimate from legacy
+	if state.InputTokens > 0 || state.OutputTokens > 0 {
+		r.session.InputTokens = state.InputTokens
+		r.session.OutputTokens = state.OutputTokens
+	} else if state.TokensUsed > 0 {
+		// Legacy: split evenly as approximation (input usually larger)
+		r.session.InputTokens = state.TokensUsed * 2 / 3
+		r.session.OutputTokens = state.TokensUsed / 3
+	}
+
 	return nil
+}
+
+// buildChecklistPrompt creates the initial prompt with checklist context
+// Note: All items passed here are already selected - the must-have vs optional
+// distinction is only relevant during planning, not execution.
+func (r *RalphLoop) buildChecklistPrompt(items []*db.ChecklistItem) string {
+	var sb strings.Builder
+
+	sb.WriteString("## Task Checklist\n\n")
+	sb.WriteString("Complete these items and report status for each:\n\n")
+
+	for _, item := range items {
+		sb.WriteString(fmt.Sprintf("- [ ] %s (id: %s)\n", item.Description, item.ID))
+	}
+
+	sb.WriteString("\n---\n\n")
+	sb.WriteString("## Reporting Checklist Status\n\n")
+	sb.WriteString("IMPORTANT: Only mark an item as done when it is FULLY and SUCCESSFULLY completed.\n\n")
+	sb.WriteString("- CHECKLIST_DONE:<item_id> - Use ONLY when the item succeeded completely\n")
+	sb.WriteString("- CHECKLIST_FAILED:<item_id>:<reason> - Use when an item failed or could not be completed\n\n")
+	sb.WriteString("If a tool returns an error or an operation fails, you MUST use CHECKLIST_FAILED, not CHECKLIST_DONE.\n")
+	sb.WriteString("Do not claim success for items that encountered errors.\n\n")
+	sb.WriteString("When all items are addressed (done or failed), output TASK_COMPLETE.\n\n")
+	sb.WriteString("Begin working on the task. Follow your hat instructions and report progress.")
+
+	return sb.String()
+}
+
+// processChecklistSignals detects and processes checklist update signals
+func (r *RalphLoop) processChecklistSignals(response string) {
+	// Process CHECKLIST_DONE signals
+	for {
+		idx := strings.Index(response, SignalChecklistDone)
+		if idx == -1 {
+			break
+		}
+
+		// Extract item ID
+		remaining := response[idx+len(SignalChecklistDone):]
+		endIdx := strings.IndexAny(remaining, " \t\n\r")
+		if endIdx == -1 {
+			endIdx = len(remaining)
+		}
+		itemID := strings.TrimSpace(remaining[:endIdx])
+
+		if itemID != "" {
+			// Update item status in DB
+			if err := r.db.UpdateChecklistItemStatus(itemID, db.ChecklistItemStatusDone, ""); err != nil {
+				fmt.Printf("RalphLoop: warning - failed to update checklist item %s: %v\n", itemID, err)
+			} else {
+				// Record activity
+				if r.activity != nil {
+					r.activity.RecordChecklistUpdate(r.session.IterationCount, itemID, db.ChecklistItemStatusDone, "")
+				}
+				fmt.Printf("RalphLoop: marked checklist item %s as done\n", itemID)
+			}
+		}
+
+		// Move past this signal for next search
+		response = remaining[endIdx:]
+	}
+
+	// Process CHECKLIST_FAILED signals
+	response = response // Reset for second pass
+	for {
+		idx := strings.Index(response, SignalChecklistFailed)
+		if idx == -1 {
+			break
+		}
+
+		// Extract item ID and reason
+		remaining := response[idx+len(SignalChecklistFailed):]
+
+		// Format: CHECKLIST_FAILED:<item_id>:<reason>
+		parts := strings.SplitN(remaining, ":", 2)
+		if len(parts) >= 1 {
+			// Get item ID (may have trailing content)
+			itemPart := parts[0]
+			endIdx := strings.IndexAny(itemPart, " \t\n\r")
+			if endIdx == -1 {
+				endIdx = len(itemPart)
+			}
+			itemID := strings.TrimSpace(itemPart[:endIdx])
+
+			reason := ""
+			if len(parts) >= 2 {
+				reasonPart := parts[1]
+				endIdx := strings.IndexAny(reasonPart, "\n\r")
+				if endIdx == -1 {
+					endIdx = len(reasonPart)
+				}
+				reason = strings.TrimSpace(reasonPart[:endIdx])
+			}
+
+			if itemID != "" {
+				// Update item status in DB
+				if err := r.db.UpdateChecklistItemStatus(itemID, db.ChecklistItemStatusFailed, reason); err != nil {
+					fmt.Printf("RalphLoop: warning - failed to update checklist item %s: %v\n", itemID, err)
+				} else {
+					// Record activity
+					if r.activity != nil {
+						r.activity.RecordChecklistUpdate(r.session.IterationCount, itemID, db.ChecklistItemStatusFailed, reason)
+					}
+					fmt.Printf("RalphLoop: marked checklist item %s as failed: %s\n", itemID, reason)
+				}
+			}
+		}
+
+		// Move past this signal
+		response = remaining
+	}
+}
+
+// verifyChecklist checks if all selected checklist items are completed
+// Returns true if all done, false if there are issues
+func (r *RalphLoop) verifyChecklist() (bool, []db.ChecklistIssue) {
+	checklist, err := r.db.GetChecklistByTaskID(r.session.TaskID)
+	if err != nil || checklist == nil {
+		// No checklist, consider it complete
+		return true, nil
+	}
+
+	issues, err := r.db.GetChecklistIssues(checklist.ID)
+	if err != nil {
+		fmt.Printf("RalphLoop: warning - failed to get checklist issues: %v\n", err)
+		return true, nil
+	}
+
+	return len(issues) == 0, issues
 }

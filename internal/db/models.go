@@ -55,14 +55,16 @@ type ProjectServices struct {
 type Task struct {
 	ID                string
 	ProjectID         string
+	QuestID           sql.NullString // Optional: the Quest that spawned this task
 	GitHubIssueNumber sql.NullInt64
 	Title             string
 	Description       sql.NullString
 	ParentID          sql.NullString
 	Type              string // epic, feature, bug, task, chore
 	Hat               sql.NullString
-	Priority          int // 1-5 (1 highest)
-	AutonomyLevel     int // 0-3
+	Model             sql.NullString // AI model to use: "sonnet" (default) or "opus" (complex tasks)
+	Priority          int            // 1-5 (1 highest)
+	AutonomyLevel     int            // 0-3
 	Status            string
 	BaseBranch        string
 	WorktreePath      sql.NullString
@@ -78,6 +80,12 @@ type Task struct {
 	StartedAt         sql.NullTime
 	CompletedAt       sql.NullTime
 }
+
+// Task model constants
+const (
+	TaskModelSonnet = "sonnet" // Fast, capable - for simple/medium tasks
+	TaskModelOpus   = "opus"   // Extended thinking - for complex tasks
+)
 
 // TaskDependency represents a blocker relationship between tasks
 type TaskDependency struct {
@@ -97,14 +105,28 @@ type Session struct {
 	IterationCount    int
 	MaxIterations     int
 	CompletionPromise sql.NullString
-	TokensUsed        int64
+	InputTokens       int64   // Total input tokens used
+	OutputTokens      int64   // Total output tokens used
+	InputRate         float64 // $/MTok for input at session start
+	OutputRate        float64 // $/MTok for output at session start
 	TokensBudget      sql.NullInt64
-	DollarsUsed       float64
 	DollarsBudget     sql.NullFloat64
 	CreatedAt         time.Time
 	StartedAt         sql.NullTime
 	EndedAt           sql.NullTime
 	Outcome           sql.NullString
+}
+
+// Cost calculates the session cost from tokens and rates
+func (s *Session) Cost() float64 {
+	inputCost := float64(s.InputTokens) * s.InputRate / 1_000_000
+	outputCost := float64(s.OutputTokens) * s.OutputRate / 1_000_000
+	return inputCost + outputCost
+}
+
+// TotalTokens returns the combined input + output tokens
+func (s *Session) TotalTokens() int64 {
+	return s.InputTokens + s.OutputTokens
 }
 
 // SessionCheckpoint represents a saved state of a session
@@ -132,13 +154,32 @@ type Approval struct {
 
 // PlanningSession represents a planning phase for a task
 type PlanningSession struct {
-	ID             string
-	TaskID         string
-	Status         string // processing, awaiting_response, completed, skipped
-	RefinedPrompt  sql.NullString
-	OriginalPrompt string
-	CreatedAt      time.Time
-	CompletedAt    sql.NullTime
+	ID               string
+	TaskID           string
+	Status           string // processing, awaiting_response, completed, skipped
+	RefinedPrompt    sql.NullString
+	OriginalPrompt   string
+	PendingChecklist sql.NullString // JSON: transient checklist before acceptance
+	CreatedAt        time.Time
+	CompletedAt      sql.NullTime
+}
+
+// PendingChecklistData represents the transient checklist structure during planning
+type PendingChecklistData struct {
+	MustHave []string `json:"must_have"`
+	Optional []string `json:"optional"`
+}
+
+// GetPendingChecklist parses and returns the pending checklist data
+func (p *PlanningSession) GetPendingChecklist() *PendingChecklistData {
+	if !p.PendingChecklist.Valid {
+		return nil
+	}
+	var data PendingChecklistData
+	if err := json.Unmarshal([]byte(p.PendingChecklist.String), &data); err != nil {
+		return nil
+	}
+	return &data
 }
 
 // PlanningMessage represents a message in a planning session conversation
@@ -148,6 +189,42 @@ type PlanningMessage struct {
 	Role              string // user, assistant
 	Content           string
 	CreatedAt         time.Time
+}
+
+// TaskChecklist represents a structured checklist for a task
+type TaskChecklist struct {
+	ID        string
+	TaskID    string
+	CreatedAt time.Time
+}
+
+// ChecklistItem represents an individual item in a checklist
+// Note: Items are only created after acceptance - category distinction is transient during planning
+type ChecklistItem struct {
+	ID                string
+	ChecklistID       string
+	ParentID          sql.NullString
+	Description       string
+	Status            string // pending, in_progress, done, failed, skipped
+	VerificationNotes sql.NullString
+	CompletedAt       sql.NullTime
+	SortOrder         int
+}
+
+// GetParentID returns the parent ID string, or empty if null
+func (c *ChecklistItem) GetParentID() string {
+	if c.ParentID.Valid {
+		return c.ParentID.String
+	}
+	return ""
+}
+
+// GetVerificationNotes returns the verification notes string, or empty if null
+func (c *ChecklistItem) GetVerificationNotes() string {
+	if c.VerificationNotes.Valid {
+		return c.VerificationNotes.String
+	}
+	return ""
 }
 
 // Task status constants
@@ -205,6 +282,69 @@ const (
 	PlanningStatusSkipped          = "skipped"
 )
 
+// Checklist item status constants
+const (
+	ChecklistItemStatusPending    = "pending"
+	ChecklistItemStatusInProgress = "in_progress"
+	ChecklistItemStatusDone       = "done"
+	ChecklistItemStatusFailed     = "failed"
+	ChecklistItemStatusSkipped    = "skipped"
+)
+
+// Task status for completed with issues
+const TaskStatusCompletedWithIssues = "completed_with_issues"
+
+// Quest status constants
+const (
+	QuestStatusActive    = "active"
+	QuestStatusCompleted = "completed"
+)
+
+// Quest model constants
+const (
+	QuestModelSonnet = "sonnet"
+	QuestModelOpus   = "opus"
+)
+
+// Quest represents a conversation with Dex that spawns tasks
+type Quest struct {
+	ID               string
+	ProjectID        string
+	Title            sql.NullString
+	Status           string
+	Model            string
+	AutoStartDefault bool
+	CreatedAt        time.Time
+	CompletedAt      sql.NullTime
+}
+
+// GetTitle returns the title string, or empty if null
+func (q *Quest) GetTitle() string {
+	if q.Title.Valid {
+		return q.Title.String
+	}
+	return ""
+}
+
+// QuestMessage represents a message in a Quest conversation
+type QuestMessage struct {
+	ID        string
+	QuestID   string
+	Role      string // user, assistant
+	Content   string
+	CreatedAt time.Time
+}
+
+// QuestTemplate represents a reusable quest template
+type QuestTemplate struct {
+	ID            string
+	ProjectID     string
+	Name          string
+	Description   sql.NullString
+	InitialPrompt string
+	CreatedAt     time.Time
+}
+
 // GetDescription returns the description string, or empty if null
 func (t *Task) GetDescription() string {
 	if t.Description.Valid {
@@ -241,6 +381,14 @@ func (t *Task) GetHat() string {
 func (t *Task) GetParentID() string {
 	if t.ParentID.Valid {
 		return t.ParentID.String
+	}
+	return ""
+}
+
+// GetQuestID returns the quest ID string, or empty if null
+func (t *Task) GetQuestID() string {
+	if t.QuestID.Valid {
+		return t.QuestID.String
 	}
 	return ""
 }

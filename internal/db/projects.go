@@ -10,8 +10,13 @@ import (
 
 // CreateProject inserts a new project into the database
 func (db *DB) CreateProject(name, repoPath string) (*Project, error) {
+	return db.CreateProjectWithID(NewPrefixedID("proj"), name, repoPath)
+}
+
+// CreateProjectWithID inserts a new project with a specific ID
+func (db *DB) CreateProjectWithID(id, name, repoPath string) (*Project, error) {
 	project := &Project{
-		ID:            NewPrefixedID("proj"),
+		ID:            id,
 		Name:          name,
 		RepoPath:      repoPath,
 		DefaultBranch: "main",

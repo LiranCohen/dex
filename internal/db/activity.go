@@ -28,6 +28,7 @@ const (
 	ActivityTypeCompletion        = "completion_signal"
 	ActivityTypeHatTransition     = "hat_transition"
 	ActivityTypeDebugLog          = "debug_log"
+	ActivityTypeChecklistUpdate   = "checklist_update"
 )
 
 // CreateSessionActivity inserts a new activity record

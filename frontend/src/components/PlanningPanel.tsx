@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { fetchPlanning, sendPlanningResponse, acceptPlan, skipPlanning } from '../lib/api';
-import type { PlanningMessage, PlanningSession, WebSocketEvent } from '../lib/types';
+import { fetchPlanning, sendPlanningResponse, acceptPlan, skipPlanning, fetchChecklist, acceptChecklist } from '../lib/api';
+import type { PlanningMessage, PlanningSession, WebSocketEvent, ChecklistItem, ChecklistSummary, PendingChecklist } from '../lib/types';
 import { useWebSocket } from '../hooks/useWebSocket';
+import { ChecklistDisplay, PendingChecklistDisplay } from './ChecklistDisplay';
 
 // Safely convert any value to a renderable string
 function safeString(value: unknown): string {
@@ -25,6 +26,15 @@ interface PlanningPanelProps {
 export function PlanningPanel({ taskId, readOnly = false, onPlanAccepted, onPlanSkipped }: PlanningPanelProps) {
   const [session, setSession] = useState<PlanningSession | null>(null);
   const [messages, setMessages] = useState<PlanningMessage[]>([]);
+
+  // For accepted checklists (read-only view after task runs)
+  const [checklistItems, setChecklistItems] = useState<ChecklistItem[]>([]);
+  const [checklistSummary, setChecklistSummary] = useState<ChecklistSummary | null>(null);
+  const [hasAcceptedChecklist, setHasAcceptedChecklist] = useState(false);
+
+  // For pending checklists during planning (before acceptance)
+  const [selectedOptional, setSelectedOptional] = useState<number[]>([]);
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [response, setResponse] = useState('');
@@ -35,13 +45,31 @@ export function PlanningPanel({ taskId, readOnly = false, onPlanAccepted, onPlan
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const { subscribe } = useWebSocket();
 
-  // Load planning data
+  // Get pending checklist from session
+  const pendingChecklist: PendingChecklist | null = session?.pending_checklist || null;
+  const hasPendingChecklist = pendingChecklist !== null &&
+    (pendingChecklist.must_have.length > 0 || pendingChecklist.optional.length > 0);
+
+  // Load planning data and checklist
   const loadPlanning = useCallback(async () => {
     try {
       const data = await fetchPlanning(taskId);
       setSession(data.session);
       setMessages(data.messages);
       setError(null);
+
+      // If in read-only mode and task is past planning, try to fetch accepted checklist
+      if (readOnly && data.session.status === 'completed') {
+        try {
+          const checklistData = await fetchChecklist(taskId);
+          setChecklistItems(checklistData.items);
+          setChecklistSummary(checklistData.summary);
+          setHasAcceptedChecklist(true);
+        } catch {
+          // No accepted checklist exists
+          setHasAcceptedChecklist(false);
+        }
+      }
     } catch (err) {
       // Extract message from Error or ApiError, ensuring it's always a string
       let message = 'Failed to load planning';
@@ -65,7 +93,7 @@ export function PlanningPanel({ taskId, readOnly = false, onPlanAccepted, onPlan
         setError(message);
       }
     }
-  }, [taskId]);
+  }, [taskId, readOnly]);
 
   // Initial load
   useEffect(() => {
@@ -126,11 +154,28 @@ export function PlanningPanel({ taskId, readOnly = false, onPlanAccepted, onPlan
     }
   };
 
+  // Handle toggling optional items in the pending checklist
+  const handleOptionalToggle = (index: number, selected: boolean) => {
+    setSelectedOptional((prev) => {
+      if (selected) {
+        return [...prev, index];
+      } else {
+        return prev.filter((i) => i !== index);
+      }
+    });
+  };
+
   // Handle accepting the plan
   const handleAccept = async () => {
     setAccepting(true);
     try {
-      await acceptPlan(taskId);
+      if (hasPendingChecklist) {
+        // Use checklist accept endpoint with selected optional indices
+        await acceptChecklist(taskId, selectedOptional);
+      } else {
+        // Use regular plan accept
+        await acceptPlan(taskId);
+      }
       onPlanAccepted?.();
     } catch (err) {
       let message = 'Failed to accept plan';
@@ -229,29 +274,57 @@ export function PlanningPanel({ taskId, readOnly = false, onPlanAccepted, onPlan
         </div>
       </div>
 
-      {/* Messages */}
-      <div className="p-4 max-h-[400px] overflow-y-auto space-y-4">
-        {messages.map((msg) => (
-          <div
-            key={msg.id}
-            className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
-          >
+      {/* Messages - show when no pending checklist, or in read-only mode with no accepted checklist */}
+      {(!hasPendingChecklist || (readOnly && !hasAcceptedChecklist)) && (
+        <div className="p-4 max-h-[400px] overflow-y-auto space-y-4">
+          {messages.map((msg) => (
             <div
-              className={`max-w-[80%] rounded-lg px-4 py-3 ${
-                msg.role === 'user'
-                  ? 'bg-purple-600/40 text-purple-100'
-                  : 'bg-gray-700/50 text-gray-200'
-              }`}
+              key={msg.id}
+              className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
             >
-              <div className="text-xs text-gray-400 mb-1">
-                {msg.role === 'user' ? 'You' : 'Planning Assistant'}
+              <div
+                className={`max-w-[80%] rounded-lg px-4 py-3 ${
+                  msg.role === 'user'
+                    ? 'bg-purple-600/40 text-purple-100'
+                    : 'bg-gray-700/50 text-gray-200'
+                }`}
+              >
+                <div className="text-xs text-gray-400 mb-1">
+                  {msg.role === 'user' ? 'You' : 'Planning Assistant'}
+                </div>
+                <div className="whitespace-pre-wrap text-sm">{safeString(msg.content)}</div>
               </div>
-              <div className="whitespace-pre-wrap text-sm">{safeString(msg.content)}</div>
             </div>
+          ))}
+          <div ref={messagesEndRef} />
+        </div>
+      )}
+
+      {/* Pending checklist display - editable during planning (before acceptance) */}
+      {hasPendingChecklist && !readOnly && (
+        <div className="p-4 border-t border-purple-600/30">
+          <div className="mb-4">
+            <p className="text-sm text-gray-400">
+              Review the plan below. Required items will be completed. You can select which optional items to include.
+            </p>
           </div>
-        ))}
-        <div ref={messagesEndRef} />
-      </div>
+          <PendingChecklistDisplay
+            pendingChecklist={pendingChecklist!}
+            selectedOptional={selectedOptional}
+            onOptionalToggle={handleOptionalToggle}
+          />
+        </div>
+      )}
+
+      {/* Accepted checklist display - read-only after task has run */}
+      {hasAcceptedChecklist && readOnly && (
+        <div className="p-4 border-t border-purple-600/30">
+          <ChecklistDisplay
+            items={checklistItems}
+            summary={checklistSummary || undefined}
+          />
+        </div>
+      )}
 
       {/* Error display */}
       {error && (
@@ -293,7 +366,7 @@ export function PlanningPanel({ taskId, readOnly = false, onPlanAccepted, onPlan
           >
             {skipping ? 'Skipping...' : 'Skip Planning'}
           </button>
-          {(isCompleted || isAwaitingResponse) && (
+          {(isCompleted || isAwaitingResponse || hasPendingChecklist) && (
             <button
               onClick={handleAccept}
               disabled={accepting || skipping}

@@ -10,12 +10,52 @@ func GetToolDefinitions() []toolbelt.AnthropicTool {
 		readFileTool(),
 		writeFileTool(),
 		listFilesTool(),
+		gitInitTool(),
 		gitStatusTool(),
 		gitDiffTool(),
 		gitCommitTool(),
+		gitRemoteAddTool(),
 		gitPushTool(),
 		githubCreateRepoTool(),
 		githubCreatePRTool(),
+	}
+}
+
+func gitInitTool() toolbelt.AnthropicTool {
+	return toolbelt.AnthropicTool{
+		Name:        "git_init",
+		Description: "Initialize a new git repository in the working directory. Use this when starting a new project that doesn't have git yet.",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"default_branch": map[string]any{
+					"type":        "string",
+					"description": "Name for the initial branch (default: main)",
+				},
+			},
+			"required": []string{},
+		},
+	}
+}
+
+func gitRemoteAddTool() toolbelt.AnthropicTool {
+	return toolbelt.AnthropicTool{
+		Name:        "git_remote_add",
+		Description: "Add a remote repository. Use this after creating a GitHub repo to connect your local repo to it.",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"name": map[string]any{
+					"type":        "string",
+					"description": "Remote name (default: origin)",
+				},
+				"url": map[string]any{
+					"type":        "string",
+					"description": "Remote repository URL (e.g., https://github.com/owner/repo.git)",
+				},
+			},
+			"required": []string{"url"},
+		},
 	}
 }
 

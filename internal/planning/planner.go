@@ -3,6 +3,7 @@ package planning
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -10,6 +11,12 @@ import (
 	"github.com/lirancohen/dex/internal/db"
 	"github.com/lirancohen/dex/internal/toolbelt"
 )
+
+// ParsedChecklist represents the parsed checklist from the planner response
+type ParsedChecklist struct {
+	MustHave []string
+	Optional []string
+}
 
 const planningSystemPrompt = `You are a task planning assistant for Poindexter, an AI orchestration system. Your job is to clarify user requests before they are executed by an AI agent.
 
@@ -25,16 +32,31 @@ Your role is ONLY to understand and clarify the task. You do NOT execute anythin
 When analyzing a task request:
 1. Identify ambiguities or missing information
 2. Ask 1-2 clarifying questions if needed (e.g., repo name, visibility, language preferences)
-3. When the task is clear, output your understanding in this format:
+3. When the task is clear, produce a structured checklist in this format:
 
-PLAN_CONFIRMED
+PLAN_CHECKLIST
 ---
-[Clear, actionable task summary that the execution agent will follow]
+must_have:
+- First required step
+- Second required step
+- Third required step
+
+optional:
+- Nice-to-have enhancement
+- Another optional improvement
 ---
 
-Keep responses concise. Focus on understanding intent, not implementation details.`
+Guidelines for the checklist:
+- must_have items are required for task success
+- optional items are nice-to-have enhancements the user can select
+- Keep items atomic and verifiable (each should be a discrete action)
+- 3-7 items total is ideal
+- Focus on outcomes, not implementation details
+- Each item should be completable independently
 
-const planningModel = "claude-sonnet-4-20250514"
+Keep responses concise. Focus on understanding intent and breaking down into clear steps.`
+
+const planningModel = "claude-sonnet-4-5-20250929"
 
 // Planner handles the planning phase for tasks
 type Planner struct {
@@ -92,8 +114,19 @@ func (p *Planner) StartPlanning(ctx context.Context, taskID, prompt string) (*db
 		return nil, fmt.Errorf("failed to store assistant response: %w", err)
 	}
 
-	// Check if plan is already confirmed
-	if isPlanConfirmed(assistantMsg) {
+	// Check if plan has a checklist or is confirmed
+	if isPlanChecklist(assistantMsg) {
+		checklist := parseChecklist(assistantMsg)
+		// Store checklist as pending - items will be created on acceptance
+		if err := p.storePendingChecklist(session.ID, checklist); err != nil {
+			return nil, fmt.Errorf("failed to store pending checklist: %w", err)
+		}
+		refinedPrompt := buildRefinedPromptFromChecklist(checklist)
+		if err := p.db.CompletePlanningSession(session.ID, refinedPrompt); err != nil {
+			return nil, fmt.Errorf("failed to complete planning session: %w", err)
+		}
+		session.Status = db.PlanningStatusCompleted
+	} else if isPlanConfirmed(assistantMsg) {
 		refinedPrompt := extractRefinedPrompt(assistantMsg)
 		if err := p.db.CompletePlanningSession(session.ID, refinedPrompt); err != nil {
 			return nil, fmt.Errorf("failed to complete planning session: %w", err)
@@ -176,8 +209,19 @@ func (p *Planner) ProcessResponse(ctx context.Context, sessionID, response strin
 		return nil, fmt.Errorf("failed to store assistant response: %w", err)
 	}
 
-	// Check if plan is confirmed
-	if isPlanConfirmed(assistantMsg) {
+	// Check if plan has a checklist or is confirmed
+	if isPlanChecklist(assistantMsg) {
+		checklist := parseChecklist(assistantMsg)
+		// Store checklist as pending - items will be created on acceptance
+		if err := p.storePendingChecklist(session.ID, checklist); err != nil {
+			return nil, fmt.Errorf("failed to store pending checklist: %w", err)
+		}
+		refinedPrompt := buildRefinedPromptFromChecklist(checklist)
+		if err := p.db.CompletePlanningSession(session.ID, refinedPrompt); err != nil {
+			return nil, fmt.Errorf("failed to complete planning session: %w", err)
+		}
+		session.Status = db.PlanningStatusCompleted
+	} else if isPlanConfirmed(assistantMsg) {
 		refinedPrompt := extractRefinedPrompt(assistantMsg)
 		if err := p.db.CompletePlanningSession(session.ID, refinedPrompt); err != nil {
 			return nil, fmt.Errorf("failed to complete planning session: %w", err)
@@ -348,4 +392,127 @@ func extractRefinedPrompt(msg string) string {
 	// If no formatted prompt found, return the whole message without PLAN_CONFIRMED
 	msg = strings.Replace(msg, "PLAN_CONFIRMED", "", 1)
 	return strings.TrimSpace(msg)
+}
+
+// isPlanChecklist checks if the assistant's message contains a checklist plan
+func isPlanChecklist(msg string) bool {
+	return strings.Contains(msg, "PLAN_CHECKLIST")
+}
+
+// parseChecklist extracts the checklist from a PLAN_CHECKLIST message
+func parseChecklist(msg string) *ParsedChecklist {
+	checklist := &ParsedChecklist{
+		MustHave: []string{},
+		Optional: []string{},
+	}
+
+	// Extract content between --- delimiters
+	parts := strings.Split(msg, "---")
+	if len(parts) < 2 {
+		return checklist
+	}
+
+	content := strings.TrimSpace(parts[1])
+	lines := strings.Split(content, "\n")
+
+	var currentSection string
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+
+		// Check for section headers
+		lowerLine := strings.ToLower(line)
+		if strings.HasPrefix(lowerLine, "must_have:") || strings.HasPrefix(lowerLine, "must-have:") {
+			currentSection = "must_have"
+			continue
+		}
+		if strings.HasPrefix(lowerLine, "optional:") {
+			currentSection = "optional"
+			continue
+		}
+
+		// Parse list items
+		if strings.HasPrefix(line, "- ") || strings.HasPrefix(line, "* ") {
+			item := strings.TrimPrefix(strings.TrimPrefix(line, "- "), "* ")
+			item = strings.TrimSpace(item)
+			if item == "" {
+				continue
+			}
+
+			switch currentSection {
+			case "must_have":
+				checklist.MustHave = append(checklist.MustHave, item)
+			case "optional":
+				checklist.Optional = append(checklist.Optional, item)
+			}
+		}
+	}
+
+	return checklist
+}
+
+// buildRefinedPromptFromChecklist creates a refined prompt text from the checklist
+func buildRefinedPromptFromChecklist(checklist *ParsedChecklist) string {
+	var sb strings.Builder
+
+	if len(checklist.MustHave) > 0 {
+		sb.WriteString("Required steps:\n")
+		for _, item := range checklist.MustHave {
+			sb.WriteString("- ")
+			sb.WriteString(item)
+			sb.WriteString("\n")
+		}
+	}
+
+	if len(checklist.Optional) > 0 {
+		if sb.Len() > 0 {
+			sb.WriteString("\n")
+		}
+		sb.WriteString("Optional enhancements:\n")
+		for _, item := range checklist.Optional {
+			sb.WriteString("- ")
+			sb.WriteString(item)
+			sb.WriteString("\n")
+		}
+	}
+
+	return strings.TrimSpace(sb.String())
+}
+
+// storePendingChecklist stores the parsed checklist as JSON in the planning session
+// The checklist items are not created until acceptance
+func (p *Planner) storePendingChecklist(sessionID string, checklist *ParsedChecklist) error {
+	checklistJSON, err := json.Marshal(db.PendingChecklistData{
+		MustHave: checklist.MustHave,
+		Optional: checklist.Optional,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to marshal checklist: %w", err)
+	}
+
+	if err := p.db.SetPendingChecklist(sessionID, string(checklistJSON)); err != nil {
+		return fmt.Errorf("failed to store pending checklist: %w", err)
+	}
+
+	return nil
+}
+
+// GetChecklistByTask retrieves the checklist for a task
+func (p *Planner) GetChecklistByTask(taskID string) (*db.TaskChecklist, []*db.ChecklistItem, error) {
+	checklist, err := p.db.GetChecklistByTaskID(taskID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to get checklist: %w", err)
+	}
+	if checklist == nil {
+		return nil, nil, nil
+	}
+
+	items, err := p.db.GetChecklistItems(checklist.ID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to get checklist items: %w", err)
+	}
+
+	return checklist, items, nil
 }

@@ -56,6 +56,11 @@ func (db *DB) Migrate() error {
 		migrationSessionActivity,
 		migrationPlanningSessions,
 		migrationPlanningMessages,
+		migrationTaskChecklists,
+		migrationChecklistItems,
+		migrationQuests,
+		migrationQuestMessages,
+		migrationQuestTemplates,
 	}
 
 	for i, migration := range migrations {
@@ -69,6 +74,13 @@ func (db *DB) Migrate() error {
 	optionalMigrations := []string{
 		"ALTER TABLE webauthn_credentials ADD COLUMN backup_eligible INTEGER NOT NULL DEFAULT 0",
 		"ALTER TABLE webauthn_credentials ADD COLUMN backup_state INTEGER NOT NULL DEFAULT 0",
+		"ALTER TABLE tasks ADD COLUMN quest_id TEXT REFERENCES quests(id)",
+		"ALTER TABLE tasks ADD COLUMN model TEXT DEFAULT 'sonnet'",
+		// Session token/rate tracking (replaces tokens_used, dollars_used)
+		"ALTER TABLE sessions ADD COLUMN input_tokens INTEGER DEFAULT 0",
+		"ALTER TABLE sessions ADD COLUMN output_tokens INTEGER DEFAULT 0",
+		"ALTER TABLE sessions ADD COLUMN input_rate REAL DEFAULT 3.0",
+		"ALTER TABLE sessions ADD COLUMN output_rate REAL DEFAULT 15.0",
 	}
 	for _, migration := range optionalMigrations {
 		db.Exec(migration) // Ignore errors - column may already exist
@@ -248,6 +260,7 @@ CREATE TABLE IF NOT EXISTS planning_sessions (
 	status TEXT NOT NULL DEFAULT 'processing',
 	refined_prompt TEXT,
 	original_prompt TEXT NOT NULL,
+	pending_checklist TEXT,
 	created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 	completed_at DATETIME,
 	FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
@@ -268,4 +281,78 @@ CREATE TABLE IF NOT EXISTS planning_messages (
 );
 
 CREATE INDEX IF NOT EXISTS idx_planning_messages_session ON planning_messages(planning_session_id);
+`
+
+const migrationTaskChecklists = `
+CREATE TABLE IF NOT EXISTS task_checklists (
+	id TEXT PRIMARY KEY,
+	task_id TEXT NOT NULL UNIQUE,
+	created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+	FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_task_checklists_task ON task_checklists(task_id);
+`
+
+const migrationChecklistItems = `
+CREATE TABLE IF NOT EXISTS checklist_items (
+	id TEXT PRIMARY KEY,
+	checklist_id TEXT NOT NULL,
+	parent_id TEXT,
+	description TEXT NOT NULL,
+	status TEXT DEFAULT 'pending',
+	verification_notes TEXT,
+	completed_at DATETIME,
+	sort_order INTEGER DEFAULT 0,
+	FOREIGN KEY (checklist_id) REFERENCES task_checklists(id) ON DELETE CASCADE,
+	FOREIGN KEY (parent_id) REFERENCES checklist_items(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_checklist_items_checklist ON checklist_items(checklist_id);
+CREATE INDEX IF NOT EXISTS idx_checklist_items_parent ON checklist_items(parent_id);
+CREATE INDEX IF NOT EXISTS idx_checklist_items_status ON checklist_items(status);
+`
+
+const migrationQuests = `
+CREATE TABLE IF NOT EXISTS quests (
+	id TEXT PRIMARY KEY,
+	project_id TEXT NOT NULL,
+	title TEXT,
+	status TEXT NOT NULL DEFAULT 'active',
+	model TEXT DEFAULT 'sonnet',
+	auto_start_default INTEGER DEFAULT 1,
+	created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+	completed_at DATETIME,
+	FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_quests_project ON quests(project_id);
+CREATE INDEX IF NOT EXISTS idx_quests_status ON quests(status);
+`
+
+const migrationQuestMessages = `
+CREATE TABLE IF NOT EXISTS quest_messages (
+	id TEXT PRIMARY KEY,
+	quest_id TEXT NOT NULL,
+	role TEXT NOT NULL,
+	content TEXT NOT NULL,
+	created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+	FOREIGN KEY (quest_id) REFERENCES quests(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_quest_messages_quest ON quest_messages(quest_id);
+`
+
+const migrationQuestTemplates = `
+CREATE TABLE IF NOT EXISTS quest_templates (
+	id TEXT PRIMARY KEY,
+	project_id TEXT NOT NULL,
+	name TEXT NOT NULL,
+	description TEXT,
+	initial_prompt TEXT NOT NULL,
+	created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+	FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_quest_templates_project ON quest_templates(project_id);
 `

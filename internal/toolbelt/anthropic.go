@@ -233,7 +233,7 @@ func (c *AnthropicClient) Ping(ctx context.Context) error {
 	reqURL := fmt.Sprintf("%s/messages", anthropicAPIBaseURL)
 
 	reqBody := AnthropicChatRequest{
-		Model:     "claude-3-haiku-20240307",
+		Model:     "claude-haiku-4-5-20251001",
 		MaxTokens: 1,
 		Messages: []AnthropicMessage{
 			{Role: "user", Content: "hi"},
@@ -256,7 +256,7 @@ func (c *AnthropicClient) Chat(ctx context.Context, req *AnthropicChatRequest) (
 
 	// Set defaults if not provided
 	if req.Model == "" {
-		req.Model = "claude-sonnet-4-20250514"
+		req.Model = "claude-sonnet-4-5-20250929"
 	}
 	if req.MaxTokens == 0 {
 		req.MaxTokens = 4096
@@ -278,7 +278,7 @@ func (c *AnthropicClient) Complete(ctx context.Context, prompt string, maxTokens
 	}
 
 	req := &AnthropicChatRequest{
-		Model:     "claude-sonnet-4-20250514",
+		Model:     "claude-sonnet-4-5-20250929",
 		MaxTokens: maxTokens,
 		Messages: []AnthropicMessage{
 			{Role: "user", Content: prompt},
