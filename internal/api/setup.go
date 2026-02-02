@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v4"
+	"github.com/lirancohen/dex/internal/toolbelt"
 	"github.com/lirancohen/dex/internal/workspace"
 )
 
@@ -289,12 +290,28 @@ func (s *Server) handleSetupComplete(c echo.Context) error {
 	}
 
 	// Optionally create GitHub workspace repository
-	s.toolbeltMu.RLock()
-	githubClient := s.toolbelt != nil && s.toolbelt.GitHub != nil
-	s.toolbeltMu.RUnlock()
+	// First try GitHub App (preferred), then fall back to legacy PAT
+	var githubClientForWorkspace *toolbelt.GitHubClient
 
-	if githubClient {
-		ws := workspace.NewService(s.toolbelt.GitHub, workspacePath)
+	if hasGitHubApp {
+		// Use GitHub App installation token
+		client, err := s.GetToolbeltGitHubClient(c.Request().Context(), "")
+		if err != nil {
+			fmt.Printf("Warning: failed to get GitHub App client for workspace: %v\n", err)
+		} else {
+			githubClientForWorkspace = client
+		}
+	} else {
+		// Fall back to legacy PAT
+		s.toolbeltMu.RLock()
+		if s.toolbelt != nil && s.toolbelt.GitHub != nil {
+			githubClientForWorkspace = s.toolbelt.GitHub
+		}
+		s.toolbeltMu.RUnlock()
+	}
+
+	if githubClientForWorkspace != nil {
+		ws := workspace.NewService(githubClientForWorkspace, workspacePath)
 		if err := ws.EnsureRemoteExists(c.Request().Context()); err != nil {
 			// Log warning but don't fail - GitHub workspace is optional
 			fmt.Printf("Warning: failed to create GitHub workspace: %v\n", err)
