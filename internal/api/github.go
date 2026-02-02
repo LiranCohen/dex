@@ -20,11 +20,16 @@ import (
 	"github.com/lirancohen/dex/internal/toolbelt"
 )
 
-// initGitHubApp initializes the GitHub App manager from database configuration
-func (s *Server) initGitHubApp() {
+// initGitHubApp initializes the GitHub App manager from database configuration.
+// It also sets up the session manager's GitHub client fetcher if not already set.
+// This method is safe to call multiple times - it will reinitialize if needed.
+func (s *Server) initGitHubApp() error {
 	config, err := s.db.GetGitHubAppConfig()
-	if err != nil || config == nil {
-		return
+	if err != nil {
+		return fmt.Errorf("failed to get GitHub App config: %w", err)
+	}
+	if config == nil {
+		return fmt.Errorf("no GitHub App configured")
 	}
 
 	appManager, err := github.NewAppManager(&github.AppConfig{
@@ -36,13 +41,39 @@ func (s *Server) initGitHubApp() {
 		WebhookSecret: config.WebhookSecret,
 	})
 	if err != nil {
-		fmt.Printf("Warning: failed to initialize GitHub App manager: %v\n", err)
-		return
+		return fmt.Errorf("failed to create GitHub App manager: %w", err)
 	}
 
 	s.githubAppMu.Lock()
 	s.githubApp = appManager
 	s.githubAppMu.Unlock()
+
+	fmt.Printf("initGitHubApp: GitHub App manager initialized for %s\n", config.AppSlug)
+
+	// Set up session manager fetcher if we have a session manager
+	if s.sessionManager != nil {
+		s.sessionManager.SetGitHubClientFetcher(func(ctx context.Context, login string) (*toolbelt.GitHubClient, error) {
+			return s.GetToolbeltGitHubClient(ctx, login)
+		})
+		fmt.Println("initGitHubApp: Session manager GitHub client fetcher configured")
+	}
+
+	return nil
+}
+
+// ensureGitHubAppInitialized ensures the GitHub App manager is initialized.
+// Call this before using s.githubApp when the app might have been configured after server startup.
+func (s *Server) ensureGitHubAppInitialized() error {
+	s.githubAppMu.RLock()
+	initialized := s.githubApp != nil
+	s.githubAppMu.RUnlock()
+
+	if initialized {
+		return nil
+	}
+
+	// Try to initialize from database
+	return s.initGitHubApp()
 }
 
 // GetGitHubClientForInstallation returns a GitHub client for the specified installation login.
@@ -228,6 +259,11 @@ func (s *Server) handleGitHubAppCallback(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("failed to save app config: %v", err))
 	}
 
+	// Initialize the GitHub App manager now that config is saved
+	if err := s.initGitHubApp(); err != nil {
+		fmt.Printf("Warning: failed to initialize GitHub App after creation: %v\n", err)
+	}
+
 	// Return success and redirect URL to install the app
 	installURL := fmt.Sprintf("https://github.com/apps/%s/installations/new", appConfig.AppSlug)
 
@@ -242,24 +278,14 @@ func (s *Server) handleGitHubInstallCallback(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "missing installation_id")
 	}
 
-	// Get the app config
-	config, err := s.db.GetGitHubAppConfig()
-	if err != nil || config == nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "GitHub App not configured")
+	// Ensure GitHub App manager is initialized
+	if err := s.ensureGitHubAppInitialized(); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("GitHub App not configured: %v", err))
 	}
 
-	// Create app manager to fetch installation details
-	appManager, err := github.NewAppManager(&github.AppConfig{
-		AppID:         config.AppID,
-		AppSlug:       config.AppSlug,
-		ClientID:      config.ClientID,
-		ClientSecret:  config.ClientSecret,
-		PrivateKeyPEM: config.PrivateKey,
-		WebhookSecret: config.WebhookSecret,
-	})
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("failed to create app manager: %v", err))
-	}
+	s.githubAppMu.RLock()
+	appManager := s.githubApp
+	s.githubAppMu.RUnlock()
 
 	// Fetch all installations and find the one we just received
 	ctx, cancel := context.WithTimeout(c.Request().Context(), 30*time.Second)
@@ -318,22 +344,14 @@ func (s *Server) handleGitHubInstallations(c echo.Context) error {
 
 // handleGitHubSyncInstallations syncs installations from GitHub
 func (s *Server) handleGitHubSyncInstallations(c echo.Context) error {
-	config, err := s.db.GetGitHubAppConfig()
-	if err != nil || config == nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "GitHub App not configured")
+	// Ensure GitHub App manager is initialized
+	if err := s.ensureGitHubAppInitialized(); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("GitHub App not configured: %v", err))
 	}
 
-	appManager, err := github.NewAppManager(&github.AppConfig{
-		AppID:         config.AppID,
-		AppSlug:       config.AppSlug,
-		ClientID:      config.ClientID,
-		ClientSecret:  config.ClientSecret,
-		PrivateKeyPEM: config.PrivateKey,
-		WebhookSecret: config.WebhookSecret,
-	})
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("failed to create app manager: %v", err))
-	}
+	s.githubAppMu.RLock()
+	appManager := s.githubApp
+	s.githubAppMu.RUnlock()
 
 	ctx, cancel := context.WithTimeout(c.Request().Context(), 30*time.Second)
 	defer cancel()

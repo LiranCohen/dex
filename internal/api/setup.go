@@ -294,6 +294,11 @@ func (s *Server) handleSetupComplete(c echo.Context) error {
 	var githubClientForWorkspace *toolbelt.GitHubClient
 
 	if hasGitHubApp {
+		// Ensure GitHub App manager is initialized (may have been configured after server startup)
+		if err := s.ensureGitHubAppInitialized(); err != nil {
+			fmt.Printf("Warning: failed to initialize GitHub App: %v\n", err)
+		}
+
 		// Use GitHub App installation token
 		client, err := s.GetToolbeltGitHubClient(c.Request().Context(), "")
 		if err != nil {
