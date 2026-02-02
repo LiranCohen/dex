@@ -126,30 +126,34 @@ func (r *RalphLoop) Run(ctx context.Context) error {
 		"worktree_path": r.session.WorktreePath,
 	})
 
-	// Initialize conversation with context message
-	// Check if there's a checklist or refined prompt from the planning phase
-	initialMessage := "Begin working on the task. Follow your hat instructions and report progress."
+	// Initialize conversation with context message (only if not restored from checkpoint)
+	// If messages already has content, we restored from checkpoint and should continue from there
+	if len(r.messages) == 0 {
+		initialMessage := "Begin working on the task. Follow your hat instructions and report progress."
 
-	// Check for checklist first
-	if checklist, err := r.db.GetChecklistByTaskID(r.session.TaskID); err == nil && checklist != nil {
-		if items, err := r.db.GetChecklistItems(checklist.ID); err == nil && len(items) > 0 {
-			initialMessage = r.buildChecklistPrompt(items)
-			fmt.Printf("RalphLoop.Run: using checklist context (%d items)\n", len(items))
+		// Check for checklist first
+		if checklist, err := r.db.GetChecklistByTaskID(r.session.TaskID); err == nil && checklist != nil {
+			if items, err := r.db.GetChecklistItems(checklist.ID); err == nil && len(items) > 0 {
+				initialMessage = r.buildChecklistPrompt(items)
+				fmt.Printf("RalphLoop.Run: using checklist context (%d items)\n", len(items))
+			}
+		} else if planningSession, err := r.db.GetPlanningSessionByTaskID(r.session.TaskID); err == nil && planningSession != nil {
+			if planningSession.RefinedPrompt.Valid && planningSession.RefinedPrompt.String != "" {
+				initialMessage = fmt.Sprintf("## Task Instructions (from planning phase)\n\n%s\n\n---\n\nBegin working on this task. Follow your hat instructions and report progress.", planningSession.RefinedPrompt.String)
+				fmt.Printf("RalphLoop.Run: using refined prompt from planning phase\n")
+			}
 		}
-	} else if planningSession, err := r.db.GetPlanningSessionByTaskID(r.session.TaskID); err == nil && planningSession != nil {
-		if planningSession.RefinedPrompt.Valid && planningSession.RefinedPrompt.String != "" {
-			initialMessage = fmt.Sprintf("## Task Instructions (from planning phase)\n\n%s\n\n---\n\nBegin working on this task. Follow your hat instructions and report progress.", planningSession.RefinedPrompt.String)
-			fmt.Printf("RalphLoop.Run: using refined prompt from planning phase\n")
-		}
-	}
-	r.messages = append(r.messages, toolbelt.AnthropicMessage{
-		Role:    "user",
-		Content: initialMessage,
-	})
+		r.messages = append(r.messages, toolbelt.AnthropicMessage{
+			Role:    "user",
+			Content: initialMessage,
+		})
 
-	// Record initial user message
-	if err := r.activity.RecordUserMessage(0, initialMessage); err != nil {
-		fmt.Printf("RalphLoop.Run: warning - failed to record initial message: %v\n", err)
+		// Record initial user message
+		if err := r.activity.RecordUserMessage(0, initialMessage); err != nil {
+			fmt.Printf("RalphLoop.Run: warning - failed to record initial message: %v\n", err)
+		}
+	} else {
+		fmt.Printf("RalphLoop.Run: restored from checkpoint with %d messages, skipping initial prompt\n", len(r.messages))
 	}
 
 	// Main Ralph loop
