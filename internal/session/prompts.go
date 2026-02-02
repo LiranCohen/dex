@@ -100,48 +100,51 @@ func (p *PromptLoader) Get(hatName string, ctx *PromptContext) (string, error) {
 	// Build PromptLoom context from our PromptContext
 	loomCtx := promptloom.NewContext()
 
-	// Add task context
-	if ctx.Task != nil {
-		loomCtx.SetValue("task_id", ctx.Task.ID)
-		loomCtx.SetValue("task_title", ctx.Task.Title)
-		if ctx.Task.Description.Valid {
-			loomCtx.SetValue("task_description", ctx.Task.Description.String)
+	// Only populate context if provided (can be nil for simple prompts like quest)
+	if ctx != nil {
+		// Add task context
+		if ctx.Task != nil {
+			loomCtx.SetValue("task_id", ctx.Task.ID)
+			loomCtx.SetValue("task_title", ctx.Task.Title)
+			if ctx.Task.Description.Valid {
+				loomCtx.SetValue("task_description", ctx.Task.Description.String)
+			}
+			loomCtx.SetValue("branch_name", ctx.Task.GetBranchName())
 		}
-		loomCtx.SetValue("branch_name", ctx.Task.GetBranchName())
-	}
 
-	// Add session context
-	if ctx.Session != nil {
-		loomCtx.SetValue("worktree_path", ctx.Session.WorktreePath)
-		loomCtx.SetValue("session_id", ctx.Session.ID)
-	}
-
-	// Add project context
-	if ctx.Project != nil {
-		loomCtx.SetValue("project_name", ctx.Project.Name)
-		loomCtx.SetValue("repo_path", ctx.Project.RepoPath)
-		if ctx.Project.GitHubOwner != "" {
-			loomCtx.SetValue("github_owner", ctx.Project.GitHubOwner)
-			loomCtx.SetValue("github_repo", ctx.Project.GitHubRepo)
-			loomCtx.SetFlag("has_github", true)
+		// Add session context
+		if ctx.Session != nil {
+			loomCtx.SetValue("worktree_path", ctx.Session.WorktreePath)
+			loomCtx.SetValue("session_id", ctx.Session.ID)
 		}
-		if ctx.Project.IsNewProject {
-			loomCtx.SetFlag("is_new_project", true)
-		}
-	}
 
-	// Add tools list
-	if len(ctx.Tools) > 0 {
-		loomCtx.SetValue("tools", strings.Join(ctx.Tools, ", "))
-	}
-
-	// Add toolbelt services
-	if len(ctx.Toolbelt) > 0 {
-		var services []string
-		for _, svc := range ctx.Toolbelt {
-			services = append(services, fmt.Sprintf("- %s: %s", svc.Name, svc.Status))
+		// Add project context
+		if ctx.Project != nil {
+			loomCtx.SetValue("project_name", ctx.Project.Name)
+			loomCtx.SetValue("repo_path", ctx.Project.RepoPath)
+			if ctx.Project.GitHubOwner != "" {
+				loomCtx.SetValue("github_owner", ctx.Project.GitHubOwner)
+				loomCtx.SetValue("github_repo", ctx.Project.GitHubRepo)
+				loomCtx.SetFlag("has_github", true)
+			}
+			if ctx.Project.IsNewProject {
+				loomCtx.SetFlag("is_new_project", true)
+			}
 		}
-		loomCtx.SetValue("toolbelt", strings.Join(services, "\n"))
+
+		// Add tools list
+		if len(ctx.Tools) > 0 {
+			loomCtx.SetValue("tools", strings.Join(ctx.Tools, ", "))
+		}
+
+		// Add toolbelt services
+		if len(ctx.Toolbelt) > 0 {
+			var services []string
+			for _, svc := range ctx.Toolbelt {
+				services = append(services, fmt.Sprintf("- %s: %s", svc.Name, svc.Status))
+			}
+			loomCtx.SetValue("toolbelt", strings.Join(services, "\n"))
+		}
 	}
 
 	// Assemble the prompt
