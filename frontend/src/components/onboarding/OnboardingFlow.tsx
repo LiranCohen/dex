@@ -112,6 +112,7 @@ export function OnboardingFlow({ onComplete }: OnboardingFlowProps) {
         return (
           <GitHubInstallStep
             orgName={status?.github_org || ''}
+            orgId={status?.github_org_id}
             appSlug={status?.github_app_slug}
             onComplete={completeGitHubInstall}
             error={error}

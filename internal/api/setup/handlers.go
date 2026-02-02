@@ -90,6 +90,7 @@ func (h *Handler) HandleStatus(c echo.Context) error {
 		CurrentStep: progress.CurrentStep,
 		Steps:       BuildSteps(progress),
 		GitHubOrg:   progress.GetGitHubOrgName(),
+		GitHubOrgID: progress.GetGitHubOrgID(),
 
 		// Legacy compatibility fields
 		PasskeyRegistered: hasPasskey,
@@ -208,8 +209,8 @@ func (h *Handler) HandleSetGitHubOrg(c echo.Context) error {
 			fmt.Sprintf("'%s' is a personal account, not an organization. GitHub Apps can only create repositories in organizations. Please create or use a GitHub organization.", req.OrgName))
 	}
 
-	// Save the org name
-	if err := h.db.SetGitHubOrg(orgInfo.Login); err != nil {
+	// Save the org name and ID
+	if err := h.db.SetGitHubOrg(orgInfo.Login, orgInfo.ID); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("failed to save org: %v", err))
 	}
 

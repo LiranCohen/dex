@@ -22,6 +22,7 @@ type OnboardingProgress struct {
 	CurrentStep              string
 	PasskeyCompletedAt       sql.NullTime
 	GitHubOrgName            sql.NullString
+	GitHubOrgID              sql.NullInt64
 	GitHubAppCompletedAt     sql.NullTime
 	GitHubInstallCompletedAt sql.NullTime
 	AnthropicCompletedAt     sql.NullTime
@@ -43,17 +44,25 @@ func (p *OnboardingProgress) GetGitHubOrgName() string {
 	return ""
 }
 
+// GetGitHubOrgID returns the org ID or 0
+func (p *OnboardingProgress) GetGitHubOrgID() int64 {
+	if p.GitHubOrgID.Valid {
+		return p.GitHubOrgID.Int64
+	}
+	return 0
+}
+
 // GetOnboardingProgress retrieves the current onboarding progress
 // Creates a new record if none exists
 func (db *DB) GetOnboardingProgress() (*OnboardingProgress, error) {
 	var progress OnboardingProgress
 	err := db.QueryRow(`
-		SELECT current_step, passkey_completed_at, github_org_name,
+		SELECT current_step, passkey_completed_at, github_org_name, github_org_id,
 		       github_app_completed_at, github_install_completed_at,
 		       anthropic_completed_at, completed_at, created_at, updated_at
 		FROM onboarding_progress WHERE id = 1
 	`).Scan(
-		&progress.CurrentStep, &progress.PasskeyCompletedAt, &progress.GitHubOrgName,
+		&progress.CurrentStep, &progress.PasskeyCompletedAt, &progress.GitHubOrgName, &progress.GitHubOrgID,
 		&progress.GitHubAppCompletedAt, &progress.GitHubInstallCompletedAt,
 		&progress.AnthropicCompletedAt, &progress.CompletedAt,
 		&progress.CreatedAt, &progress.UpdatedAt,
@@ -111,14 +120,14 @@ func (db *DB) CompletePasskeyStep() error {
 	return nil
 }
 
-// SetGitHubOrg sets the GitHub org name and advances to the next step
-func (db *DB) SetGitHubOrg(orgName string) error {
+// SetGitHubOrg sets the GitHub org name and ID and advances to the next step
+func (db *DB) SetGitHubOrg(orgName string, orgID int64) error {
 	now := time.Now()
 	_, err := db.Exec(`
 		UPDATE onboarding_progress
-		SET github_org_name = ?, current_step = ?, updated_at = ?
+		SET github_org_name = ?, github_org_id = ?, current_step = ?, updated_at = ?
 		WHERE id = 1
-	`, orgName, OnboardingStepGitHubApp, now)
+	`, orgName, orgID, OnboardingStepGitHubApp, now)
 	if err != nil {
 		return fmt.Errorf("failed to set GitHub org: %w", err)
 	}

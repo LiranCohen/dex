@@ -12,6 +12,7 @@ export interface SetupStatus {
   current_step: string;
   steps: Step[];
   github_org?: string;
+  github_org_id?: number;
   github_app_slug?: string;
   workspace_url?: string;
 

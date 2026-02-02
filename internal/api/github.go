@@ -175,8 +175,14 @@ func (s *Server) handleGitHubAppStatus(c echo.Context) error {
 	if config != nil {
 		status.AppConfigured = true
 		status.AppSlug = config.AppSlug
-		status.InstallURL = fmt.Sprintf("https://github.com/apps/%s/installations/new", config.AppSlug)
 		status.AuthMethod = "app"
+
+		// Build install URL, targeting the selected org if available
+		installURL := fmt.Sprintf("https://github.com/apps/%s/installations/new", config.AppSlug)
+		if progress, err := s.db.GetOnboardingProgress(); err == nil && progress.GetGitHubOrgID() != 0 {
+			installURL = fmt.Sprintf("%s?suggested_target_id=%d", installURL, progress.GetGitHubOrgID())
+		}
+		status.InstallURL = installURL
 
 		// Get installation count
 		installs, err := s.db.ListGitHubInstallations()

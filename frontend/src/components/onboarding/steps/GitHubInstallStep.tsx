@@ -4,6 +4,7 @@ import { StepContainer } from '../shared/StepContainer';
 
 interface GitHubInstallStepProps {
   orgName: string;
+  orgId?: number;
   appSlug?: string;
   onComplete: () => void;
   error: string | null;
@@ -17,7 +18,7 @@ interface GitHubAppStatus {
   auth_method: string;
 }
 
-export function GitHubInstallStep({ orgName, appSlug: initialSlug, onComplete, error }: GitHubInstallStepProps) {
+export function GitHubInstallStep({ orgName, orgId, appSlug: initialSlug, onComplete, error }: GitHubInstallStepProps) {
   const [isLoading] = useState(false);
   const [appStatus, setAppStatus] = useState<GitHubAppStatus | null>(null);
 
@@ -51,7 +52,12 @@ export function GitHubInstallStep({ orgName, appSlug: initialSlug, onComplete, e
     const slug = appStatus?.app_slug || initialSlug;
     if (slug) {
       // Redirect to GitHub to install the app
-      const installUrl = appStatus?.install_url || `https://github.com/apps/${slug}/installations/new`;
+      // Use the install_url from status if available (already includes org targeting)
+      // Otherwise, construct URL with org targeting if we have an orgId
+      let installUrl = appStatus?.install_url || `https://github.com/apps/${slug}/installations/new`;
+      if (!appStatus?.install_url && orgId) {
+        installUrl = `${installUrl}?suggested_target_id=${orgId}`;
+      }
       window.location.href = installUrl;
     }
   };

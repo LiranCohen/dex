@@ -88,6 +88,8 @@ func (db *DB) Migrate() error {
 		"ALTER TABLE quest_messages ADD COLUMN tool_calls TEXT",
 		// Activity hat tracking
 		"ALTER TABLE session_activity ADD COLUMN hat TEXT",
+		// GitHub org ID for targeting installation
+		"ALTER TABLE onboarding_progress ADD COLUMN github_org_id INTEGER",
 	}
 	for _, migration := range optionalMigrations {
 		db.Exec(migration) // Ignore errors - column may already exist
@@ -123,12 +125,6 @@ CREATE TABLE IF NOT EXISTS webauthn_credentials (
 
 CREATE INDEX IF NOT EXISTS idx_webauthn_credentials_user ON webauthn_credentials(user_id);
 CREATE INDEX IF NOT EXISTS idx_webauthn_credentials_cred_id ON webauthn_credentials(credential_id);
-`
-
-// Migration to add backup flags to existing tables
-const migrationWebAuthnFlags = `
-ALTER TABLE webauthn_credentials ADD COLUMN backup_eligible INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE webauthn_credentials ADD COLUMN backup_state INTEGER NOT NULL DEFAULT 0;
 `
 
 const migrationProjects = `
@@ -397,6 +393,7 @@ CREATE TABLE IF NOT EXISTS onboarding_progress (
 	current_step TEXT NOT NULL DEFAULT 'welcome',
 	passkey_completed_at DATETIME,
 	github_org_name TEXT,
+	github_org_id INTEGER,
 	github_app_completed_at DATETIME,
 	github_install_completed_at DATETIME,
 	anthropic_completed_at DATETIME,

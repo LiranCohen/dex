@@ -17,6 +17,7 @@ type SetupStatus struct {
 	CurrentStep   string `json:"current_step"`
 	Steps         []Step `json:"steps"`
 	GitHubOrg     string `json:"github_org,omitempty"`
+	GitHubOrgID   int64  `json:"github_org_id,omitempty"`
 	GitHubAppSlug string `json:"github_app_slug,omitempty"`
 	WorkspaceURL  string `json:"workspace_url,omitempty"`
 
