@@ -633,8 +633,7 @@ func (e *Executor) executeListRuntimes() Result {
 			}
 			return s
 		}},
-		// Containers
-		{name: "Docker", cmd: "docker", args: []string{"--version"}},
+		// Containers (podman with docker alias)
 		{name: "Podman", cmd: "podman", args: []string{"--version"}},
 	}
 

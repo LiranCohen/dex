@@ -336,6 +336,229 @@ install_tailscale() {
     success "Tailscale installed"
 }
 
+# ============================================================================
+# Development Runtime Installation
+# ============================================================================
+
+install_podman() {
+    if command -v podman &>/dev/null; then
+        success "Podman already installed: $(podman --version)"
+        # Ensure docker alias exists
+        if ! command -v docker &>/dev/null; then
+            ln -sf "$(which podman)" /usr/local/bin/docker
+            success "Created docker -> podman alias"
+        fi
+        return
+    fi
+    log "Installing Podman..."
+
+    case "$OS" in
+        darwin)
+            if command -v brew &>/dev/null; then
+                brew install podman >/dev/null 2>&1
+            else
+                error "Homebrew required to install Podman on macOS"
+            fi
+            ;;
+        linux)
+            if command -v apt-get &>/dev/null; then
+                apt-get update -qq && apt-get install -y -qq podman >/dev/null
+            elif command -v dnf &>/dev/null; then
+                dnf install -y -q podman >/dev/null
+            elif command -v yum &>/dev/null; then
+                yum install -y -q podman >/dev/null
+            elif command -v pacman &>/dev/null; then
+                pacman -Sy --noconfirm podman >/dev/null
+            else
+                warn "Could not install Podman - unknown package manager"
+                return
+            fi
+            ;;
+    esac
+
+    # Create docker -> podman alias
+    ln -sf "$(which podman)" /usr/local/bin/docker
+
+    success "Podman installed: $(podman --version)"
+    success "Created docker -> podman alias"
+}
+
+install_nodejs() {
+    if command -v node &>/dev/null; then
+        success "Node.js already installed: $(node --version)"
+        return
+    fi
+    log "Installing Node.js..."
+
+    case "$OS" in
+        darwin)
+            if command -v brew &>/dev/null; then
+                brew install node >/dev/null 2>&1
+            else
+                # Use official installer
+                curl -fsSL https://nodejs.org/dist/v22.0.0/node-v22.0.0-darwin-${ARCH}.tar.gz -o /tmp/node.tar.gz
+                tar -xzf /tmp/node.tar.gz -C /usr/local --strip-components=1
+                rm -f /tmp/node.tar.gz
+            fi
+            ;;
+        linux)
+            # Use NodeSource for latest LTS
+            if command -v apt-get &>/dev/null; then
+                curl -fsSL https://deb.nodesource.com/setup_22.x | bash - >/dev/null 2>&1
+                apt-get install -y -qq nodejs >/dev/null
+            elif command -v dnf &>/dev/null; then
+                dnf install -y -q nodejs npm >/dev/null
+            elif command -v yum &>/dev/null; then
+                curl -fsSL https://rpm.nodesource.com/setup_22.x | bash - >/dev/null 2>&1
+                yum install -y -q nodejs >/dev/null
+            elif command -v pacman &>/dev/null; then
+                pacman -Sy --noconfirm nodejs npm >/dev/null
+            else
+                warn "Could not install Node.js - unknown package manager"
+                return
+            fi
+            ;;
+    esac
+
+    success "Node.js installed: $(node --version)"
+}
+
+install_python() {
+    if command -v python3 &>/dev/null; then
+        success "Python already installed: $(python3 --version)"
+        return
+    fi
+    log "Installing Python..."
+
+    case "$OS" in
+        darwin)
+            if command -v brew &>/dev/null; then
+                brew install python@3.12 >/dev/null 2>&1
+            fi
+            ;;
+        linux)
+            if command -v apt-get &>/dev/null; then
+                apt-get update -qq && apt-get install -y -qq python3 python3-pip python3-venv >/dev/null
+            elif command -v dnf &>/dev/null; then
+                dnf install -y -q python3 python3-pip >/dev/null
+            elif command -v yum &>/dev/null; then
+                yum install -y -q python3 python3-pip >/dev/null
+            elif command -v pacman &>/dev/null; then
+                pacman -Sy --noconfirm python python-pip >/dev/null
+            fi
+            ;;
+    esac
+
+    if command -v python3 &>/dev/null; then
+        success "Python installed: $(python3 --version)"
+    else
+        warn "Could not install Python"
+    fi
+}
+
+install_rust() {
+    if command -v rustc &>/dev/null; then
+        success "Rust already installed: $(rustc --version)"
+        return
+    fi
+    log "Installing Rust..."
+
+    # Use rustup for all platforms
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y >/dev/null 2>&1
+    export PATH="$HOME/.cargo/bin:$PATH"
+
+    if command -v rustc &>/dev/null; then
+        success "Rust installed: $(rustc --version)"
+    else
+        warn "Could not install Rust"
+    fi
+}
+
+install_zig() {
+    if command -v zig &>/dev/null; then
+        success "Zig already installed: $(zig version)"
+        return
+    fi
+    log "Installing Zig..."
+
+    local zig_version="0.13.0"
+
+    case "$OS" in
+        darwin)
+            if command -v brew &>/dev/null; then
+                brew install zig >/dev/null 2>&1
+            else
+                local zig_arch="$ARCH"
+                [ "$zig_arch" = "amd64" ] && zig_arch="x86_64"
+                curl -fsSL "https://ziglang.org/download/${zig_version}/zig-macos-${zig_arch}-${zig_version}.tar.xz" -o /tmp/zig.tar.xz
+                tar -xf /tmp/zig.tar.xz -C /usr/local
+                ln -sf /usr/local/zig-macos-${zig_arch}-${zig_version}/zig /usr/local/bin/zig
+                rm -f /tmp/zig.tar.xz
+            fi
+            ;;
+        linux)
+            local zig_arch="$ARCH"
+            [ "$zig_arch" = "amd64" ] && zig_arch="x86_64"
+            [ "$zig_arch" = "arm64" ] && zig_arch="aarch64"
+            curl -fsSL "https://ziglang.org/download/${zig_version}/zig-linux-${zig_arch}-${zig_version}.tar.xz" -o /tmp/zig.tar.xz
+            tar -xf /tmp/zig.tar.xz -C /usr/local
+            ln -sf /usr/local/zig-linux-${zig_arch}-${zig_version}/zig /usr/local/bin/zig
+            rm -f /tmp/zig.tar.xz
+            ;;
+    esac
+
+    if command -v zig &>/dev/null; then
+        success "Zig installed: $(zig version)"
+    else
+        warn "Could not install Zig"
+    fi
+}
+
+install_build_essentials() {
+    log "Installing build essentials (gcc, make, etc.)..."
+
+    case "$OS" in
+        darwin)
+            # Xcode command line tools provide clang, make, etc.
+            if ! xcode-select -p &>/dev/null; then
+                xcode-select --install 2>/dev/null || true
+                # Wait for installation
+                until xcode-select -p &>/dev/null; do
+                    sleep 5
+                done
+            fi
+            success "Xcode command line tools available"
+            ;;
+        linux)
+            if command -v apt-get &>/dev/null; then
+                apt-get update -qq && apt-get install -y -qq build-essential >/dev/null
+            elif command -v dnf &>/dev/null; then
+                dnf groupinstall -y -q "Development Tools" >/dev/null 2>&1 || dnf install -y -q gcc gcc-c++ make >/dev/null
+            elif command -v yum &>/dev/null; then
+                yum groupinstall -y -q "Development Tools" >/dev/null 2>&1 || yum install -y -q gcc gcc-c++ make >/dev/null
+            elif command -v pacman &>/dev/null; then
+                pacman -Sy --noconfirm base-devel >/dev/null
+            fi
+            success "Build essentials installed"
+            ;;
+    esac
+}
+
+install_dev_runtimes() {
+    log "Installing development runtimes..."
+    echo ""
+
+    install_build_essentials
+    install_nodejs
+    install_python
+    install_rust
+    install_zig
+    install_podman
+
+    echo ""
+    success "Development runtimes installed"
+}
+
 build_dex() {
     log "Building dex from source..."
 
@@ -743,6 +966,7 @@ main() {
     install_go
     install_cloudflared
     install_tailscale
+    install_dev_runtimes
 
     if [ "$FRESH_INSTALL" = false ] && is_configured; then
         echo -e "${CYAN}Existing installation detected. Running upgrade...${NC}"
