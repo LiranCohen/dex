@@ -593,8 +593,9 @@ func (m *Manager) runSession(ctx context.Context, session *ActiveSession) {
 	delete(m.byTask, taskID)
 	m.mu.Unlock()
 
-	// If task completed successfully, update task status and create PR
-	if finalState == StateCompleted {
+	// Update task status based on final state
+	switch finalState {
+	case StateCompleted:
 		_ = m.db.UpdateTaskStatus(taskID, db.TaskStatusCompleted)
 
 		// Notify task completed (for GitHub sync)
@@ -607,7 +608,11 @@ func (m *Manager) runSession(ctx context.Context, session *ActiveSession) {
 
 		// Push branch and create PR (non-blocking, log errors)
 		go m.createPRForTask(taskID, worktreePath)
-	} else if finalState == StateFailed {
+
+	case StateFailed:
+		// Mark task as paused so it can be resumed after fixing the issue
+		_ = m.db.UpdateTaskStatus(taskID, db.TaskStatusPaused)
+
 		// Notify task failed (for GitHub sync)
 		m.mu.RLock()
 		onTaskFailed := m.onTaskFailed
@@ -619,6 +624,11 @@ func (m *Manager) runSession(ctx context.Context, session *ActiveSession) {
 			}
 			go onTaskFailed(taskID, reason)
 		}
+
+	case StatePaused, StateStopped:
+		// Mark task as paused so it can be resumed
+		_ = m.db.UpdateTaskStatus(taskID, db.TaskStatusPaused)
+		m.notifyTaskStatus(taskID, "paused")
 	}
 }
 
