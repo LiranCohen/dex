@@ -431,11 +431,28 @@ func (g *GitHubClient) EnsureRepo(ctx context.Context, opts CreateRepoOptions) (
 	return g.CreateRepo(ctx, opts)
 }
 
-// GetAuthenticatedUser returns the authenticated user's information
+// GetAuthenticatedUser returns the authenticated user's information.
+// Note: This doesn't work for GitHub App installation tokens - use GetOwner() instead.
 func (g *GitHubClient) GetAuthenticatedUser(ctx context.Context) (*github.User, error) {
 	user, _, err := g.client.Users.Get(ctx, "")
 	if err != nil {
 		return nil, fmt.Errorf("failed to get authenticated user: %w", err)
 	}
 	return user, nil
+}
+
+// GetOwner returns the owner/org to use for operations.
+// For GitHub App clients, this returns the defaultOrg (installation login) without an API call.
+// For PAT clients without a defaultOrg, this falls back to GetAuthenticatedUser.
+func (g *GitHubClient) GetOwner(ctx context.Context) (string, error) {
+	if g.defaultOrg != "" {
+		return g.defaultOrg, nil
+	}
+
+	// Fall back to authenticated user for PAT tokens
+	user, err := g.GetAuthenticatedUser(ctx)
+	if err != nil {
+		return "", err
+	}
+	return user.GetLogin(), nil
 }

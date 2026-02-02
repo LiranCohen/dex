@@ -33,14 +33,14 @@ func NewService(github *toolbelt.GitHubClient, localPath string) *Service {
 func (s *Service) EnsureRemoteExists(ctx context.Context) error {
 	fmt.Printf("workspace.Service: checking for GitHub workspace\n")
 
-	// Get the authenticated user
-	user, err := s.github.GetAuthenticatedUser(ctx)
+	// Get the owner (works for both PAT and GitHub App tokens)
+	owner, err := s.github.GetOwner(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to get authenticated user: %w", err)
+		return fmt.Errorf("failed to get owner: %w", err)
 	}
-	s.repoOwner = user.GetLogin()
+	s.repoOwner = owner
 
-	fmt.Printf("workspace.Service: authenticated as %s\n", s.repoOwner)
+	fmt.Printf("workspace.Service: using owner %s\n", s.repoOwner)
 
 	// Check if the dex-workspace repo exists, create if not
 	repo, err := s.github.EnsureRepo(ctx, toolbelt.CreateRepoOptions{
