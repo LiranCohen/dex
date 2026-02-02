@@ -66,6 +66,14 @@ func (s *Server) initGitHubApp() error {
 		fmt.Println("initGitHubApp: Session manager GitHub client fetcher configured")
 	}
 
+	// Set up quest handler fetcher if we have a quest handler
+	if s.questHandler != nil {
+		s.questHandler.SetGitHubClientFetcher(func(ctx context.Context, login string) (*toolbelt.GitHubClient, error) {
+			return s.GetToolbeltGitHubClient(ctx, login)
+		})
+		fmt.Println("initGitHubApp: Quest handler GitHub client fetcher configured")
+	}
+
 	return nil
 }
 

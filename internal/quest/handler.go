@@ -58,11 +58,15 @@ type PreflightCheck struct {
 	Warnings []string `json:"warnings,omitempty"`
 }
 
+// GitHubClientFetcher is a function that returns a GitHub client for a given login/org
+type GitHubClientFetcher func(ctx context.Context, login string) (*toolbelt.GitHubClient, error)
+
 // Handler manages Quest conversations with Dex
 type Handler struct {
 	db             *db.DB
 	client         *toolbelt.AnthropicClient
-	github         *toolbelt.GitHubClient
+	github         *toolbelt.GitHubClient  // Static client (PAT-based)
+	githubFetcher  GitHubClientFetcher     // Dynamic client fetcher (GitHub App)
 	hub            *websocket.Hub
 	promptLoader   *session.PromptLoader
 	githubUsername string        // cached GitHub username
@@ -94,9 +98,14 @@ func NewHandler(database *db.DB, client *toolbelt.AnthropicClient, hub *websocke
 	}
 }
 
-// SetGitHubClient sets the GitHub client for the handler
+// SetGitHubClient sets the static GitHub client for the handler (PAT-based)
 func (h *Handler) SetGitHubClient(client *toolbelt.GitHubClient) {
 	h.github = client
+}
+
+// SetGitHubClientFetcher sets the dynamic GitHub client fetcher (GitHub App)
+func (h *Handler) SetGitHubClientFetcher(fetcher GitHubClientFetcher) {
+	h.githubFetcher = fetcher
 }
 
 // SetPromptLoader sets the prompt loader for the handler
@@ -105,7 +114,7 @@ func (h *Handler) SetPromptLoader(loader *session.PromptLoader) {
 }
 
 // getGitHubUsername returns the cached GitHub username/org, fetching it if needed
-// Tries: 1) cached value, 2) onboarding progress (org name), 3) GitHub client (PAT auth)
+// Tries: 1) cached value, 2) onboarding progress (org name), 3) GitHub client (static or fetched)
 func (h *Handler) getGitHubUsername(ctx context.Context) string {
 	if h.githubUsername != "" {
 		return h.githubUsername
@@ -121,9 +130,18 @@ func (h *Handler) getGitHubUsername(ctx context.Context) string {
 		}
 	}
 
-	// Fall back to GitHub client (PAT auth)
-	if h.github != nil {
-		username, err := h.github.GetUsername(ctx)
+	// Get GitHub client - try static client first, then fetcher
+	githubClient := h.github
+	if githubClient == nil && h.githubFetcher != nil {
+		fetchedClient, err := h.githubFetcher(ctx, "")
+		if err == nil {
+			githubClient = fetchedClient
+		}
+	}
+
+	// Try to get username from GitHub client
+	if githubClient != nil {
+		username, err := githubClient.GetUsername(ctx)
 		if err == nil && username != "" {
 			h.githubUsername = username
 			return username
