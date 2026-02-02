@@ -279,6 +279,11 @@ func (s *Server) handleGitHubAppCallback(c echo.Context) error {
 	// Return success and redirect URL to install the app
 	installURL := fmt.Sprintf("https://github.com/apps/%s/installations/new", appConfig.AppSlug)
 
+	// Add org targeting if we have an org ID stored
+	if progress, err := s.db.GetOnboardingProgress(); err == nil && progress.GetGitHubOrgID() != 0 {
+		installURL = fmt.Sprintf("%s?suggested_target_id=%d", installURL, progress.GetGitHubOrgID())
+	}
+
 	// Redirect to frontend with success parameter (URL-encode the install_url)
 	return c.Redirect(http.StatusFound, "/?github_app=created&install_url="+url.QueryEscape(installURL))
 }
