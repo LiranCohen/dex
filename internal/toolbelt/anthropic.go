@@ -27,7 +27,7 @@ func NewAnthropicClient(config *AnthropicConfig) *AnthropicClient {
 
 	return &AnthropicClient{
 		httpClient: &http.Client{
-			Timeout: 120 * time.Second, // Longer timeout for LLM responses
+			Timeout: 5 * time.Minute, // Long timeout for large context LLM responses (200K tokens)
 		},
 		apiKey: config.APIKey,
 	}
