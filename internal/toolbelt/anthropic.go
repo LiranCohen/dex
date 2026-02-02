@@ -197,8 +197,18 @@ func (r *AnthropicChatResponse) Text() string {
 }
 
 // HasToolUse returns true if the response contains tool_use blocks
+// Checks both stop_reason and actual content blocks (handles max_tokens truncation)
 func (r *AnthropicChatResponse) HasToolUse() bool {
-	return r.StopReason == "tool_use"
+	if r.StopReason == "tool_use" {
+		return true
+	}
+	// Also check content blocks in case response was truncated (max_tokens)
+	for _, block := range r.Content {
+		if block.Type == "tool_use" {
+			return true
+		}
+	}
+	return false
 }
 
 // ToolUseBlocks returns all tool_use content blocks from the response

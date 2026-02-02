@@ -285,6 +285,14 @@ func (r *RalphLoop) Run(ctx context.Context) error {
 		responseText := response.Text()
 
 		// 7. Add assistant response to conversation
+		// Guard against empty content which would cause API error on next call
+		if responseText == "" {
+			if response.StopReason == "max_tokens" {
+				responseText = "[Response truncated due to token limit. Continuing...]"
+			} else {
+				responseText = "[No response content]"
+			}
+		}
 		r.messages = append(r.messages, toolbelt.AnthropicMessage{
 			Role:    "assistant",
 			Content: responseText,
