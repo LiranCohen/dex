@@ -27,6 +27,8 @@ type ToolExecutor struct {
 	githubClient *toolbelt.GitHubClient
 	owner        string
 	repo         string
+	// Callback when a GitHub repo is created - allows updating project DB record
+	onRepoCreated func(owner, repo string)
 }
 
 // NewToolExecutor creates a new ToolExecutor
@@ -38,6 +40,11 @@ func NewToolExecutor(worktreePath string, gitOps *git.Operations, githubClient *
 		owner:        owner,
 		repo:         repo,
 	}
+}
+
+// SetOnRepoCreated sets the callback for when a GitHub repo is created
+func (e *ToolExecutor) SetOnRepoCreated(callback func(owner, repo string)) {
+	e.onRepoCreated = callback
 }
 
 // Execute runs a tool with the given input and returns the result
@@ -312,6 +319,15 @@ func (e *ToolExecutor) executeGitHubCreateRepo(ctx context.Context, input map[st
 	if cloneURL == "" {
 		cloneURL = repo.GetHTMLURL() + ".git"
 	}
+
+	// Notify that a repo was created (allows updating project DB record)
+	if e.onRepoCreated != nil {
+		e.onRepoCreated(owner, name)
+	}
+
+	// Update executor's owner/repo so subsequent operations use the new repo
+	e.owner = owner
+	e.repo = name
 
 	return ToolResult{
 		Output:  fmt.Sprintf("Created repository: %s\nClone URL: %s\nUse this URL with git_remote_add to connect your local repo.", repo.GetHTMLURL(), cloneURL),

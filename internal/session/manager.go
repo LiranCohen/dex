@@ -528,6 +528,16 @@ func (m *Manager) runSession(ctx context.Context, session *ActiveSession) {
 
 				loop.InitExecutor(session.WorktreePath, m.gitOps, githubClient, owner, repo)
 				fmt.Printf("runSession: initialized tool executor (owner=%s, repo=%s, hasGitHub=%v)\n", owner, repo, githubClient != nil)
+
+				// Set callback to update project when a repo is created
+				projectID := project.ID
+				loop.SetOnRepoCreated(func(newOwner, newRepo string) {
+					if err := m.db.UpdateProjectGitHub(projectID, newOwner, newRepo); err != nil {
+						fmt.Printf("runSession: warning - failed to update project GitHub info: %v\n", err)
+					} else {
+						fmt.Printf("runSession: updated project %s with GitHub %s/%s\n", projectID, newOwner, newRepo)
+					}
+				})
 			}
 		}
 

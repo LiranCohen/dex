@@ -79,6 +79,14 @@ func (r *RalphLoop) InitExecutor(worktreePath string, gitOps *git.Operations, gi
 	r.executor = NewToolExecutor(worktreePath, gitOps, githubClient, owner, repo)
 }
 
+// SetOnRepoCreated sets the callback for when a GitHub repo is created
+// This allows updating the project's GitHub info in the database
+func (r *RalphLoop) SetOnRepoCreated(callback func(owner, repo string)) {
+	if r.executor != nil {
+		r.executor.SetOnRepoCreated(callback)
+	}
+}
+
 // SetModel sets the AI model to use for this loop and captures the rates
 // model should be "sonnet" or "opus"
 func (r *RalphLoop) SetModel(model string) {
