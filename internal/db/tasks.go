@@ -413,3 +413,107 @@ func (db *DB) IsTaskReady(taskID string) (bool, error) {
 
 	return count == 0, nil
 }
+
+// CreateTaskForQuestWithStatus creates a new task with a specific initial status and auto_start preference
+// This is used for batch objective creation where some tasks may start as blocked
+func (db *DB) CreateTaskForQuestWithStatus(questID, projectID, title, description, hat, taskType, model string, priority int, status string, autoStart bool) (*Task, error) {
+	// Default to sonnet if not specified
+	if model == "" {
+		model = TaskModelSonnet
+	}
+
+	task := &Task{
+		ID:            NewPrefixedID("task"),
+		ProjectID:     projectID,
+		QuestID:       sql.NullString{String: questID, Valid: true},
+		Title:         title,
+		Description:   sql.NullString{String: description, Valid: description != ""},
+		Hat:           sql.NullString{String: hat, Valid: hat != ""},
+		Model:         sql.NullString{String: model, Valid: true},
+		Type:          taskType,
+		Priority:      priority,
+		AutonomyLevel: 1,
+		Status:        status,
+		BaseBranch:    "main",
+		CreatedAt:     time.Now(),
+	}
+
+	_, err := db.Exec(
+		`INSERT INTO tasks (id, project_id, quest_id, title, description, hat, model, type, priority, autonomy_level, status, base_branch, auto_start, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		task.ID, task.ProjectID, task.QuestID, task.Title, task.Description, task.Hat, task.Model,
+		task.Type, task.Priority, task.AutonomyLevel, task.Status, task.BaseBranch, autoStart, task.CreatedAt,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create task for quest: %w", err)
+	}
+
+	return task, nil
+}
+
+// GetTasksUnblockedBy returns tasks that became ready because the given task completed
+// These are tasks that:
+// 1. Were blocked by the completed task
+// 2. Have status 'blocked'
+// 3. Now have all their blockers completed
+func (db *DB) GetTasksUnblockedBy(completedTaskID string) ([]*Task, error) {
+	// Find tasks that were blocked by the completed task and are now ready
+	query := `
+		SELECT DISTINCT t.id, t.project_id, t.quest_id, t.github_issue_number, t.title, t.description, t.parent_id,
+		       t.type, t.hat, t.priority, t.autonomy_level, t.status, t.base_branch,
+		       t.worktree_path, t.branch_name, t.content_path, t.pr_number,
+		       t.token_budget, t.token_used, t.time_budget_min, t.time_used_min,
+		       t.dollar_budget, t.dollar_used, t.created_at, t.started_at, t.completed_at
+		FROM tasks t
+		JOIN task_dependencies td ON t.id = td.blocked_id
+		WHERE td.blocker_id = ?
+		  AND t.status = ?
+		  AND NOT EXISTS (
+		      SELECT 1 FROM task_dependencies td2
+		      JOIN tasks blocker ON td2.blocker_id = blocker.id
+		      WHERE td2.blocked_id = t.id
+		        AND blocker.status != ?
+		  )
+	`
+
+	rows, err := db.Query(query, completedTaskID, TaskStatusBlocked, TaskStatusCompleted)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get unblocked tasks: %w", err)
+	}
+	defer rows.Close()
+
+	var tasks []*Task
+	for rows.Next() {
+		task := &Task{}
+		err := rows.Scan(
+			&task.ID, &task.ProjectID, &task.QuestID, &task.GitHubIssueNumber, &task.Title, &task.Description, &task.ParentID,
+			&task.Type, &task.Hat, &task.Priority, &task.AutonomyLevel, &task.Status, &task.BaseBranch,
+			&task.WorktreePath, &task.BranchName, &task.ContentPath, &task.PRNumber,
+			&task.TokenBudget, &task.TokenUsed, &task.TimeBudgetMin, &task.TimeUsedMin,
+			&task.DollarBudget, &task.DollarUsed, &task.CreatedAt, &task.StartedAt, &task.CompletedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan unblocked task: %w", err)
+		}
+		tasks = append(tasks, task)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating unblocked tasks: %w", err)
+	}
+
+	return tasks, nil
+}
+
+// GetTaskAutoStart returns whether a task should auto-start when unblocked
+func (db *DB) GetTaskAutoStart(taskID string) (bool, error) {
+	var autoStart bool
+	err := db.QueryRow(`SELECT COALESCE(auto_start, FALSE) FROM tasks WHERE id = ?`, taskID).Scan(&autoStart)
+	if err == sql.ErrNoRows {
+		return false, fmt.Errorf("task not found: %s", taskID)
+	}
+	if err != nil {
+		return false, fmt.Errorf("failed to get task auto_start: %w", err)
+	}
+	return autoStart, nil
+}

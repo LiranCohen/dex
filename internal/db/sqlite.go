@@ -102,6 +102,8 @@ func (db *DB) Migrate() error {
 		// Quality gate and termination tracking
 		"ALTER TABLE sessions ADD COLUMN termination_reason TEXT",
 		"ALTER TABLE sessions ADD COLUMN quality_gate_attempts INTEGER DEFAULT 0",
+		// Task auto-start preference for dependency unblocking
+		"ALTER TABLE tasks ADD COLUMN auto_start BOOLEAN DEFAULT FALSE",
 	}
 	for _, migration := range optionalMigrations {
 		db.Exec(migration) // Ignore errors - column may already exist

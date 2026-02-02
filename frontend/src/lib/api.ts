@@ -205,10 +205,50 @@ export async function createObjective(
     optional: draft.checklist.optional || [],
     selected_optional: selectedOptional,
     auto_start: draft.auto_start,
+    blocked_by: draft.blocked_by || [],
   };
   console.log('createObjective API call:', { questId, payload });
   const result = await api.post<CreateObjectiveResult>(`/quests/${questId}/objectives`, payload);
   console.log('createObjective API response:', result);
+  return result;
+}
+
+export interface BatchCreateObjectiveResult {
+  message: string;
+  tasks: Array<{
+    draft_id: string;
+    task: import('./types').Task;
+    auto_started?: boolean;
+    worktree_path?: string;
+    session_id?: string;
+  }>;
+  draft_mapping: Record<string, string>;
+  auto_started?: string[];
+  auto_start_errors?: string[];
+}
+
+export async function createObjectivesBatch(
+  questId: string,
+  drafts: Array<{ draft: import('./types').ObjectiveDraft; selectedOptional: number[] }>
+): Promise<BatchCreateObjectiveResult> {
+  const payload = {
+    drafts: drafts.map(({ draft, selectedOptional }) => ({
+      draft_id: draft.draft_id,
+      title: draft.title,
+      description: draft.description,
+      hat: draft.hat,
+      must_have: draft.checklist.must_have,
+      optional: draft.checklist.optional || [],
+      selected_optional: selectedOptional,
+      auto_start: draft.auto_start,
+      blocked_by: draft.blocked_by || [],
+      complexity: draft.complexity,
+      estimated_iterations: draft.estimated_iterations,
+    })),
+  };
+  console.log('createObjectivesBatch API call:', { questId, payload });
+  const result = await api.post<BatchCreateObjectiveResult>(`/quests/${questId}/objectives/batch`, payload);
+  console.log('createObjectivesBatch API response:', result);
   return result;
 }
 

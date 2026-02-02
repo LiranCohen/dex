@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Routes, Route, Navigate, useNavigate, useParams, Link } from 'react-router-dom';
 import { useAuthStore } from './stores/auth';
-import { api, fetchApprovals, approveApproval, rejectApproval, fetchQuests, createQuest, fetchQuest, fetchQuestTasks, sendQuestMessage, completeQuest, reopenQuest, deleteQuest, createObjective, updateQuestModel, fetchPreflightCheck } from './lib/api';
+import { api, fetchApprovals, approveApproval, rejectApproval, fetchQuests, createQuest, fetchQuest, fetchQuestTasks, sendQuestMessage, completeQuest, reopenQuest, deleteQuest, createObjective, createObjectivesBatch, updateQuestModel, fetchPreflightCheck } from './lib/api';
 import { useWebSocket } from './hooks/useWebSocket';
 import { OnboardingFlow } from './components/onboarding';
 import { ActivityFeed } from './components/ActivityFeed';
@@ -1583,6 +1583,7 @@ function QuestDetailPage() {
   const [drafts, setDrafts] = useState<ObjectiveDraft[]>([]);
   const [questions, setQuestions] = useState<QuestQuestion[]>([]);
   const [acceptingDraft, setAcceptingDraft] = useState<string | null>(null);
+  const [acceptingAll, setAcceptingAll] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isSending, setIsSending] = useState(false);
@@ -1899,6 +1900,49 @@ function QuestDetailPage() {
     }
   };
 
+  // Accept all drafts in batch (handles dependencies correctly)
+  const handleAcceptAllDrafts = async () => {
+    if (!id || drafts.length === 0) return;
+
+    setAcceptingAll(true);
+    setError(null);
+
+    try {
+      // For batch acceptance, use default optional selections (none selected)
+      const batchDrafts = drafts.map((draft) => ({
+        draft,
+        selectedOptional: [] as number[],
+      }));
+
+      console.log('Creating objectives in batch:', batchDrafts);
+      const result = await createObjectivesBatch(id, batchDrafts);
+      console.log('Batch create result:', result);
+
+      // Check for auto-start errors
+      if (result.auto_start_errors && result.auto_start_errors.length > 0) {
+        console.error('Some auto-starts failed:', result.auto_start_errors);
+        setError(`Created ${result.tasks.length} objectives but some failed to auto-start: ${result.auto_start_errors.join(', ')}`);
+      }
+
+      // Mark all drafts as handled
+      drafts.forEach((draft) => handledDraftIds.current.add(draft.draft_id));
+      // Clear all drafts
+      setDrafts([]);
+      // Clear questions
+      setQuestions([]);
+      // Reload quest to get updated summary
+      loadQuest();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to create objectives';
+      setError(message);
+    } finally {
+      setAcceptingAll(false);
+    }
+  };
+
+  // Check if any drafts have dependencies (for showing Accept All button)
+  const hasDraftDependencies = drafts.some((d) => d.blocked_by && d.blocked_by.length > 0);
+
   // Format timestamp
   if (loading) {
     return (
@@ -2058,9 +2102,22 @@ function QuestDetailPage() {
             {/* Draft Objectives */}
             {drafts.length > 0 && (
               <div className="mb-6">
-                <h2 className="text-sm font-semibold text-gray-400 mb-3">
-                  Proposed Objectives ({drafts.length})
-                </h2>
+                <div className="flex items-center justify-between mb-3">
+                  <h2 className="text-sm font-semibold text-gray-400">
+                    Proposed Objectives ({drafts.length})
+                  </h2>
+                  {drafts.length > 1 && (
+                    <button
+                      onClick={handleAcceptAllDrafts}
+                      disabled={acceptingAll || acceptingDraft !== null}
+                      className="text-xs px-2 py-1 bg-purple-600 hover:bg-purple-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded transition-colors"
+                      title={hasDraftDependencies ? 'Accept all with dependencies wired correctly' : 'Accept all objectives'}
+                    >
+                      {acceptingAll ? 'Accepting...' : 'Accept All'}
+                      {hasDraftDependencies && ' (with deps)'}
+                    </button>
+                  )}
+                </div>
                 <div className="space-y-3">
                   {drafts.map((draft) => (
                     <ObjectiveDraftCard
@@ -2068,7 +2125,7 @@ function QuestDetailPage() {
                       draft={draft}
                       onAccept={handleAcceptDraft}
                       onReject={handleRejectDraft}
-                      isAccepting={acceptingDraft === draft.draft_id}
+                      isAccepting={acceptingDraft === draft.draft_id || acceptingAll}
                     />
                   ))}
                 </div>

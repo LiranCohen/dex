@@ -339,6 +339,7 @@ func (s *Server) registerRoutes() {
 	protected.PUT("/quests/:id/model", s.handleUpdateQuestModel)
 	protected.GET("/quests/:id/tasks", s.handleGetQuestTasks)
 	protected.POST("/quests/:id/objectives", s.handleCreateObjective)
+	protected.POST("/quests/:id/objectives/batch", s.handleCreateObjectivesBatch)
 	protected.GET("/quests/:id/preflight", s.handleGetPreflightCheck)
 
 	// Quest template endpoints
@@ -2953,6 +2954,7 @@ func (s *Server) handleCreateObjective(c echo.Context) error {
 		Optional         []string `json:"optional"`
 		SelectedOptional []int    `json:"selected_optional"`
 		AutoStart        bool     `json:"auto_start"`
+		BlockedBy        []string `json:"blocked_by"` // task IDs this objective is blocked by
 	}
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
@@ -2981,6 +2983,27 @@ func (s *Server) handleCreateObjective(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 
+	// Wire up dependencies if blocked_by is specified
+	if len(req.BlockedBy) > 0 {
+		for _, blockerID := range req.BlockedBy {
+			if err := s.db.AddTaskDependency(blockerID, createdTask.ID); err != nil {
+				// Log but don't fail - the task was created
+				fmt.Printf("warning: failed to add dependency %s -> %s: %v\n", blockerID, createdTask.ID, err)
+			}
+		}
+
+		// Check if task is now blocked
+		isReady, err := s.db.IsTaskReady(createdTask.ID)
+		if err == nil && !isReady {
+			// Task has incomplete blockers, set to blocked status
+			if err := s.db.UpdateTaskStatus(createdTask.ID, db.TaskStatusBlocked); err != nil {
+				fmt.Printf("warning: failed to set task %s to blocked: %v\n", createdTask.ID, err)
+			} else {
+				createdTask.Status = db.TaskStatusBlocked
+			}
+		}
+	}
+
 	// Sync objective to GitHub Issue (async)
 	go s.syncObjectiveToGitHubIssue(createdTask.ID)
 
@@ -3004,8 +3027,8 @@ func (s *Server) handleCreateObjective(c echo.Context) error {
 		"task":    toTaskResponse(createdTask),
 	}
 
-	// Auto-start the task if requested
-	if req.AutoStart {
+	// Auto-start the task if requested and not blocked
+	if req.AutoStart && createdTask.Status != db.TaskStatusBlocked {
 		startResult, err := s.startTaskInternal(context.Background(), createdTask.ID, "")
 		if err != nil {
 			// Task was created but couldn't be started - return partial success
@@ -3017,6 +3040,175 @@ func (s *Server) handleCreateObjective(c echo.Context) error {
 			response["session_id"] = startResult.SessionID
 			response["auto_started"] = true
 		}
+	}
+
+	return c.JSON(http.StatusCreated, response)
+}
+
+// handleCreateObjectivesBatch creates multiple tasks from accepted objective drafts atomically
+// This handles dependency mapping between draft IDs and created task IDs
+func (s *Server) handleCreateObjectivesBatch(c echo.Context) error {
+	questID := c.Param("id")
+
+	questObj, err := s.db.GetQuestByID(questID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	if questObj == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "quest not found")
+	}
+
+	if s.questHandler == nil {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "quest handler not configured")
+	}
+
+	var req struct {
+		Drafts []struct {
+			DraftID             string   `json:"draft_id"`
+			Title               string   `json:"title"`
+			Description         string   `json:"description"`
+			Hat                 string   `json:"hat"`
+			MustHave            []string `json:"must_have"`
+			Optional            []string `json:"optional"`
+			SelectedOptional    []int    `json:"selected_optional"`
+			AutoStart           bool     `json:"auto_start"`
+			BlockedBy           []string `json:"blocked_by"` // draft IDs this is blocked by
+			Complexity          string   `json:"complexity,omitempty"`
+			EstimatedIterations int      `json:"estimated_iterations,omitempty"`
+		} `json:"drafts"`
+	}
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+
+	if len(req.Drafts) == 0 {
+		return echo.NewHTTPError(http.StatusBadRequest, "at least one draft is required")
+	}
+
+	// Phase 1: Create all tasks and build draft_id -> task_id mapping
+	draftToTaskID := make(map[string]string)
+	var createdTasks []*db.Task
+	var taskResults []map[string]any
+
+	for _, draft := range req.Drafts {
+		if draft.Title == "" {
+			return echo.NewHTTPError(http.StatusBadRequest, "title is required for all drafts")
+		}
+
+		// Build the draft object
+		questDraft := quest.ObjectiveDraft{
+			DraftID:             draft.DraftID,
+			Title:               draft.Title,
+			Description:         draft.Description,
+			Hat:                 draft.Hat,
+			Checklist:           quest.Checklist{MustHave: draft.MustHave, Optional: draft.Optional},
+			AutoStart:           draft.AutoStart,
+			Complexity:          draft.Complexity,
+			EstimatedIterations: draft.EstimatedIterations,
+		}
+
+		// Create the task (initially as ready - we'll update to blocked later if needed)
+		task, err := s.questHandler.CreateObjectiveFromDraft(c.Request().Context(), questID, questDraft, draft.SelectedOptional)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("failed to create objective '%s': %v", draft.Title, err))
+		}
+
+		draftToTaskID[draft.DraftID] = task.ID
+		createdTasks = append(createdTasks, task)
+		taskResults = append(taskResults, map[string]any{
+			"draft_id": draft.DraftID,
+			"task":     toTaskResponse(task),
+		})
+	}
+
+	// Phase 2: Wire up dependencies using the draft_id -> task_id mapping
+	for i, draft := range req.Drafts {
+		if len(draft.BlockedBy) == 0 {
+			continue
+		}
+
+		task := createdTasks[i]
+		hasActiveBlocker := false
+
+		for _, blockerDraftID := range draft.BlockedBy {
+			blockerTaskID, ok := draftToTaskID[blockerDraftID]
+			if !ok {
+				// Blocker might be an existing task ID, not a draft ID
+				blockerTaskID = blockerDraftID
+			}
+
+			if err := s.db.AddTaskDependency(blockerTaskID, task.ID); err != nil {
+				fmt.Printf("warning: failed to add dependency %s -> %s: %v\n", blockerTaskID, task.ID, err)
+				continue
+			}
+
+			// Check if blocker is not completed
+			blockerTask, err := s.db.GetTaskByID(blockerTaskID)
+			if err == nil && blockerTask != nil && blockerTask.Status != db.TaskStatusCompleted {
+				hasActiveBlocker = true
+			}
+		}
+
+		// If task has active blockers, set to blocked status
+		if hasActiveBlocker {
+			if err := s.db.UpdateTaskStatus(task.ID, db.TaskStatusBlocked); err != nil {
+				fmt.Printf("warning: failed to set task %s to blocked: %v\n", task.ID, err)
+			} else {
+				task.Status = db.TaskStatusBlocked
+				taskResults[i]["task"] = toTaskResponse(task)
+			}
+		}
+	}
+
+	// Phase 3: Sync to GitHub and auto-start ready tasks
+	var autoStarted []string
+	var autoStartErrors []string
+
+	for i, task := range createdTasks {
+		// Sync to GitHub Issue (async)
+		go s.syncObjectiveToGitHubIssue(task.ID)
+
+		// Auto-start if requested and not blocked
+		if req.Drafts[i].AutoStart && task.Status != db.TaskStatusBlocked {
+			startResult, err := s.startTaskInternal(context.Background(), task.ID, "")
+			if err != nil {
+				autoStartErrors = append(autoStartErrors, fmt.Sprintf("%s: %v", task.Title, err))
+				fmt.Printf("auto-start failed for task %s: %v\n", task.ID, err)
+			} else {
+				taskResults[i]["task"] = toTaskResponse(startResult.Task)
+				taskResults[i]["worktree_path"] = startResult.WorktreePath
+				taskResults[i]["session_id"] = startResult.SessionID
+				taskResults[i]["auto_started"] = true
+				autoStarted = append(autoStarted, task.ID)
+			}
+		}
+	}
+
+	// Add a message to the quest history
+	acceptMessage := fmt.Sprintf("✓ Accepted %d objectives in batch", len(createdTasks))
+	if msg, err := s.db.CreateQuestMessage(questID, "user", acceptMessage); err != nil {
+		fmt.Printf("warning: failed to add accept message to quest: %v\n", err)
+	} else if s.hub != nil {
+		s.hub.Broadcast(websocket.Message{
+			Type: "quest.message",
+			Payload: map[string]any{
+				"quest_id": questID,
+				"message":  msg,
+			},
+		})
+	}
+
+	response := map[string]any{
+		"message":       fmt.Sprintf("created %d objectives", len(createdTasks)),
+		"tasks":         taskResults,
+		"draft_mapping": draftToTaskID,
+	}
+
+	if len(autoStarted) > 0 {
+		response["auto_started"] = autoStarted
+	}
+	if len(autoStartErrors) > 0 {
+		response["auto_start_errors"] = autoStartErrors
 	}
 
 	return c.JSON(http.StatusCreated, response)
@@ -3321,11 +3513,15 @@ func (s *Server) reopenQuestGitHubIssue(questID string) {
 }
 
 // onTaskCompletedSync is called when a task completes (callback from session manager)
-// It closes the objective's GitHub Issue
+// It closes the objective's GitHub Issue and triggers unblocked dependent tasks
 func (s *Server) onTaskCompletedSync(taskID string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
+	// Phase 1: Handle dependency unblocking (run first, independent of GitHub sync)
+	s.handleTaskUnblocking(ctx, taskID)
+
+	// Phase 2: GitHub sync (continues even if Phase 1 errors)
 	// Get sync config
 	syncConfig := s.getSyncConfig(ctx)
 	if syncConfig == nil || !syncConfig.IsConfigured() {
@@ -3371,6 +3567,91 @@ func (s *Server) onTaskCompletedSync(taskID string) {
 
 	// Update parent quest issue to reflect objective completion
 	s.updateQuestIssueForTask(ctx, task, syncService, syncConfig)
+}
+
+// handleTaskUnblocking finds tasks that became ready because the given task completed
+// and transitions them from blocked to ready (auto-starting if configured)
+func (s *Server) handleTaskUnblocking(ctx context.Context, completedTaskID string) {
+	// Find tasks that are now unblocked
+	unblockedTasks, err := s.db.GetTasksUnblockedBy(completedTaskID)
+	if err != nil {
+		fmt.Printf("handleTaskUnblocking: failed to get unblocked tasks for %s: %v\n", completedTaskID, err)
+		return
+	}
+
+	if len(unblockedTasks) == 0 {
+		return
+	}
+
+	fmt.Printf("handleTaskUnblocking: %d tasks unblocked by completion of %s\n", len(unblockedTasks), completedTaskID)
+
+	for _, task := range unblockedTasks {
+		// Transition from blocked to ready
+		if err := s.db.TransitionTaskStatus(task.ID, db.TaskStatusBlocked, db.TaskStatusReady); err != nil {
+			fmt.Printf("handleTaskUnblocking: failed to transition task %s to ready: %v\n", task.ID, err)
+			continue
+		}
+
+		fmt.Printf("handleTaskUnblocking: task %s transitioned to ready\n", task.ID)
+
+		// Broadcast task unblocked event
+		if s.hub != nil {
+			s.hub.Broadcast(websocket.Message{
+				Type: "task.unblocked",
+				Payload: map[string]any{
+					"task_id":          task.ID,
+					"unblocked_by":     completedTaskID,
+					"quest_id":         task.QuestID.String,
+					"title":            task.Title,
+					"previous_status":  db.TaskStatusBlocked,
+					"new_status":       db.TaskStatusReady,
+				},
+			})
+		}
+
+		// Check if task should auto-start
+		autoStart, err := s.db.GetTaskAutoStart(task.ID)
+		if err != nil {
+			fmt.Printf("handleTaskUnblocking: failed to get auto_start for task %s: %v\n", task.ID, err)
+			continue
+		}
+
+		if autoStart {
+			// Auto-start the task in a goroutine
+			taskID := task.ID
+			go func() {
+				startResult, err := s.startTaskInternal(context.Background(), taskID, "")
+				if err != nil {
+					fmt.Printf("handleTaskUnblocking: auto-start failed for task %s: %v\n", taskID, err)
+					// Broadcast auto-start failure
+					if s.hub != nil {
+						s.hub.Broadcast(websocket.Message{
+							Type: "task.auto_start_failed",
+							Payload: map[string]any{
+								"task_id": taskID,
+								"error":   err.Error(),
+							},
+						})
+					}
+					return
+				}
+
+				fmt.Printf("handleTaskUnblocking: auto-started task %s (session %s)\n", taskID, startResult.SessionID)
+
+				// Broadcast auto-start success
+				if s.hub != nil {
+					s.hub.Broadcast(websocket.Message{
+						Type: "task.auto_started",
+						Payload: map[string]any{
+							"task_id":       taskID,
+							"session_id":    startResult.SessionID,
+							"worktree_path": startResult.WorktreePath,
+						},
+					})
+				}
+			}()
+		}
+	}
 }
 
 // onPRCreatedSync is called when a PR is created (callback from session manager)
