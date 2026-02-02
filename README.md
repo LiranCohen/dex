@@ -63,7 +63,7 @@ source .env
 cp toolbelt.yaml.example toolbelt.yaml
 
 # Run
-./dex -static ./frontend/dist -toolbelt toolbelt.yaml -worktree-base ./worktrees -repos-dir ./repos
+./dex -static ./frontend/dist -toolbelt toolbelt.yaml -base-dir .
 ```
 
 Open http://localhost:8080 and register a passkey (Face ID, Touch ID, or security key).

@@ -585,8 +585,7 @@ ExecStart=${DEX_INSTALL_DIR}/dex \\
     -db ${DEX_INSTALL_DIR}/dex.db \\
     -static ${DEX_INSTALL_DIR}/frontend \\
     -addr 127.0.0.1:${DEX_PORT} \\
-    -worktree-base ${DEX_INSTALL_DIR}/worktrees \\
-    -repos-dir ${DEX_INSTALL_DIR}/repos
+    -base-dir ${DEX_INSTALL_DIR}
 Restart=always
 RestartSec=5
 Environment=DEX_DATA_DIR=${DEX_INSTALL_DIR}
