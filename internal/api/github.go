@@ -178,7 +178,8 @@ func (s *Server) handleGitHubAppStatus(c echo.Context) error {
 		status.AuthMethod = "app"
 
 		// Build install URL, targeting the selected org if available
-		installURL := fmt.Sprintf("https://github.com/apps/%s/installations/new", config.AppSlug)
+		// Use /permissions path to properly support suggested_target_id parameter
+		installURL := fmt.Sprintf("https://github.com/apps/%s/installations/new/permissions", config.AppSlug)
 		if progress, err := s.db.GetOnboardingProgress(); err == nil && progress.GetGitHubOrgID() != 0 {
 			installURL = fmt.Sprintf("%s?suggested_target_id=%d", installURL, progress.GetGitHubOrgID())
 		}
@@ -277,7 +278,9 @@ func (s *Server) handleGitHubAppCallback(c echo.Context) error {
 	}
 
 	// Return success and redirect URL to install the app
-	installURL := fmt.Sprintf("https://github.com/apps/%s/installations/new", appConfig.AppSlug)
+	// Use /installations/new/permissions with suggested_target_id to pre-select the org
+	// See: https://docs.github.com/en/apps/creating-github-apps/about-creating-github-apps/migrating-oauth-apps-to-github-apps
+	installURL := fmt.Sprintf("https://github.com/apps/%s/installations/new/permissions", appConfig.AppSlug)
 
 	// Add org targeting if we have an org ID stored
 	if progress, err := s.db.GetOnboardingProgress(); err == nil && progress.GetGitHubOrgID() != 0 {
