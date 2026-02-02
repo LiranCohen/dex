@@ -54,6 +54,10 @@ type ActiveSession struct {
 	// Stores task understanding, plan, decisions, blockers, and last action
 	Scratchpad string
 
+	// PredecessorContext: handoff from a completed predecessor task in a dependency chain
+	// Contains summary of what the predecessor accomplished and context for continuation
+	PredecessorContext string
+
 	// For resuming from a previous session's checkpoint
 	RestoreFromSessionID string
 
@@ -267,6 +271,16 @@ func (m *Manager) notifyTaskStatus(taskID string, status string) {
 	m.mu.RUnlock()
 	if callback != nil {
 		go callback(taskID, status)
+	}
+}
+
+// SetPredecessorContext sets the context from a predecessor task in a dependency chain
+// This should be called after CreateSession but before Start
+func (m *Manager) SetPredecessorContext(sessionID string, context string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if session, exists := m.sessions[sessionID]; exists {
+		session.PredecessorContext = context
 	}
 }
 
@@ -549,6 +563,11 @@ func (m *Manager) runSession(ctx context.Context, session *ActiveSession) {
 
 				loop.InitExecutor(session.WorktreePath, m.gitOps, githubClient, owner, repo)
 				fmt.Printf("runSession: initialized tool executor (owner=%s, repo=%s, hasGitHub=%v)\n", owner, repo, githubClient != nil)
+
+				// Set GitHub client for issue commenting
+				if githubClient != nil {
+					loop.SetGitHubClient(githubClient.Client())
+				}
 
 				// Set callback to update project when a repo is created
 				projectID := project.ID

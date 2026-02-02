@@ -3572,6 +3572,13 @@ func (s *Server) onTaskCompletedSync(taskID string) {
 // handleTaskUnblocking finds tasks that became ready because the given task completed
 // and transitions them from blocked to ready (auto-starting if configured)
 func (s *Server) handleTaskUnblocking(ctx context.Context, completedTaskID string) {
+	// Get the completed task to capture its worktree and context
+	completedTask, err := s.db.GetTaskByID(completedTaskID)
+	if err != nil || completedTask == nil {
+		fmt.Printf("handleTaskUnblocking: failed to get completed task %s: %v\n", completedTaskID, err)
+		return
+	}
+
 	// Find tasks that are now unblocked
 	unblockedTasks, err := s.db.GetTasksUnblockedBy(completedTaskID)
 	if err != nil {
@@ -3584,6 +3591,12 @@ func (s *Server) handleTaskUnblocking(ctx context.Context, completedTaskID strin
 	}
 
 	fmt.Printf("handleTaskUnblocking: %d tasks unblocked by completion of %s\n", len(unblockedTasks), completedTaskID)
+
+	// Get handoff summary from completed task for context passing
+	var predecessorHandoff string
+	if completedTask.WorktreePath.Valid && completedTask.WorktreePath.String != "" {
+		predecessorHandoff = s.generatePredecessorHandoff(completedTask)
+	}
 
 	for _, task := range unblockedTasks {
 		// Transition from blocked to ready
@@ -3617,10 +3630,12 @@ func (s *Server) handleTaskUnblocking(ctx context.Context, completedTaskID strin
 		}
 
 		if autoStart {
-			// Auto-start the task in a goroutine
+			// Auto-start the task in a goroutine, inheriting predecessor's worktree
 			taskID := task.ID
+			inheritedWorktree := completedTask.GetWorktreePath()
+			handoff := predecessorHandoff
 			go func() {
-				startResult, err := s.startTaskInternal(context.Background(), taskID, "")
+				startResult, err := s.startTaskWithInheritance(context.Background(), taskID, inheritedWorktree, handoff)
 				if err != nil {
 					fmt.Printf("handleTaskUnblocking: auto-start failed for task %s: %v\n", taskID, err)
 					// Broadcast auto-start failure
@@ -3636,22 +3651,172 @@ func (s *Server) handleTaskUnblocking(ctx context.Context, completedTaskID strin
 					return
 				}
 
-				fmt.Printf("handleTaskUnblocking: auto-started task %s (session %s)\n", taskID, startResult.SessionID)
+				fmt.Printf("handleTaskUnblocking: auto-started task %s (session %s) with inherited worktree from %s\n",
+					taskID, startResult.SessionID, completedTaskID)
 
 				// Broadcast auto-start success
 				if s.hub != nil {
 					s.hub.Broadcast(websocket.Message{
 						Type: "task.auto_started",
 						Payload: map[string]any{
-							"task_id":       taskID,
-							"session_id":    startResult.SessionID,
-							"worktree_path": startResult.WorktreePath,
+							"task_id":            taskID,
+							"session_id":         startResult.SessionID,
+							"worktree_path":      startResult.WorktreePath,
+							"inherited_from":     completedTaskID,
+							"predecessor_title":  completedTask.Title,
 						},
 					})
 				}
 			}()
 		}
 	}
+}
+
+// generatePredecessorHandoff creates a handoff summary for the completed task
+// to provide context to dependent tasks
+func (s *Server) generatePredecessorHandoff(task *db.Task) string {
+	var sb strings.Builder
+
+	sb.WriteString("## Predecessor Task Completed\n\n")
+	sb.WriteString(fmt.Sprintf("**Previous Task**: %s\n", task.Title))
+
+	if task.Description.Valid && task.Description.String != "" {
+		sb.WriteString(fmt.Sprintf("**Description**: %s\n", task.Description.String))
+	}
+
+	sb.WriteString(fmt.Sprintf("**Status**: Completed\n"))
+
+	if task.WorktreePath.Valid && task.WorktreePath.String != "" {
+		sb.WriteString(fmt.Sprintf("**Working Directory**: %s\n", task.WorktreePath.String))
+	}
+
+	if task.BranchName.Valid && task.BranchName.String != "" {
+		sb.WriteString(fmt.Sprintf("**Branch**: %s\n", task.BranchName.String))
+	}
+
+	// Get checklist summary if available
+	if checklist, err := s.db.GetChecklistByTaskID(task.ID); err == nil && checklist != nil {
+		if items, err := s.db.GetChecklistItems(checklist.ID); err == nil && len(items) > 0 {
+			sb.WriteString("\n**Completed Work**:\n")
+			for _, item := range items {
+				if item.Status == db.ChecklistItemStatusDone {
+					sb.WriteString(fmt.Sprintf("- [x] %s\n", item.Description))
+				}
+			}
+		}
+	}
+
+	sb.WriteString("\n**Your Task**: Continue from where the previous task left off. Use the same working directory and build upon the completed work.\n")
+
+	return sb.String()
+}
+
+// startTaskWithInheritance starts a task, optionally inheriting a worktree from a predecessor
+func (s *Server) startTaskWithInheritance(ctx context.Context, taskID string, inheritedWorktree string, predecessorHandoff string) (*startTaskResult, error) {
+	// Get the task first
+	t, err := s.taskService.Get(taskID)
+	if err != nil {
+		return nil, fmt.Errorf("task not found: %w", err)
+	}
+
+	// Get the project
+	project, err := s.db.GetProjectByID(t.ProjectID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get project: %w", err)
+	}
+	if project == nil {
+		return nil, fmt.Errorf("project not found")
+	}
+
+	// Check if already has a worktree
+	if t.WorktreePath.Valid && t.WorktreePath.String != "" {
+		return nil, fmt.Errorf("task already has a worktree")
+	}
+
+	// Use inherited worktree if provided and valid, otherwise fall back to normal logic
+	var worktreePath string
+	if inheritedWorktree != "" {
+		// Verify the inherited worktree still exists
+		if _, err := os.Stat(inheritedWorktree); err == nil {
+			worktreePath = inheritedWorktree
+			fmt.Printf("startTaskWithInheritance: task %s inheriting worktree %s\n", taskID, worktreePath)
+		} else {
+			fmt.Printf("startTaskWithInheritance: inherited worktree %s no longer exists, creating new\n", inheritedWorktree)
+		}
+	}
+
+	// If no inherited worktree, fall back to normal worktree creation
+	if worktreePath == "" {
+		projectPath := project.RepoPath
+		baseBranch := project.DefaultBranch
+		if baseBranch == "" {
+			baseBranch = "main"
+		}
+
+		hasGitRepo := s.isValidGitRepo(projectPath)
+		isValidProjectPath := s.isValidProjectPath(projectPath)
+
+		if hasGitRepo && isValidProjectPath && s.gitService != nil {
+			worktreePath, err = s.gitService.SetupTaskWorktree(projectPath, taskID, baseBranch)
+			if err != nil {
+				return nil, fmt.Errorf("failed to create worktree: %w", err)
+			}
+		} else if isValidProjectPath && projectPath != "" {
+			worktreePath = projectPath
+			if err := os.MkdirAll(worktreePath, 0755); err != nil {
+				return nil, fmt.Errorf("failed to create project directory: %w", err)
+			}
+		} else {
+			if s.baseDir != "" {
+				worktreePath = filepath.Join(s.baseDir, "worktrees", "task-"+taskID)
+			} else {
+				worktreePath = filepath.Join(os.TempDir(), "dex-task-"+taskID)
+			}
+			if err := os.MkdirAll(worktreePath, 0755); err != nil {
+				return nil, fmt.Errorf("failed to create task directory: %w", err)
+			}
+		}
+	}
+
+	// Transition through ready to running status
+	if t.Status == "pending" || t.Status == "blocked" {
+		if err := s.taskService.UpdateStatus(taskID, "ready"); err != nil {
+			return nil, fmt.Errorf("failed to transition to ready: %w", err)
+		}
+	}
+	if err := s.taskService.UpdateStatus(taskID, "running"); err != nil {
+		return nil, fmt.Errorf("failed to transition to running: %w", err)
+	}
+
+	// Create and start a session for this task
+	hat := "creator"
+	if t.Hat.Valid && t.Hat.String != "" {
+		hat = t.Hat.String
+	}
+
+	session, err := s.sessionManager.CreateSession(taskID, hat, worktreePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create session: %w", err)
+	}
+
+	// If we have a predecessor handoff, inject it into the session context
+	if predecessorHandoff != "" {
+		s.sessionManager.SetPredecessorContext(session.ID, predecessorHandoff)
+	}
+
+	// Start the session
+	if err := s.sessionManager.Start(ctx, session.ID); err != nil {
+		return nil, fmt.Errorf("failed to start session: %w", err)
+	}
+
+	// Fetch updated task
+	updated, _ := s.taskService.Get(taskID)
+
+	return &startTaskResult{
+		Task:         updated,
+		WorktreePath: worktreePath,
+		SessionID:    session.ID,
+	}, nil
 }
 
 // onPRCreatedSync is called when a PR is created (callback from session manager)

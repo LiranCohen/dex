@@ -29,6 +29,13 @@ instructions: |
   {{.Values.refined_prompt}}
   {{end}}
 
+  {{if .Flags.has_predecessor_context}}
+  ### Predecessor Task Context
+  This task is part of a dependency chain. A previous task completed and you are continuing from where it left off.
+
+  {{.Values.predecessor_context}}
+  {{end}}
+
   {{if .Values.tool_descriptions}}
   {{.Values.tool_descriptions}}
   {{end}}

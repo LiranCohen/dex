@@ -12,15 +12,16 @@ import (
 
 // PromptContext provides context for rendering hat prompts
 type PromptContext struct {
-	Task             *db.Task
-	Session          *ActiveSession
-	Toolbelt         []ToolbeltService
-	Project          *ProjectContext
-	Tools            []string
-	RefinedPrompt    string // From planning phase - included in system prompt
-	ToolDescriptions string // Formatted tool descriptions for hat context
-	ProjectHints     string // Loaded from .dexhints, AGENTS.md, etc.
-	ProjectMemories  string // Formatted memory section from previous sessions
+	Task               *db.Task
+	Session            *ActiveSession
+	Toolbelt           []ToolbeltService
+	Project            *ProjectContext
+	Tools              []string
+	RefinedPrompt      string // From planning phase - included in system prompt
+	ToolDescriptions   string // Formatted tool descriptions for hat context
+	ProjectHints       string // Loaded from .dexhints, AGENTS.md, etc.
+	ProjectMemories    string // Formatted memory section from previous sessions
+	PredecessorContext string // Handoff from predecessor task in dependency chain
 }
 
 // ProjectContext provides project-level context for prompts
@@ -162,6 +163,12 @@ func (p *PromptLoader) Get(hatName string, ctx *PromptContext) (string, error) {
 		if ctx.ProjectMemories != "" {
 			loomCtx.SetValue("project_memories", ctx.ProjectMemories)
 			loomCtx.SetFlag("has_memories", true)
+		}
+
+		// Add predecessor context (for dependency chain handoffs)
+		if ctx.PredecessorContext != "" {
+			loomCtx.SetValue("predecessor_context", ctx.PredecessorContext)
+			loomCtx.SetFlag("has_predecessor_context", true)
 		}
 
 		// Add toolbelt services

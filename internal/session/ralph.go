@@ -867,14 +867,15 @@ func (r *RalphLoop) buildPrompt() (string, error) {
 	}
 
 	ctx := &PromptContext{
-		Task:             task,
-		Session:          r.session,
-		Project:          projectCtx,
-		Tools:            toolNames,
-		RefinedPrompt:    refinedPrompt,
-		ToolDescriptions: toolDescriptions,
-		ProjectHints:     projectHints,
-		ProjectMemories:  projectMemories,
+		Task:               task,
+		Session:            r.session,
+		Project:            projectCtx,
+		Tools:              toolNames,
+		RefinedPrompt:      refinedPrompt,
+		ToolDescriptions:   toolDescriptions,
+		ProjectHints:       projectHints,
+		ProjectMemories:    projectMemories,
+		PredecessorContext: r.session.PredecessorContext,
 	}
 
 	return r.manager.promptLoader.Get(r.session.Hat, ctx)
