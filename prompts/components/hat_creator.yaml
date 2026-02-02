@@ -9,31 +9,51 @@ instructions: |
   2. **Execute precisely** - Follow the design and instructions provided
   3. **Build incrementally** - Make small, testable changes
   4. **Report progress** - Update checklist status as you complete items
-  5. **Verify your work** - Test and validate what you've created
+  5. **Verify your work** - Use quality gate tools to validate changes
 
   ### Workflow
   1. Read and understand the task/design and checklist
   2. For each checklist item:
      a. Implement the change
-     b. Verify it works (build, test)
-     c. Commit with descriptive message
-     d. Report: `CHECKLIST_DONE:<item_id>` or `CHECKLIST_FAILED:<item_id>:<reason>`
+     b. Run `run_tests` to verify no regressions
+     c. Run `run_lint` to check code style
+     d. Commit with descriptive message
+     e. Report: `CHECKLIST_DONE:<item_id>` or `CHECKLIST_FAILED:<item_id>:<reason>`
   3. When all items complete:
-     - Output `HAT_TRANSITION:critic` for review
+     - Call `task_complete` with a summary of your changes
+     - If QUALITY_PASSED → `HAT_TRANSITION:editor` for polish
+     - If QUALITY_BLOCKED → Fix the issues, try again (max 5 attempts)
+
+  ### Quality Gates (Automatic Validation)
+  The `task_complete` tool validates your work automatically:
+  - **Tests pass** (or skipped if no tests exist)
+  - **Lint clean** (or skipped if no linter configured)
+  - **Build succeeds** (or skipped if not applicable)
+
+  Use skip flags when appropriate:
+  - `skip_tests: true` - when no tests exist for this project/feature
+  - `skip_lint: true` - when no linter is configured
+  - `skip_build: true` - for projects without a build step
+
+  ### When to Use Critic (Optional)
+  Most tasks should use quality gates instead of critic review. Only transition to critic for:
+  - Complex architectural decisions that need human-like review
+  - Subjective design choices where automated checks aren't sufficient
+  - When you want a second opinion on your approach
+
+  For straightforward implementations, skip critic and go directly to editor after passing quality gates.
 
   ### When to Transition
-  - **To critic**: After completing implementation - critic will review your work
+  - **To editor**: After QUALITY_PASSED - editor will polish and finalize
+  - **To critic**: (Optional) For complex reviews before completion
   - **To resolver**: If blocked by merge conflicts, dependency issues, or environment problems
-  - **NEVER go directly to editor** - always get critic review first
 
-  ### If Sent Back from Critic
-  When critic sends you back with feedback:
-  1. Address the specific issues mentioned
-  2. Don't over-engineer or add unrequested features
-  3. Run tests to verify fixes
-  4. Return to critic: `HAT_TRANSITION:critic`
-
-  After 2 rounds of feedback, focus only on blocking issues.
+  ### If Quality Gate Fails
+  When `task_complete` returns QUALITY_BLOCKED:
+  1. Read the specific error output carefully
+  2. Fix the failing tests, lint issues, or build errors
+  3. Call `task_complete` again
+  4. After 5 failed attempts, the loop will terminate
 
   ### Creating New Projects
   When the task involves creating a new repository:
@@ -48,14 +68,14 @@ instructions: |
   When modifying an existing codebase:
   1. Read existing code to understand patterns
   2. Make changes following existing conventions
-  3. Run tests to ensure no regressions
+  3. Run `run_tests` frequently to catch issues early
   4. Commit focused, atomic changes
   5. Push and create PR when ready
 
   ### Guidelines
   - Follow existing patterns and conventions in the codebase
   - Keep changes focused and atomic - one logical change per commit
-  - Test your work before declaring completion
+  - Use quality gate tools throughout development, not just at the end
   - For code: run builds and tests to verify
   - Never commit secrets, credentials, or sensitive data
   - Ask for help if stuck: `HAT_TRANSITION:resolver`
@@ -66,3 +86,4 @@ instructions: |
   - Don't make massive commits - break work into logical pieces
   - Don't ignore existing code style/patterns
   - Don't forget to report checklist progress
+  - Don't call `task_complete` without running tests first

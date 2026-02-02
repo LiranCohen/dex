@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/bmatcuk/doublestar/v4"
+	"github.com/lirancohen/dex/internal/security"
 )
 
 // Executor executes tools in the context of a working directory
@@ -107,6 +108,12 @@ func (e *Executor) Execute(ctx context.Context, toolName string, input map[strin
 	}
 
 	result.DurationMs = time.Since(start).Milliseconds()
+
+	// Process large responses - write to temp file if too big
+	if !result.IsError && len(result.Output) > LargeResponseThreshold {
+		result.Output = ProcessLargeResponse(toolName, result.Output)
+	}
+
 	return result
 }
 
@@ -178,7 +185,10 @@ func (e *Executor) executeReadFile(input map[string]any) Result {
 		}
 	}
 
-	return Result{Output: string(content), IsError: false}
+	// Sanitize file content to prevent prompt injection via invisible unicode
+	sanitized := security.SanitizeForPrompt(string(content))
+
+	return Result{Output: sanitized, IsError: false}
 }
 
 func (e *Executor) executeListFiles(input map[string]any) Result {

@@ -128,25 +128,27 @@ type TaskDependency struct {
 
 // Session represents a Claude session working on a task
 type Session struct {
-	ID                string
-	TaskID            string
-	Hat               string
-	ClaudeSessionID   sql.NullString
-	Status            string
-	WorktreePath      string
-	IterationCount    int
-	MaxIterations     int
-	CompletionPromise sql.NullString
-	InputTokens       int64   // Total input tokens used
-	OutputTokens      int64   // Total output tokens used
-	InputRate         float64 // $/MTok for input at session start
-	OutputRate        float64 // $/MTok for output at session start
-	TokensBudget      sql.NullInt64
-	DollarsBudget     sql.NullFloat64
-	CreatedAt         time.Time
-	StartedAt         sql.NullTime
-	EndedAt           sql.NullTime
-	Outcome           sql.NullString
+	ID                  string
+	TaskID              string
+	Hat                 string
+	ClaudeSessionID     sql.NullString
+	Status              string
+	WorktreePath        string
+	IterationCount      int
+	MaxIterations       int
+	CompletionPromise   sql.NullString
+	InputTokens         int64   // Total input tokens used
+	OutputTokens        int64   // Total output tokens used
+	InputRate           float64 // $/MTok for input at session start
+	OutputRate          float64 // $/MTok for output at session start
+	TokensBudget        sql.NullInt64
+	DollarsBudget       sql.NullFloat64
+	CreatedAt           time.Time
+	StartedAt           sql.NullTime
+	EndedAt             sql.NullTime
+	Outcome             sql.NullString
+	TerminationReason   sql.NullString // Why the session ended
+	QualityGateAttempts int            // Number of quality gate validation attempts
 }
 
 // Cost calculates the session cost from tokens and rates

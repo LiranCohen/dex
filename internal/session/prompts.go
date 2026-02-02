@@ -12,11 +12,15 @@ import (
 
 // PromptContext provides context for rendering hat prompts
 type PromptContext struct {
-	Task     *db.Task
-	Session  *ActiveSession
-	Toolbelt []ToolbeltService
-	Project  *ProjectContext
-	Tools    []string
+	Task             *db.Task
+	Session          *ActiveSession
+	Toolbelt         []ToolbeltService
+	Project          *ProjectContext
+	Tools            []string
+	RefinedPrompt    string // From planning phase - included in system prompt
+	ToolDescriptions string // Formatted tool descriptions for hat context
+	ProjectHints     string // Loaded from .dexhints, AGENTS.md, etc.
+	ProjectMemories  string // Formatted memory section from previous sessions
 }
 
 // ProjectContext provides project-level context for prompts
@@ -135,6 +139,29 @@ func (p *PromptLoader) Get(hatName string, ctx *PromptContext) (string, error) {
 		// Add tools list
 		if len(ctx.Tools) > 0 {
 			loomCtx.SetValue("tools", strings.Join(ctx.Tools, ", "))
+		}
+
+		// Add refined prompt from planning phase
+		if ctx.RefinedPrompt != "" {
+			loomCtx.SetValue("refined_prompt", ctx.RefinedPrompt)
+			loomCtx.SetFlag("has_refined_prompt", true)
+		}
+
+		// Add tool descriptions
+		if ctx.ToolDescriptions != "" {
+			loomCtx.SetValue("tool_descriptions", ctx.ToolDescriptions)
+		}
+
+		// Add project hints
+		if ctx.ProjectHints != "" {
+			loomCtx.SetValue("project_hints", ctx.ProjectHints)
+			loomCtx.SetFlag("has_project_hints", true)
+		}
+
+		// Add project memories
+		if ctx.ProjectMemories != "" {
+			loomCtx.SetValue("project_memories", ctx.ProjectMemories)
+			loomCtx.SetFlag("has_memories", true)
 		}
 
 		// Add toolbelt services

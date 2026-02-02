@@ -23,3 +23,12 @@ instructions: |
   {{if .Values.task_description}}
   - **Description:** {{.Values.task_description}}
   {{end}}
+
+  {{if .Flags.has_refined_prompt}}
+  ### Refined Task Instructions (from planning)
+  {{.Values.refined_prompt}}
+  {{end}}
+
+  {{if .Values.tool_descriptions}}
+  {{.Values.tool_descriptions}}
+  {{end}}

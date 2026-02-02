@@ -30,6 +30,11 @@ const (
 	ActivityTypeHatTransition     = "hat_transition"
 	ActivityTypeDebugLog          = "debug_log"
 	ActivityTypeChecklistUpdate   = "checklist_update"
+	// Quality gate and loop health activity types
+	ActivityTypeQualityGate   = "quality_gate"
+	ActivityTypeLoopHealth    = "loop_health"
+	ActivityTypeDecision      = "decision"
+	ActivityTypeMemoryCreated = "memory_created"
 )
 
 // CreateSessionActivity inserts a new activity record

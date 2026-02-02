@@ -15,10 +15,10 @@ var HatTransitions = map[string][]string{
 	"explorer": {"planner", "designer", "creator"}, // research → plan, design, or create
 	"planner":  {"designer", "creator"},            // plan → design or create
 	"designer": {"creator"},                        // design → create
-	"creator":  {"critic", "editor"},               // create → review or refine
+	"creator":  {"critic", "editor", "resolver"},   // create → review, refine, or handle blockers
 	"critic":   {"creator", "editor"},              // review → fix issues or polish
-	"editor":   {},                                 // terminal: task completes after editing
-	"resolver": {"creator", "critic"},              // resolve issues → continue work or re-review
+	"editor":   {"resolver"},                       // can recover if issues found via resolver
+	"resolver": {"creator", "critic", "editor"},    // resolve issues → continue work, re-review, or finalize
 }
 
 // TerminalHats lists hats that mark task completion (no further transitions)

@@ -7,7 +7,14 @@ import { OnboardingFlow } from './components/onboarding';
 import { ActivityFeed } from './components/ActivityFeed';
 import { PlanningPanel } from './components/PlanningPanel';
 import { ObjectiveDraftCard } from './components/ObjectiveDraftCard';
-import { ToolCallList } from './components/ToolCallList';
+import {
+  MessageList,
+  ChatInput,
+  QuestionPrompt,
+  parseObjectiveDrafts,
+  parseQuestions,
+  type QuestQuestion,
+} from './components/QuestChat';
 import type { Task, TasksResponse, SystemStatus, TaskStatus, WebSocketEvent, SessionEvent, Approval, Quest, QuestMessage, QuestResponse, ObjectiveDraft, QuestModel, PreflightCheck } from './lib/types';
 
 // Setup status type
@@ -1569,82 +1576,6 @@ function QuestsPage() {
   );
 }
 
-// Helper to parse objective drafts from message content
-function parseObjectiveDrafts(content: string): ObjectiveDraft[] {
-  const drafts: ObjectiveDraft[] = [];
-  const regex = /OBJECTIVE_DRAFT:\s*(\{[\s\S]*?\})\s*(?=OBJECTIVE_DRAFT:|QUESTION:|QUEST_READY:|$)/g;
-  let match;
-
-  while ((match = regex.exec(content)) !== null) {
-    try {
-      const draft = JSON.parse(match[1]);
-      if (draft.title && draft.draft_id) {
-        // Default auto_start to true if not specified
-        if (draft.auto_start === undefined) {
-          draft.auto_start = true;
-        }
-        drafts.push(draft);
-      }
-    } catch {
-      // Skip malformed JSON
-    }
-  }
-
-  return drafts;
-}
-
-// Helper to format signals for display
-// Questions are formatted inline for history, drafts are shown in sidebar
-function formatMessageContent(content: string): string {
-  // Remove OBJECTIVE_DRAFT signals (shown in sidebar)
-  let formatted = content.replace(/OBJECTIVE_DRAFT:\s*\{[\s\S]*?\}\s*(?=OBJECTIVE_DRAFT:|QUESTION:|QUEST_READY:|$)/g, '');
-
-  // Format QUESTION signals as readable text for message history
-  formatted = formatted.replace(/QUESTION:\s*(\{[^}]*\})/g, (_match, jsonStr) => {
-    try {
-      const q = JSON.parse(jsonStr);
-      let questionText = `\n**${q.question}**`;
-      if (q.options && q.options.length > 0) {
-        questionText += '\n' + q.options.map((opt: string) => `• ${opt}`).join('\n');
-      }
-      return questionText;
-    } catch {
-      return '';
-    }
-  });
-
-  // Remove QUEST_READY signals
-  formatted = formatted.replace(/QUEST_READY:\s*\{[^}]*\}/g, '');
-  // Clean up extra whitespace
-  return formatted.trim();
-}
-
-// Question type for quest conversations
-interface QuestQuestion {
-  question: string;
-  options?: string[];
-}
-
-// Helper to parse questions from message content
-function parseQuestions(content: string): QuestQuestion[] {
-  const questions: QuestQuestion[] = [];
-  const regex = /QUESTION:\s*(\{[^}]*\})/g;
-  let match;
-
-  while ((match = regex.exec(content)) !== null) {
-    try {
-      const q = JSON.parse(match[1]);
-      if (q.question) {
-        questions.push(q);
-      }
-    } catch {
-      // Skip malformed JSON
-    }
-  }
-
-  return questions;
-}
-
 function QuestDetailPage() {
   const { id } = useParams<{ id: string }>();
   const [quest, setQuest] = useState<Quest | null>(null);
@@ -1654,7 +1585,6 @@ function QuestDetailPage() {
   const [acceptingDraft, setAcceptingDraft] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [messageInput, setMessageInput] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [isCompleting, setIsCompleting] = useState(false);
   const [isReopening, setIsReopening] = useState(false);
@@ -1681,9 +1611,6 @@ function QuestDetailPage() {
       }
     }
   }, [id]);
-
-  // Ref for textarea to reset height after sending
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const { connected, subscribe } = useWebSocket();
   const navigate = useNavigate();
@@ -1822,17 +1749,9 @@ function QuestDetailPage() {
     return unsubscribe;
   }, [subscribe, handleWebSocketEvent]);
 
-  // Send message
-  const handleSendMessage = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const trimmedMessage = messageInput.trim();
-    if (!id || !trimmedMessage || isSending) return;
-
-    // Clear input immediately for better UX
-    setMessageInput('');
-    if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto';
-    }
+  // Send message - called by ChatInput component
+  const handleSendMessage = useCallback(async (content: string) => {
+    if (!id || !content || isSending) return;
 
     setIsSending(true);
     setError(null);
@@ -1840,19 +1759,17 @@ function QuestDetailPage() {
     setQuestions([]);
 
     try {
-      await sendQuestMessage(id, trimmedMessage);
+      await sendQuestMessage(id, content);
       // Message will be added via WebSocket event
     } catch (err) {
       // err could be ApiError (with message property) or Error
       const apiErr = err as { message?: string };
       const message = apiErr?.message || (err instanceof Error ? err.message : 'Failed to send message');
       setError(message);
-      // Restore the message on error so user doesn't lose it
-      setMessageInput(trimmedMessage);
     } finally {
       setIsSending(false);
     }
-  };
+  }, [id, isSending]);
 
   // Complete quest
   const handleCompleteQuest = async () => {
@@ -1983,11 +1900,6 @@ function QuestDetailPage() {
   };
 
   // Format timestamp
-  const formatTime = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  };
-
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center">
@@ -2098,138 +2010,45 @@ function QuestDetailPage() {
       <div className="flex-1 flex max-w-4xl mx-auto w-full">
         {/* Chat Area */}
         <div className="flex-1 flex flex-col">
+          {/* Error display */}
           {error && (
             <div className="bg-red-900/50 border border-red-500 rounded-lg p-3 m-4">
               <p className="text-red-400 text-sm">{error}</p>
             </div>
           )}
 
-          {/* Messages - aligned to bottom */}
-          <div className="flex-1 overflow-y-auto p-4 flex flex-col justify-end">
-            {messages.length === 0 ? (
-              <div className="text-center py-8">
-                <p className="text-gray-400 mb-2">Start your quest</p>
-                <p className="text-sm text-gray-500">
-                  Describe what you want to accomplish and Dex will help plan the objectives
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-4">
-              {messages.map((msg) => {
-                // Format assistant messages and skip if empty (e.g., only contained objective drafts)
-                const displayContent = msg.role === 'assistant' ? formatMessageContent(msg.content) : msg.content;
-                if (!displayContent) return null;
+          {/* Message List */}
+          <MessageList
+            messages={messages}
+            isStreaming={isSending}
+          />
 
-                return (
-                  <div
-                    key={msg.id}
-                    className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
-                  >
-                    <div
-                      className={`max-w-[80%] rounded-lg p-3 ${
-                        msg.role === 'user'
-                          ? 'bg-blue-600 text-white'
-                          : 'bg-gray-800 text-gray-200'
-                      }`}
-                    >
-                      {/* Tool calls (assistant only) */}
-                      {msg.role === 'assistant' && msg.tool_calls && msg.tool_calls.length > 0 && (
-                        <div className="mb-3">
-                          <ToolCallList toolCalls={msg.tool_calls} />
-                        </div>
-                      )}
-                      <p className="whitespace-pre-wrap">{displayContent}</p>
-                      <p className={`text-xs mt-1 ${msg.role === 'user' ? 'text-blue-200' : 'text-gray-500'}`}>
-                        {formatTime(msg.created_at)}
-                      </p>
-                    </div>
-                  </div>
-                );
-              })}
-              </div>
-            )}
-          </div>
-
-          {/* Questions from Dex */}
+          {/* Question Prompt */}
           {questions.length > 0 && isActive && (
-            <div className="p-4 border-t border-gray-700 bg-gray-800/50">
-              {questions.map((q, idx) => (
-                <div key={idx} className="mb-3 last:mb-0">
-                  <p className="text-gray-300 mb-2 font-medium">{q.question}</p>
-                  {q.options && q.options.length > 0 && (
-                    <div className="flex flex-wrap gap-2">
-                      {q.options.map((opt, optIdx) => (
-                        <button
-                          key={optIdx}
-                          type="button"
-                          onClick={() => setMessageInput(opt)}
-                          className="bg-gray-700 hover:bg-gray-600 text-gray-200 px-3 py-1.5 rounded-lg text-sm transition-colors"
-                        >
-                          {opt}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              ))}
+            <div className="px-4 pb-2">
+              <QuestionPrompt
+                question={questions[0]}
+                onAnswer={handleSendMessage}
+                disabled={isSending}
+              />
             </div>
           )}
 
-          {/* Input Area */}
+          {/* Chat Input */}
           {isActive && (
-            <form onSubmit={handleSendMessage} className="p-4 border-t border-gray-700">
-              <div className="flex gap-3 items-end">
-                <textarea
-                  ref={textareaRef}
-                  value={messageInput}
-                  onChange={(e) => {
-                    setMessageInput(e.target.value);
-                    // Auto-resize: reset height then set to scrollHeight
-                    e.target.style.height = 'auto';
-                    e.target.style.height = Math.min(e.target.scrollHeight, window.innerWidth < 768 ? 120 : 200) + 'px';
-                  }}
-                  onKeyDown={(e) => {
-                    // Check if mobile (touch device)
-                    const isMobile = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
-
-                    if (e.key === 'Enter') {
-                      if (isMobile) {
-                        // Mobile: Enter = new line (don't prevent default)
-                        return;
-                      }
-                      // Desktop: Enter = send, Shift+Enter = new line
-                      if (!e.shiftKey) {
-                        e.preventDefault();
-                        if (messageInput.trim() && !isSending) {
-                          handleSendMessage(e);
-                        }
-                      }
-                    }
-                  }}
-                  placeholder="Describe what you want to accomplish..."
-                  className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none min-h-[42px] max-h-[120px] md:max-h-[200px] overflow-y-auto"
-                  disabled={isSending}
-                  rows={1}
-                />
-                <button
-                  type="submit"
-                  disabled={isSending || !messageInput.trim()}
-                  className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-700 disabled:cursor-not-allowed text-white font-medium p-2 rounded-lg transition-colors flex-shrink-0"
-                  aria-label="Send message"
-                >
-                  {isSending ? (
-                    <svg className="w-6 h-6 animate-spin" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                    </svg>
-                  ) : (
-                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-                    </svg>
-                  )}
-                </button>
-              </div>
-            </form>
+            <div className="border-t border-gray-700 p-4 pb-8">
+              <ChatInput
+                onSubmit={handleSendMessage}
+                disabled={isSending || !connected}
+                placeholder={
+                  !connected
+                    ? 'Connecting...'
+                    : isSending
+                    ? 'Dex is responding...'
+                    : 'Describe what you want to accomplish...'
+                }
+              />
+            </div>
           )}
         </div>
 

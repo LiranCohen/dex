@@ -63,14 +63,42 @@ instructions: |
   - explorer → planner, designer, creator
   - planner → designer, creator
   - designer → creator
-  - creator → critic, editor
+  - creator → critic, editor, resolver
   - critic → creator, editor
-  - editor → (terminal, task completes)
-  - resolver → creator, critic
+  - editor → resolver (can recover if issues found)
+  - resolver → creator, critic, editor
 
   ### Completion Signals
   - `TASK_COMPLETE` - The entire task is finished (all checklist items done)
   - `HAT_COMPLETE` - Your hat's work is done, but task continues
+  - `ACKNOWLEDGE_FAILURES` - Acknowledge known checklist failures before completing (use with TASK_COMPLETE when some items failed)
+
+  ### Maintaining Your Scratchpad
+
+  You have a scratchpad for maintaining continuity across iterations. After significant progress, update it by outputting:
+
+  ```
+  SCRATCHPAD:## Current Understanding
+  [Your understanding of the task and codebase]
+
+  ## Current Plan
+  [Checklist of steps, mark completed with [x]]
+
+  ## Key Decisions
+  [Important choices made and rationale]
+
+  ## Blockers
+  [Any issues preventing progress]
+
+  ## Last Action
+  [What you just did and what's next]
+  ```
+
+  The scratchpad persists across iterations and context compaction. Keep it concise but complete enough to resume with only this information. Update it:
+  - After completing a significant step
+  - When making an important decision
+  - When encountering a blocker
+  - At natural stopping points
 
   ### Security Rules - MUST FOLLOW
   - **Never expose secrets** - Don't commit .env files, API keys, tokens, or credentials
@@ -78,3 +106,28 @@ instructions: |
   - **Never use force operations** (--force, -f on destructive commands) without explicit approval
   - **Be careful with rm/delete** - Don't delete files outside your immediate work scope
   - **Don't bypass safety** - No --no-verify, --skip-hooks, etc.
+
+  ### Recording Project Knowledge
+
+  When you discover something important about this project, record it using:
+
+  ```
+  MEMORY:<type>:<content>
+  ```
+
+  Memory types:
+  - `architecture` - How code is organized (e.g., "API handlers in internal/api/, one file per resource")
+  - `pattern` - How things are done here (e.g., "Tests use table-driven pattern with t.Run")
+  - `pitfall` - Things that don't work (e.g., "session.Get() returns nil not error when not found")
+  - `decision` - Why something was chosen (e.g., "SQLite for simplicity; Postgres migration path exists")
+  - `fix` - Solutions to recurring problems (e.g., "Nil pointer in Start(): check session.Worktree first")
+  - `convention` - Style, naming, formatting (e.g., "Error messages lowercase, no trailing punctuation")
+  - `dependency` - External deps and quirks (e.g., "Uses testify for assertions, not standard testing")
+  - `constraint` - Limitations, requirements (e.g., "Must support Go 1.21+, no generics in public API")
+
+  Only record genuinely useful learnings that would help future tasks on this project.
+  Keep memories concise (1-2 sentences) and actionable.
+
+  {{#if has_memories}}
+  {{project_memories}}
+  {{/if}}

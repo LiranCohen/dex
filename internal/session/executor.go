@@ -29,6 +29,10 @@ type ToolExecutor struct {
 	repo         string
 	// Callback when a GitHub repo is created - allows updating project DB record
 	onRepoCreated func(owner, repo string)
+	// Quality gate for task completion validation
+	qualityGate *QualityGate
+	// Activity recorder for logging quality gate attempts
+	activity *ActivityRecorder
 }
 
 // NewToolExecutor creates a new ToolExecutor
@@ -45,6 +49,16 @@ func NewToolExecutor(worktreePath string, gitOps *git.Operations, githubClient *
 // SetOnRepoCreated sets the callback for when a GitHub repo is created
 func (e *ToolExecutor) SetOnRepoCreated(callback func(owner, repo string)) {
 	e.onRepoCreated = callback
+}
+
+// SetQualityGate sets the quality gate for task completion validation
+func (e *ToolExecutor) SetQualityGate(qg *QualityGate) {
+	e.qualityGate = qg
+}
+
+// SetActivityRecorder sets the activity recorder for quality gate logging
+func (e *ToolExecutor) SetActivityRecorder(activity *ActivityRecorder) {
+	e.activity = activity
 }
 
 // Execute runs a tool with the given input and returns the result
@@ -65,6 +79,15 @@ func (e *ToolExecutor) Execute(ctx context.Context, toolName string, input map[s
 		return e.executeGitHubCreateRepo(ctx, input)
 	case "github_create_pr":
 		return e.executeGitHubCreatePR(ctx, input)
+	// Quality gate tools
+	case "run_tests":
+		return e.executeRunTests(ctx, input)
+	case "run_lint":
+		return e.executeRunLint(ctx, input)
+	case "run_build":
+		return e.executeRunBuild(ctx, input)
+	case "task_complete":
+		return e.executeTaskComplete(ctx, input)
 	default:
 		// Use base executor for all other tools
 		result := e.Executor.Execute(ctx, toolName, input)
@@ -387,5 +410,140 @@ func (e *ToolExecutor) executeGitHubCreatePR(ctx context.Context, input map[stri
 	return ToolResult{
 		Output:  fmt.Sprintf("Created pull request #%d: %s", pr.GetNumber(), pr.GetHTMLURL()),
 		IsError: false,
+	}
+}
+
+// Quality gate tool implementations
+
+func (e *ToolExecutor) executeRunTests(ctx context.Context, input map[string]any) ToolResult {
+	if e.qualityGate == nil {
+		e.qualityGate = NewQualityGate(e.WorkDir(), e.activity)
+	}
+
+	verbose := false
+	if v, ok := input["verbose"].(bool); ok {
+		verbose = v
+	}
+
+	timeoutSecs := 300
+	if t, ok := input["timeout_seconds"].(float64); ok {
+		timeoutSecs = int(t)
+	}
+
+	result := e.qualityGate.RunTests(ctx, verbose, timeoutSecs)
+
+	if result.Skipped {
+		return ToolResult{
+			Output:  fmt.Sprintf("Tests skipped: %s", result.SkipReason),
+			IsError: false,
+		}
+	}
+
+	if result.Passed {
+		return ToolResult{
+			Output:  fmt.Sprintf("Tests passed (%dms)\n\n%s", result.DurationMs, result.Output),
+			IsError: false,
+		}
+	}
+
+	return ToolResult{
+		Output:  fmt.Sprintf("Tests failed (%dms)\n\n%s", result.DurationMs, result.Output),
+		IsError: true,
+	}
+}
+
+func (e *ToolExecutor) executeRunLint(ctx context.Context, input map[string]any) ToolResult {
+	if e.qualityGate == nil {
+		e.qualityGate = NewQualityGate(e.WorkDir(), e.activity)
+	}
+
+	fix := false
+	if f, ok := input["fix"].(bool); ok {
+		fix = f
+	}
+
+	result := e.qualityGate.RunLint(ctx, fix)
+
+	if result.Skipped {
+		return ToolResult{
+			Output:  fmt.Sprintf("Lint skipped: %s", result.SkipReason),
+			IsError: false,
+		}
+	}
+
+	if result.Passed {
+		return ToolResult{
+			Output:  fmt.Sprintf("Lint passed (%dms)\n\n%s", result.DurationMs, result.Output),
+			IsError: false,
+		}
+	}
+
+	return ToolResult{
+		Output:  fmt.Sprintf("Lint issues found (%dms)\n\n%s", result.DurationMs, result.Output),
+		IsError: true,
+	}
+}
+
+func (e *ToolExecutor) executeRunBuild(ctx context.Context, input map[string]any) ToolResult {
+	if e.qualityGate == nil {
+		e.qualityGate = NewQualityGate(e.WorkDir(), e.activity)
+	}
+
+	timeoutSecs := 300
+	if t, ok := input["timeout_seconds"].(float64); ok {
+		timeoutSecs = int(t)
+	}
+
+	result := e.qualityGate.RunBuild(ctx, timeoutSecs)
+
+	if result.Skipped {
+		return ToolResult{
+			Output:  fmt.Sprintf("Build skipped: %s", result.SkipReason),
+			IsError: false,
+		}
+	}
+
+	if result.Passed {
+		return ToolResult{
+			Output:  fmt.Sprintf("Build succeeded (%dms)\n\n%s", result.DurationMs, result.Output),
+			IsError: false,
+		}
+	}
+
+	return ToolResult{
+		Output:  fmt.Sprintf("Build failed (%dms)\n\n%s", result.DurationMs, result.Output),
+		IsError: true,
+	}
+}
+
+func (e *ToolExecutor) executeTaskComplete(ctx context.Context, input map[string]any) ToolResult {
+	if e.qualityGate == nil {
+		e.qualityGate = NewQualityGate(e.WorkDir(), e.activity)
+	}
+
+	summary, ok := input["summary"].(string)
+	if !ok || summary == "" {
+		return ToolResult{Output: "summary is required", IsError: true}
+	}
+
+	opts := TaskCompleteOpts{
+		Summary: summary,
+	}
+
+	if skipTests, ok := input["skip_tests"].(bool); ok {
+		opts.SkipTests = skipTests
+	}
+	if skipLint, ok := input["skip_lint"].(bool); ok {
+		opts.SkipLint = skipLint
+	}
+	if skipBuild, ok := input["skip_build"].(bool); ok {
+		opts.SkipBuild = skipBuild
+	}
+
+	result := e.qualityGate.Validate(ctx, opts)
+
+	return ToolResult{
+		Output:  result.Feedback,
+		IsError: !result.Passed,
 	}
 }

@@ -35,8 +35,12 @@ instructions: |
   - Don't over-document simple changes
   - Use conventional commit messages (feat:, fix:, docs:, etc.)
   - Ensure the work is ready for others to understand
-  - This is the final hat - task completes after editing
+  - This is typically the final hat - task completes after editing
   - Always include the PR URL in your TASK_COMPLETE message
+
+  ### Recovery Options
+  If you encounter blocking issues during editing (merge conflicts, broken dependencies, etc.):
+  - Use `HAT_TRANSITION:resolver` to handle blockers before finalizing
 
   ### Final Checks Before Completion
   - [ ] All checklist items reported as done/skipped/failed

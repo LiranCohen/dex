@@ -295,6 +295,15 @@ func (s *Server) registerRoutes() {
 	protected.PUT("/projects/:id", s.handleUpdateProject)
 	protected.DELETE("/projects/:id", s.handleDeleteProject)
 
+	// Memory endpoints
+	protected.GET("/projects/:id/memories", s.handleListMemories)
+	protected.POST("/projects/:id/memories", s.handleCreateMemory)
+	protected.GET("/projects/:id/memories/search", s.handleSearchMemories)
+	protected.POST("/projects/:id/memories/cleanup", s.handleCleanupMemories)
+	protected.GET("/memories/:id", s.handleGetMemory)
+	protected.PUT("/memories/:id", s.handleUpdateMemory)
+	protected.DELETE("/memories/:id", s.handleDeleteMemory)
+
 	// Approval endpoints
 	protected.GET("/approvals", s.handleListApprovals)
 	protected.GET("/approvals/:id", s.handleGetApproval)
@@ -2059,6 +2068,13 @@ func (s *Server) handlePlanningAccept(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusServiceUnavailable, "planning not available")
 	}
 
+	// Parse request body for optional item selection
+	var req struct {
+		SelectedOptional []int `json:"selected_optional"`
+	}
+	// Ignore binding error - it's optional
+	_ = c.Bind(&req)
+
 	// Get the planning session for this task
 	session, _, err := s.planner.GetSessionByTask(taskID)
 	if err != nil {
@@ -2069,7 +2085,7 @@ func (s *Server) handlePlanningAccept(c echo.Context) error {
 	}
 
 	// Accept the plan
-	refinedPrompt, err := s.planner.AcceptPlan(c.Request().Context(), session.ID)
+	refinedPrompt, err := s.planner.AcceptPlan(c.Request().Context(), session.ID, req.SelectedOptional)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}

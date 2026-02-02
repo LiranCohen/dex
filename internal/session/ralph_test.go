@@ -2,6 +2,7 @@ package session
 
 import (
 	"testing"
+	"time"
 )
 
 func TestNewRalphLoop(t *testing.T) {
@@ -155,6 +156,51 @@ func TestCheckBudget_NoBudgetsSet(t *testing.T) {
 	err := loop.checkBudget()
 	if err != nil {
 		t.Errorf("expected no error when no budgets set, got %v", err)
+	}
+}
+
+func TestCheckBudget_RuntimeExceeded(t *testing.T) {
+	session := &ActiveSession{
+		MaxIterations: 100,
+		MaxRuntime:    1 * time.Hour,
+		StartedAt:     time.Now().Add(-2 * time.Hour), // Started 2 hours ago
+	}
+
+	loop := &RalphLoop{session: session}
+
+	err := loop.checkBudget()
+	if err != ErrRuntimeLimit {
+		t.Errorf("expected ErrRuntimeLimit, got %v", err)
+	}
+}
+
+func TestCheckBudget_RuntimeBelowLimit(t *testing.T) {
+	session := &ActiveSession{
+		MaxIterations: 100,
+		MaxRuntime:    4 * time.Hour,
+		StartedAt:     time.Now().Add(-1 * time.Hour), // Started 1 hour ago
+	}
+
+	loop := &RalphLoop{session: session}
+
+	err := loop.checkBudget()
+	if err != nil {
+		t.Errorf("expected no error, got %v", err)
+	}
+}
+
+func TestCheckBudget_RuntimeZeroMeansNoLimit(t *testing.T) {
+	session := &ActiveSession{
+		MaxIterations: 100,
+		MaxRuntime:    0, // No limit
+		StartedAt:     time.Now().Add(-100 * time.Hour), // Started 100 hours ago
+	}
+
+	loop := &RalphLoop{session: session}
+
+	err := loop.checkBudget()
+	if err != nil {
+		t.Errorf("expected no error when MaxRuntime is 0, got %v", err)
 	}
 }
 

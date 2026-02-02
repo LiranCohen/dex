@@ -19,7 +19,10 @@ type ParsedChecklist struct {
 	Optional []string
 }
 
-const planningModel = "claude-sonnet-4-5-20250929"
+const (
+	planningModelSonnet = "claude-sonnet-4-5-20250929"
+	planningModelOpus   = "claude-opus-4-5-20251101"
+)
 
 // Planner handles the planning phase for tasks
 type Planner struct {
@@ -63,6 +66,14 @@ func (p *Planner) StartPlanning(ctx context.Context, taskID, prompt string) (*db
 		return nil, fmt.Errorf("anthropic client not configured")
 	}
 
+	// Get task to check model preference
+	model := planningModelSonnet
+	if task, err := p.db.GetTaskByID(taskID); err == nil && task != nil {
+		if task.Model.Valid && task.Model.String == db.TaskModelOpus {
+			model = planningModelOpus
+		}
+	}
+
 	// Create planning session
 	session, err := p.db.CreatePlanningSession(taskID, prompt)
 	if err != nil {
@@ -75,9 +86,9 @@ func (p *Planner) StartPlanning(ctx context.Context, taskID, prompt string) (*db
 		return nil, fmt.Errorf("failed to store initial prompt: %w", err)
 	}
 
-	// Call Sonnet to analyze the prompt
+	// Call the model to analyze the prompt
 	response, err := p.client.Chat(ctx, &toolbelt.AnthropicChatRequest{
-		Model:     planningModel,
+		Model:     model,
 		MaxTokens: 1024,
 		System:    p.getPlanningPrompt(),
 		Messages: []toolbelt.AnthropicMessage{
@@ -153,6 +164,14 @@ func (p *Planner) ProcessResponse(ctx context.Context, sessionID, response strin
 		return nil, fmt.Errorf("planning session not found: %s", sessionID)
 	}
 
+	// Determine model based on task preference
+	model := planningModelSonnet
+	if task, err := p.db.GetTaskByID(session.TaskID); err == nil && task != nil {
+		if task.Model.Valid && task.Model.String == db.TaskModelOpus {
+			model = planningModelOpus
+		}
+	}
+
 	// Store user's response
 	_, err = p.db.CreatePlanningMessage(session.ID, "user", response)
 	if err != nil {
@@ -174,9 +193,9 @@ func (p *Planner) ProcessResponse(ctx context.Context, sessionID, response strin
 		}
 	}
 
-	// Call Sonnet to continue the conversation
+	// Call the model to continue the conversation
 	anthropicResp, err := p.client.Chat(ctx, &toolbelt.AnthropicChatRequest{
-		Model:     planningModel,
+		Model:     model,
 		MaxTokens: 1024,
 		System:    p.getPlanningPrompt(),
 		Messages:  anthropicMessages,
@@ -230,7 +249,8 @@ func (p *Planner) ProcessResponse(ctx context.Context, sessionID, response strin
 }
 
 // AcceptPlan marks the planning session as completed and returns the refined prompt
-func (p *Planner) AcceptPlan(ctx context.Context, sessionID string) (string, error) {
+// selectedOptional specifies which optional checklist items to include (by index)
+func (p *Planner) AcceptPlan(ctx context.Context, sessionID string, selectedOptional []int) (string, error) {
 	session, err := p.db.GetPlanningSessionByID(sessionID)
 	if err != nil {
 		return "", fmt.Errorf("failed to get planning session: %w", err)
@@ -267,6 +287,13 @@ func (p *Planner) AcceptPlan(ctx context.Context, sessionID string) (string, err
 		refinedPrompt = session.OriginalPrompt
 	}
 
+	// Transfer pending checklist to task checklist (if any)
+	if session.PendingChecklist.Valid && session.PendingChecklist.String != "" {
+		if err := p.transferPendingChecklist(session.TaskID, session.PendingChecklist.String, selectedOptional); err != nil {
+			return "", fmt.Errorf("failed to transfer checklist: %w", err)
+		}
+	}
+
 	// Complete the session
 	if err := p.db.CompletePlanningSession(sessionID, refinedPrompt); err != nil {
 		return "", fmt.Errorf("failed to complete planning session: %w", err)
@@ -284,6 +311,57 @@ func (p *Planner) AcceptPlan(ctx context.Context, sessionID string) (string, err
 	}
 
 	return refinedPrompt, nil
+}
+
+// transferPendingChecklist transfers pending checklist items from planning to task checklist
+func (p *Planner) transferPendingChecklist(taskID, pendingJSON string, selectedOptional []int) error {
+	var pending db.PendingChecklistData
+	if err := json.Unmarshal([]byte(pendingJSON), &pending); err != nil {
+		return fmt.Errorf("failed to parse pending checklist: %w", err)
+	}
+
+	// Check if checklist already exists for this task
+	existing, err := p.db.GetChecklistByTaskID(taskID)
+	if err != nil {
+		return fmt.Errorf("failed to check existing checklist: %w", err)
+	}
+	if existing != nil {
+		// Checklist already exists, skip transfer
+		return nil
+	}
+
+	// Create task checklist
+	checklist, err := p.db.CreateTaskChecklist(taskID)
+	if err != nil {
+		return fmt.Errorf("failed to create task checklist: %w", err)
+	}
+
+	sortOrder := 0
+
+	// Add all must-have items
+	for _, item := range pending.MustHave {
+		if _, err := p.db.CreateChecklistItem(checklist.ID, item, sortOrder); err != nil {
+			return fmt.Errorf("failed to create must-have checklist item: %w", err)
+		}
+		sortOrder++
+	}
+
+	// Add selected optional items
+	selectedSet := make(map[int]bool)
+	for _, idx := range selectedOptional {
+		selectedSet[idx] = true
+	}
+
+	for i, item := range pending.Optional {
+		if selectedSet[i] {
+			if _, err := p.db.CreateChecklistItem(checklist.ID, item, sortOrder); err != nil {
+				return fmt.Errorf("failed to create optional checklist item: %w", err)
+			}
+			sortOrder++
+		}
+	}
+
+	return nil
 }
 
 // SkipPlanning skips the planning phase for a task

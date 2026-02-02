@@ -45,9 +45,14 @@ type ActiveSession struct {
 	OutputRate    float64 // $/MTok for output (captured at session start)
 	TokensBudget  *int64
 	DollarsBudget *float64
+	MaxRuntime    time.Duration // Maximum runtime before termination (0 = unlimited)
 
 	StartedAt    time.Time
 	LastActivity time.Time
+
+	// Scratchpad: persistent thinking document updated each iteration
+	// Stores task understanding, plan, decisions, blockers, and last action
+	Scratchpad string
 
 	// For resuming from a previous session's checkpoint
 	RestoreFromSessionID string
@@ -115,10 +120,14 @@ type Manager struct {
 	sessions map[string]*ActiveSession // sessionID -> session
 	byTask   map[string]string         // taskID -> sessionID
 
+	// Transition tracking for loop detection (per task)
+	transitionTrackers map[string]*TransitionTracker // taskID -> tracker
+
 	// Configuration
 	defaultMaxIterations int
 	defaultTokenBudget   *int64
 	defaultDollarBudget  *float64
+	defaultMaxRuntime    time.Duration
 }
 
 // NewManager creates a session manager
@@ -135,7 +144,9 @@ func NewManager(database *db.DB, scheduler *orchestrator.Scheduler, promptsDir s
 		promptLoader:         loader,
 		sessions:             make(map[string]*ActiveSession),
 		byTask:               make(map[string]string),
+		transitionTrackers:   make(map[string]*TransitionTracker),
 		defaultMaxIterations: 100,
+		defaultMaxRuntime:    4 * time.Hour, // Default: 4 hours
 	}
 }
 
@@ -152,6 +163,13 @@ func (m *Manager) SetDefaults(maxIterations int, tokenBudget *int64, dollarBudge
 	m.defaultMaxIterations = maxIterations
 	m.defaultTokenBudget = tokenBudget
 	m.defaultDollarBudget = dollarBudgetFloat
+}
+
+// SetMaxRuntime configures the default max runtime for new sessions
+func (m *Manager) SetMaxRuntime(d time.Duration) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.defaultMaxRuntime = d
 }
 
 // SetAnthropicClient sets the Anthropic client for the Ralph loop
@@ -279,6 +297,7 @@ func (m *Manager) CreateSession(taskID, hat, worktreePath string) (*ActiveSessio
 		MaxIterations: m.defaultMaxIterations,
 		TokensBudget:  m.defaultTokenBudget,
 		DollarsBudget: m.defaultDollarBudget,
+		MaxRuntime:    m.defaultMaxRuntime,
 		done:          make(chan struct{}),
 	}
 
@@ -452,8 +471,10 @@ func (m *Manager) copySession(s *ActiveSession) *ActiveSession {
 		OutputTokens:   s.OutputTokens,
 		InputRate:      s.InputRate,
 		OutputRate:     s.OutputRate,
+		MaxRuntime:     s.MaxRuntime,
 		StartedAt:      s.StartedAt,
 		LastActivity:   s.LastActivity,
+		Scratchpad:     s.Scratchpad,
 	}
 	// Copy pointers by creating new pointers to the same values
 	if s.TokensBudget != nil {
@@ -616,6 +637,7 @@ func (m *Manager) runSession(ctx context.Context, session *ActiveSession) {
 	m.mu.Lock()
 	delete(m.sessions, sessionID)
 	delete(m.byTask, taskID)
+	delete(m.transitionTrackers, taskID) // Clean up transition tracker
 	m.mu.Unlock()
 
 	// Update task status based on final state
@@ -655,14 +677,30 @@ func (m *Manager) runSession(ctx context.Context, session *ActiveSession) {
 // handleHatTransition handles transitioning a task to a new hat
 func (m *Manager) handleHatTransition(ctx context.Context, taskID, originalHat, nextHat, worktreePath string) {
 	// Validate transition BEFORE removing old session
-	m.mu.RLock()
+	m.mu.Lock()
 	handler := m.transitionHandler
 	oldSessionID := m.byTask[taskID]
-	m.mu.RUnlock()
+
+	// Get or create transition tracker for this task
+	tracker := m.transitionTrackers[taskID]
+	if tracker == nil {
+		tracker = NewTransitionTracker()
+		m.transitionTrackers[taskID] = tracker
+	}
+	m.mu.Unlock()
 
 	if handler != nil && !handler.ValidateTransition(originalHat, nextHat) {
 		fmt.Printf("warning: invalid hat transition from %s to %s, marking task failed\n", originalHat, nextHat)
 		_ = m.db.UpdateTaskStatus(taskID, db.TaskStatusCancelled)
+		m.cleanupTransitionTracker(taskID)
+		return
+	}
+
+	// Check for transition loops
+	if err := tracker.RecordTransition(originalHat, nextHat); err != nil {
+		fmt.Printf("error: %v (history: %s), marking task quarantined\n", err, tracker.History())
+		_ = m.db.UpdateTaskStatus(taskID, db.TaskStatusQuarantined)
+		m.cleanupTransitionTracker(taskID)
 		return
 	}
 
@@ -688,6 +726,13 @@ func (m *Manager) handleHatTransition(ctx context.Context, taskID, originalHat, 
 	}
 
 	fmt.Printf("hat transition: task %s transitioned from %s to %s (session %s)\n", taskID, originalHat, nextHat, newSession.ID)
+}
+
+// cleanupTransitionTracker removes the transition tracker for a task
+func (m *Manager) cleanupTransitionTracker(taskID string) {
+	m.mu.Lock()
+	delete(m.transitionTrackers, taskID)
+	m.mu.Unlock()
 }
 
 // GetPrompt returns the rendered prompt for a session's hat
@@ -755,6 +800,7 @@ func (m *Manager) LoadActiveSessions() error {
 			OutputTokens:   dbSession.OutputTokens,
 			InputRate:      dbSession.InputRate,
 			OutputRate:     dbSession.OutputRate,
+			MaxRuntime:     m.defaultMaxRuntime, // Use default for restored sessions
 			done:           make(chan struct{}),
 		}
 

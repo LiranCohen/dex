@@ -3,6 +3,7 @@ package session
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,19 +12,28 @@ import (
 	"strings"
 	"time"
 
+	gogithub "github.com/google/go-github/v68/github"
+	"github.com/google/uuid"
 	"github.com/lirancohen/dex/internal/api/websocket"
 	"github.com/lirancohen/dex/internal/db"
 	"github.com/lirancohen/dex/internal/git"
+	"github.com/lirancohen/dex/internal/github"
+	"github.com/lirancohen/dex/internal/hints"
+	"github.com/lirancohen/dex/internal/security"
 	"github.com/lirancohen/dex/internal/toolbelt"
+	"github.com/lirancohen/dex/internal/tools"
 )
 
 // Completion/transition signals that Ralph looks for in responses
 const (
-	SignalTaskComplete    = "TASK_COMPLETE"
-	SignalHatComplete     = "HAT_COMPLETE"
-	SignalHatTransition   = "HAT_TRANSITION:"
-	SignalChecklistDone   = "CHECKLIST_DONE:"
-	SignalChecklistFailed = "CHECKLIST_FAILED:"
+	SignalTaskComplete        = "TASK_COMPLETE"
+	SignalHatComplete         = "HAT_COMPLETE"
+	SignalHatTransition       = "HAT_TRANSITION:"
+	SignalChecklistDone       = "CHECKLIST_DONE:"
+	SignalChecklistFailed     = "CHECKLIST_FAILED:"
+	SignalAcknowledgeFailures = "ACKNOWLEDGE_FAILURES"
+	SignalScratchpad          = "SCRATCHPAD:"
+	SignalMemory              = "MEMORY:"
 )
 
 // Budget limit errors
@@ -32,6 +42,7 @@ var (
 	ErrIterationLimit    = errors.New("iteration limit exceeded")
 	ErrTokenBudget       = errors.New("token budget exceeded")
 	ErrDollarBudget      = errors.New("dollar budget exceeded")
+	ErrRuntimeLimit      = errors.New("runtime limit exceeded")
 	ErrNoAnthropicClient = errors.New("anthropic client not configured")
 )
 
@@ -58,6 +69,27 @@ type RalphLoop struct {
 	// Tool use support
 	executor *ToolExecutor
 	tools    []toolbelt.AnthropicTool
+
+	// Loop health tracking
+	health *LoopHealth
+
+	// Quality gate for task completion
+	qualityGate *QualityGate
+
+	// Context management
+	contextGuard     *ContextGuard
+	handoffGen       *HandoffGenerator
+	hintsLoader      *hints.Loader
+	lastSystemPrompt string // Cached for token estimation
+
+	// Failure context for checkpoint recovery
+	lastError    string // Last error encountered
+	failedAt     string // Where failure occurred: "tool", "api", "validation"
+	recoveryHint string // Hint for recovery attempt
+
+	// Issue activity sync
+	issueCommenter *github.IssueCommenter
+	githubClient   *gogithub.Client
 }
 
 // NewRalphLoop creates a new RalphLoop for the given session
@@ -70,13 +102,16 @@ func NewRalphLoop(manager *Manager, session *ActiveSession, client *toolbelt.Ant
 		db:                 database,
 		messages:           make([]toolbelt.AnthropicMessage, 0),
 		checkpointInterval: 5,
-		tools:              GetToolDefinitions(),
+		tools:              GetToolDefinitionsForHat(session.Hat),
+		health:             NewLoopHealth(),
 	}
 }
 
 // InitExecutor initializes the tool executor with project context
 func (r *RalphLoop) InitExecutor(worktreePath string, gitOps *git.Operations, githubClient *toolbelt.GitHubClient, owner, repo string) {
 	r.executor = NewToolExecutor(worktreePath, gitOps, githubClient, owner, repo)
+	// Quality gate will be initialized when activity recorder is ready
+	r.qualityGate = NewQualityGate(worktreePath, nil)
 }
 
 // SetOnRepoCreated sets the callback for when a GitHub repo is created
@@ -84,6 +119,52 @@ func (r *RalphLoop) InitExecutor(worktreePath string, gitOps *git.Operations, gi
 func (r *RalphLoop) SetOnRepoCreated(callback func(owner, repo string)) {
 	if r.executor != nil {
 		r.executor.SetOnRepoCreated(callback)
+	}
+}
+
+// SetGitHubClient sets the GitHub client for issue commenting
+func (r *RalphLoop) SetGitHubClient(client *gogithub.Client) {
+	r.githubClient = client
+}
+
+// initIssueCommenter initializes the issue commenter if task has a linked issue
+func (r *RalphLoop) initIssueCommenter(task *db.Task) {
+	if r.githubClient == nil {
+		return
+	}
+
+	// Check if task has a linked GitHub issue
+	if !task.GitHubIssueNumber.Valid || task.GitHubIssueNumber.Int64 == 0 {
+		return
+	}
+
+	// Get project for GitHub owner/repo
+	project, err := r.db.GetProjectByID(task.ProjectID)
+	if err != nil || project == nil {
+		return
+	}
+
+	if !project.GitHubOwner.Valid || !project.GitHubRepo.Valid {
+		return
+	}
+
+	r.issueCommenter = github.NewIssueCommenter(
+		r.githubClient,
+		project.GitHubOwner.String,
+		project.GitHubRepo.String,
+		int(task.GitHubIssueNumber.Int64),
+		github.DefaultIssueCommenterConfig(),
+	)
+}
+
+// postIssueComment posts a comment to the linked GitHub issue (if any)
+func (r *RalphLoop) postIssueComment(ctx context.Context, comment string) {
+	if r.issueCommenter == nil {
+		return
+	}
+
+	if err := r.issueCommenter.Post(ctx, comment); err != nil {
+		r.activity.Debug(r.session.IterationCount, fmt.Sprintf("failed to post issue comment: %v", err))
 	}
 }
 
@@ -109,6 +190,13 @@ func (r *RalphLoop) SetModel(model string) {
 func (r *RalphLoop) Run(ctx context.Context) error {
 	fmt.Printf("RalphLoop.Run: starting for session %s (hat: %s)\n", r.session.ID, r.session.Hat)
 
+	// Cleanup temp files from large tool responses when session ends
+	defer func() {
+		if err := tools.CleanupTempResponses(); err != nil {
+			fmt.Printf("RalphLoop.Run: warning - failed to cleanup temp responses: %v\n", err)
+		}
+	}()
+
 	if r.client == nil {
 		fmt.Printf("RalphLoop.Run: ERROR - Anthropic client is nil\n")
 		return ErrNoAnthropicClient
@@ -117,6 +205,34 @@ func (r *RalphLoop) Run(ctx context.Context) error {
 	// Initialize activity recorder with WebSocket broadcasting
 	r.activity = NewActivityRecorder(r.db, r.session.ID, r.session.TaskID, r.broadcastEvent)
 	r.activity.SetHat(r.session.Hat)
+
+	// Initialize context guard for token management
+	r.contextGuard = NewContextGuard(r.activity)
+
+	// Initialize handoff generator for checkpoint summaries
+	r.handoffGen = NewHandoffGenerator(r.db, r.manager.gitOps)
+
+	// Initialize hints loader for project context
+	if r.session.WorktreePath != "" {
+		r.hintsLoader = hints.NewLoader(r.session.WorktreePath)
+	}
+
+	// Initialize quality gate with activity recorder
+	if r.qualityGate != nil {
+		r.qualityGate.activity = r.activity
+	}
+
+	// Set activity recorder on executor for quality gate logging
+	if r.executor != nil {
+		r.executor.SetActivityRecorder(r.activity)
+		r.executor.SetQualityGate(r.qualityGate)
+	}
+
+	// Initialize issue commenter for GitHub issue sync
+	task, _ := r.db.GetTaskByID(r.session.TaskID)
+	if task != nil {
+		r.initIssueCommenter(task)
+	}
 
 	// Save checkpoint when function exits (success or failure) to preserve state for resume
 	defer func() {
@@ -144,6 +260,20 @@ func (r *RalphLoop) Run(ctx context.Context) error {
 		"hat":           r.session.Hat,
 		"worktree_path": r.session.WorktreePath,
 	})
+
+	// Post "started" comment to linked GitHub issue
+	if r.issueCommenter != nil && len(r.messages) == 0 {
+		commentData := &github.CommentData{
+			Iteration:   0,
+			TotalTokens: 0,
+			Hat:         r.session.Hat,
+		}
+		if task != nil {
+			commentData.Branch = task.GetBranchName()
+		}
+		comment := github.BuildStartedComment(commentData)
+		r.postIssueComment(ctx, comment)
+	}
 
 	// Initialize conversation with context message (only if not restored from checkpoint)
 	// If messages already has content, we restored from checkpoint and should continue from there
@@ -193,10 +323,51 @@ func (r *RalphLoop) Run(ctx context.Context) error {
 			return err
 		}
 
-		// 3. Send to Claude
+		// 2.5. Check loop health
+		if shouldTerminate, reason := r.health.ShouldTerminate(); shouldTerminate {
+			r.activity.RecordLoopHealth(r.session.IterationCount, &LoopHealthData{
+				Status:              string(r.health.Status()),
+				ConsecutiveFailures: r.health.ConsecutiveFailures,
+				QualityGateAttempts: r.health.QualityGateAttempts,
+				TotalFailures:       r.health.TotalFailures,
+			})
+			r.broadcastEvent(websocket.EventSessionCompleted, map[string]any{
+				"session_id": r.session.ID,
+				"outcome":    string(reason),
+				"iterations": r.session.IterationCount,
+			})
+			return fmt.Errorf("loop terminated: %s", reason)
+		}
+
+		// Record health status if changed
+		if r.health.StatusChanged() {
+			r.activity.RecordLoopHealth(r.session.IterationCount, &LoopHealthData{
+				Status:              string(r.health.Status()),
+				ConsecutiveFailures: r.health.ConsecutiveFailures,
+				QualityGateAttempts: r.health.QualityGateAttempts,
+				TotalFailures:       r.health.TotalFailures,
+			})
+		}
+
+		// 3. Check and compact context if needed
+		if r.contextGuard != nil {
+			compacted, wasCompacted, err := r.contextGuard.CheckAndCompact(r.messages, systemPrompt, r.session.Scratchpad)
+			if err != nil {
+				fmt.Printf("RalphLoop.Run: warning - context compaction failed: %v\n", err)
+			} else if wasCompacted {
+				r.messages = compacted
+				// Save checkpoint after compaction
+				if err := r.checkpoint(); err != nil {
+					fmt.Printf("RalphLoop.Run: warning - post-compaction checkpoint failed: %v\n", err)
+				}
+			}
+		}
+
+		// 4. Send to Claude
 		fmt.Printf("RalphLoop.Run: iteration %d - sending message to Claude\n", r.session.IterationCount+1)
 		r.activity.Debug(r.session.IterationCount+1, fmt.Sprintf("Sending API request (iteration %d, %d messages)", r.session.IterationCount+1, len(r.messages)))
 
+		r.lastSystemPrompt = systemPrompt // Cache for token estimation
 		apiStart := time.Now()
 		response, err := r.sendMessage(ctx, systemPrompt)
 		apiDuration := time.Since(apiStart).Milliseconds()
@@ -257,6 +428,20 @@ func (r *RalphLoop) Run(ctx context.Context) error {
 					fmt.Printf("RalphLoop.Run: warning - failed to record tool call: %v\n", err)
 				}
 
+				// Check for tool repetition before execution
+				paramsJSON, _ := json.Marshal(block.Input)
+				if allowed, reason := r.health.CheckToolCall(block.Name, string(paramsJSON)); !allowed {
+					r.activity.Debug(r.session.IterationCount, fmt.Sprintf("Tool %s blocked: %s", block.Name, reason))
+
+					results = append(results, toolbelt.ContentBlock{
+						Type:      "tool_result",
+						ToolUseID: block.ID,
+						Content:   fmt.Sprintf("Tool call blocked: %s. Please try a different approach or use different parameters.", reason),
+						IsError:   true,
+					})
+					continue // Skip execution, move to next tool
+				}
+
 				// Execute the tool
 				toolStart := time.Now()
 				var result ToolResult
@@ -278,8 +463,20 @@ func (r *RalphLoop) Run(ctx context.Context) error {
 
 				if result.IsError {
 					r.activity.DebugError(r.session.IterationCount, fmt.Sprintf("Tool %s failed after %dms", block.Name, toolDuration), map[string]any{"output": truncateOutput(result.Output, 500)})
+					r.health.RecordFailure(block.Name)
+
+					// Track quality gate blocks specifically
+					if block.Name == "task_complete" && strings.Contains(result.Output, "QUALITY_BLOCKED") {
+						r.health.RecordQualityBlock()
+					}
 				} else {
 					r.activity.DebugWithDuration(r.session.IterationCount, fmt.Sprintf("Tool %s completed (%d bytes output)", block.Name, len(result.Output)), toolDuration)
+					r.health.RecordSuccess()
+
+					// Track quality gate passes
+					if block.Name == "task_complete" && strings.Contains(result.Output, "QUALITY_PASSED") {
+						r.health.RecordQualityPass()
+					}
 				}
 
 				fmt.Printf("RalphLoop.Run: tool %s result (error=%v): %s\n", block.Name, result.IsError, truncateOutput(result.Output, 200))
@@ -334,21 +531,61 @@ func (r *RalphLoop) Run(ctx context.Context) error {
 		// 7.5. Process checklist signals
 		r.processChecklistSignals(responseText)
 
+		// 7.6. Process scratchpad signal
+		if scratchpad, found := parseScratchpadSignal(responseText); found {
+			r.session.Scratchpad = security.SanitizeForPrompt(scratchpad)
+			r.activity.Debug(r.session.IterationCount, fmt.Sprintf("Updated scratchpad (%d chars)", len(r.session.Scratchpad)))
+		}
+
+		// 7.7. Process memory signals
+		r.processMemorySignals(responseText)
+
 		// 8. Check for task completion
 		if r.detectCompletion(responseText) {
 			// Verify checklist completion
 			allComplete, issues := r.verifyChecklist()
 
+			// If there are issues, check if they're acknowledged
+			if !allComplete {
+				hasAcknowledgment := strings.Contains(responseText, SignalAcknowledgeFailures)
+
+				if !hasAcknowledgment {
+					// Send back for resolution - require explicit acknowledgment
+					issuesList := r.formatChecklistIssues(issues)
+					r.messages = append(r.messages, toolbelt.AnthropicMessage{
+						Role: "user",
+						Content: fmt.Sprintf(`Some checklist items are not complete:
+%s
+
+Please either:
+1. Complete the remaining items and call TASK_COMPLETE again
+2. Mark items as failed with CHECKLIST_FAILED:<id>:<reason>
+3. If failures are known and accepted, output ACKNOWLEDGE_FAILURES along with TASK_COMPLETE
+4. Use HAT_TRANSITION:resolver if blocked`, issuesList),
+					})
+					fmt.Printf("RalphLoop.Run: task completion blocked - %d unacknowledged checklist issues\n", len(issues))
+					continue // Continue loop, don't complete
+				}
+			}
+
 			// Determine outcome
 			outcome := "completed"
 			if !allComplete {
-				outcome = "completed_with_issues"
-				fmt.Printf("RalphLoop.Run: task completed with %d checklist issues\n", len(issues))
+				outcome = "completed_with_acknowledged_issues"
+				fmt.Printf("RalphLoop.Run: task completed with %d acknowledged checklist issues\n", len(issues))
 			}
 
 			// Record completion signal
 			if err := r.activity.RecordCompletion(r.session.IterationCount, SignalTaskComplete); err != nil {
 				fmt.Printf("RalphLoop.Run: warning - failed to record completion: %v\n", err)
+			}
+
+			// Post completion comment to GitHub issue
+			if r.issueCommenter != nil {
+				commentData := r.buildCommentData(ctx)
+				summary := r.getCompletionSummary()
+				comment := github.BuildCompletedComment(commentData, summary)
+				r.postIssueComment(ctx, comment)
 			}
 
 			r.broadcastEvent(websocket.EventSessionCompleted, map[string]any{
@@ -367,6 +604,15 @@ func (r *RalphLoop) Run(ctx context.Context) error {
 			oldHat := r.session.Hat
 			if err := r.activity.RecordHatTransition(r.session.IterationCount, oldHat, nextHat); err != nil {
 				fmt.Printf("RalphLoop.Run: warning - failed to record hat transition: %v\n", err)
+			}
+
+			// Post hat transition comment to GitHub issue (with debouncing)
+			if r.issueCommenter != nil && r.issueCommenter.ShouldPostHatTransition(r.session.IterationCount) {
+				commentData := r.buildCommentData(ctx)
+				commentData.Hat = nextHat
+				commentData.PreviousHat = oldHat
+				comment := github.BuildHatTransitionComment(commentData)
+				r.postIssueComment(ctx, comment)
 			}
 
 			// Store transition for manager to handle
@@ -388,8 +634,8 @@ func (r *RalphLoop) Run(ctx context.Context) error {
 			}
 		}
 
-		// 11. Add continuation prompt for next iteration
-		continuationMsg := "Continue. If the task is complete, output TASK_COMPLETE. If you need to transition to a different hat, output HAT_TRANSITION:<hat_name>."
+		// 11. Add continuation prompt for next iteration (hat-specific)
+		continuationMsg := r.getContinuationPrompt()
 		r.messages = append(r.messages, toolbelt.AnthropicMessage{
 			Role:    "user",
 			Content: continuationMsg,
@@ -410,6 +656,115 @@ func truncateOutput(s string, maxLen int) string {
 	return s[:maxLen] + "..."
 }
 
+// buildToolDescriptions creates a formatted list of available tools with descriptions
+func (r *RalphLoop) buildToolDescriptions() string {
+	var sb strings.Builder
+	sb.WriteString("## Available Tools\n\n")
+
+	for _, tool := range r.tools {
+		// Truncate description to keep it concise
+		desc := tool.Description
+		if len(desc) > 200 {
+			desc = desc[:197] + "..."
+		}
+		sb.WriteString(fmt.Sprintf("- **%s**: %s\n", tool.Name, desc))
+	}
+
+	return sb.String()
+}
+
+// buildMemorySection retrieves relevant memories and formats them for the prompt
+func (r *RalphLoop) buildMemorySection(projectID string) string {
+	if r.db == nil {
+		return ""
+	}
+
+	// Get task for keywords
+	task, err := r.db.GetTaskByID(r.session.TaskID)
+	if err != nil || task == nil {
+		return ""
+	}
+
+	// Extract keywords from task
+	keywords := extractKeywords(task.Title + " " + task.GetDescription())
+
+	// Get relevant memories
+	ctx := db.MemoryContext{
+		ProjectID:        projectID,
+		CurrentHat:       r.session.Hat,
+		CurrentSessionID: r.session.ID, // Exclude self
+		RelevantPaths:    []string{},   // Could be populated from recent tool calls
+		TaskKeywords:     keywords,
+	}
+
+	memories, err := r.db.GetRelevantMemories(ctx, 8)
+	if err != nil || len(memories) == 0 {
+		return ""
+	}
+
+	var sb strings.Builder
+	sb.WriteString("## Project Knowledge\n\n")
+	sb.WriteString("Learnings from previous work on this project:\n\n")
+
+	// Group by type for readability
+	byType := make(map[db.MemoryType][]db.Memory)
+	for _, m := range memories {
+		byType[m.Type] = append(byType[m.Type], m)
+	}
+
+	// Order types for consistent display
+	typeOrder := []db.MemoryType{
+		db.MemoryArchitecture, db.MemoryPattern, db.MemoryPitfall,
+		db.MemoryDecision, db.MemoryFix, db.MemoryConvention,
+		db.MemoryDependency, db.MemoryConstraint,
+	}
+
+	for _, memType := range typeOrder {
+		mems := byType[memType]
+		if len(mems) == 0 {
+			continue
+		}
+
+		sb.WriteString(fmt.Sprintf("### %s\n", memType.Title()))
+		for _, m := range mems {
+			sb.WriteString(fmt.Sprintf("- **%s**: %s\n", m.Title, m.Content))
+		}
+		sb.WriteString("\n")
+	}
+
+	return sb.String()
+}
+
+// extractKeywords extracts relevant keywords from text for memory matching
+func extractKeywords(text string) []string {
+	// Simple keyword extraction - split on whitespace and filter
+	words := strings.Fields(strings.ToLower(text))
+	keywords := make([]string, 0, len(words))
+
+	// Filter out common words
+	stopWords := map[string]bool{
+		"the": true, "a": true, "an": true, "and": true, "or": true,
+		"to": true, "in": true, "on": true, "for": true, "of": true,
+		"is": true, "it": true, "this": true, "that": true, "with": true,
+		"as": true, "be": true, "are": true, "was": true, "were": true,
+	}
+
+	for _, word := range words {
+		// Skip short words and stop words
+		if len(word) < 3 || stopWords[word] {
+			continue
+		}
+		keywords = append(keywords, word)
+	}
+
+	// Limit to first 10 keywords
+	if len(keywords) > 10 {
+		keywords = keywords[:10]
+	}
+
+	return keywords
+}
+
 // checkBudget returns an error if any budget limit is exceeded
 func (r *RalphLoop) checkBudget() error {
 	// Check iteration limit
@@ -425,6 +780,13 @@ func (r *RalphLoop) checkBudget() error {
 	// Check dollar budget
 	if r.session.DollarsBudget != nil && r.session.Cost() >= *r.session.DollarsBudget {
 		return ErrDollarBudget
+	}
+
+	// Check runtime limit
+	if r.session.MaxRuntime > 0 && !r.session.StartedAt.IsZero() {
+		if time.Since(r.session.StartedAt) > r.session.MaxRuntime {
+			return ErrRuntimeLimit
+		}
 	}
 
 	return nil
@@ -475,11 +837,44 @@ func (r *RalphLoop) buildPrompt() (string, error) {
 		toolNames[i] = tool.Name
 	}
 
+	// Build tool descriptions for context
+	toolDescriptions := r.buildToolDescriptions()
+
+	// Load project hints
+	var projectHints string
+	if r.hintsLoader != nil {
+		loadedHints, err := r.hintsLoader.Load()
+		if err != nil {
+			fmt.Printf("RalphLoop.buildPrompt: warning - failed to load hints: %v\n", err)
+		} else if loadedHints != "" {
+			projectHints = loadedHints
+			fmt.Printf("RalphLoop.buildPrompt: loaded project hints (%d chars)\n", len(loadedHints))
+		}
+	}
+
+	// Fetch refined prompt from planning session (if any)
+	var refinedPrompt string
+	if planningSession, err := r.db.GetPlanningSessionByTaskID(r.session.TaskID); err == nil && planningSession != nil {
+		if planningSession.RefinedPrompt.Valid && planningSession.RefinedPrompt.String != "" {
+			refinedPrompt = planningSession.RefinedPrompt.String
+		}
+	}
+
+	// Load project memories from database
+	var projectMemories string
+	if project != nil {
+		projectMemories = r.buildMemorySection(task.ProjectID)
+	}
+
 	ctx := &PromptContext{
-		Task:    task,
-		Session: r.session,
-		Project: projectCtx,
-		Tools:   toolNames,
+		Task:             task,
+		Session:          r.session,
+		Project:          projectCtx,
+		Tools:            toolNames,
+		RefinedPrompt:    refinedPrompt,
+		ToolDescriptions: toolDescriptions,
+		ProjectHints:     projectHints,
+		ProjectMemories:  projectMemories,
 	}
 
 	return r.manager.promptLoader.Get(r.session.Hat, ctx)
@@ -547,6 +942,20 @@ func (r *RalphLoop) checkpoint() error {
 		"output_tokens": r.session.OutputTokens,
 		"hat":           r.session.Hat,
 		"messages":      r.messages,
+		"scratchpad":    r.session.Scratchpad,
+	}
+
+	// Include failure context if present
+	if r.lastError != "" {
+		state["last_error"] = r.lastError
+		state["failed_at"] = r.failedAt
+		state["recovery_hint"] = r.recoveryHint
+	}
+
+	// Generate handoff summary for easier review and resume
+	if r.handoffGen != nil {
+		handoff := r.handoffGen.Generate(r.session, r.session.Scratchpad, r.session.WorktreePath)
+		state["handoff"] = handoff.FormatForAPI()
 	}
 
 	stateJSON, err := json.Marshal(state)
@@ -561,6 +970,22 @@ func (r *RalphLoop) checkpoint() error {
 
 	_, err = r.db.CreateSessionCheckpoint(r.session.ID, r.session.IterationCount, stateJSON)
 	return err
+}
+
+// SetFailureContext sets failure information for checkpoint recovery
+func (r *RalphLoop) SetFailureContext(err error, failedAt, recoveryHint string) {
+	if err != nil {
+		r.lastError = err.Error()
+	}
+	r.failedAt = failedAt
+	r.recoveryHint = recoveryHint
+}
+
+// ClearFailureContext clears any previous failure state
+func (r *RalphLoop) ClearFailureContext() {
+	r.lastError = ""
+	r.failedAt = ""
+	r.recoveryHint = ""
 }
 
 // broadcastEvent sends an event through the WebSocket hub
@@ -597,10 +1022,16 @@ func (r *RalphLoop) RestoreFromCheckpoint(checkpoint *db.SessionCheckpoint) erro
 		InputTokens  int64                       `json:"input_tokens"`
 		OutputTokens int64                       `json:"output_tokens"`
 		// Legacy fields for backwards compatibility
-		TokensUsed  int64                        `json:"tokens_used"`
-		DollarsUsed float64                      `json:"dollars_used"`
-		Hat         string                       `json:"hat"`
-		Messages    []toolbelt.AnthropicMessage  `json:"messages"`
+		TokensUsed   int64                       `json:"tokens_used"`
+		DollarsUsed  float64                     `json:"dollars_used"`
+		Hat          string                      `json:"hat"`
+		Messages     []toolbelt.AnthropicMessage `json:"messages"`
+		Scratchpad   string                      `json:"scratchpad,omitempty"`
+		Handoff      map[string]any              `json:"handoff,omitempty"`
+		// Failure context for recovery
+		LastError    string                      `json:"last_error,omitempty"`
+		FailedAt     string                      `json:"failed_at,omitempty"`
+		RecoveryHint string                      `json:"recovery_hint,omitempty"`
 	}
 
 	if err := json.Unmarshal(checkpoint.State, &state); err != nil {
@@ -612,10 +1043,21 @@ func (r *RalphLoop) RestoreFromCheckpoint(checkpoint *db.SessionCheckpoint) erro
 	if r.activity != nil {
 		r.activity.SetHat(state.Hat)
 	}
+
+	// Update tools for the restored hat
+	r.tools = GetToolDefinitionsForHat(state.Hat)
+
+	// Restore scratchpad
+	r.session.Scratchpad = security.SanitizeForPrompt(state.Scratchpad)
+
+	// Sanitize restored messages to prevent prompt injection via stored content
+	for i := range state.Messages {
+		state.Messages[i].Content = sanitizeMessageContent(state.Messages[i].Content)
+	}
 	r.messages = state.Messages
 
-	fmt.Printf("RestoreFromCheckpoint: restored iteration=%d, hat=%s, messages=%d, inputTokens=%d, outputTokens=%d\n",
-		state.Iteration, state.Hat, len(state.Messages), state.InputTokens, state.OutputTokens)
+	fmt.Printf("RestoreFromCheckpoint: restored iteration=%d, hat=%s, messages=%d, inputTokens=%d, outputTokens=%d, scratchpad=%d chars\n",
+		state.Iteration, state.Hat, len(state.Messages), state.InputTokens, state.OutputTokens, len(state.Scratchpad))
 
 	// Use new fields if available, otherwise estimate from legacy
 	if state.InputTokens > 0 || state.OutputTokens > 0 {
@@ -627,7 +1069,77 @@ func (r *RalphLoop) RestoreFromCheckpoint(checkpoint *db.SessionCheckpoint) erro
 		r.session.OutputTokens = state.TokensUsed / 3
 	}
 
+	// Build recovery/continuation context
+	var recoveryMsg strings.Builder
+
+	// Add handoff context if available
+	if state.Handoff != nil {
+		if continuation, ok := state.Handoff["continuation_prompt"].(string); ok && continuation != "" {
+			recoveryMsg.WriteString("## Resuming Session\n\n")
+			recoveryMsg.WriteString(continuation)
+			recoveryMsg.WriteString("\n\n")
+		}
+	}
+
+	// If checkpoint had failure context, add recovery message
+	if state.LastError != "" {
+		recoveryMsg.WriteString(fmt.Sprintf("Previous attempt failed: %s\n", state.LastError))
+		recoveryMsg.WriteString(fmt.Sprintf("Location: %s\n", state.FailedAt))
+		if state.RecoveryHint != "" {
+			recoveryMsg.WriteString(fmt.Sprintf("Hint: %s\n", state.RecoveryHint))
+		}
+		recoveryMsg.WriteString("\nPlease try a different approach. If blocked, use HAT_TRANSITION:resolver to handle the blocker.\n")
+	}
+
+	// Add recovery message if we have any content
+	if recoveryMsg.Len() > 0 {
+		r.messages = append(r.messages, toolbelt.AnthropicMessage{
+			Role:    "user",
+			Content: recoveryMsg.String(),
+		})
+		fmt.Printf("RestoreFromCheckpoint: added recovery/continuation context\n")
+	}
+
 	return nil
+}
+
+// sanitizeMessageContent sanitizes the Content field of an AnthropicMessage.
+// Content can be either a string or []ContentBlock, both need sanitization.
+func sanitizeMessageContent(content any) any {
+	switch c := content.(type) {
+	case string:
+		return security.SanitizeForPrompt(c)
+	case []any:
+		// Handle []ContentBlock (arrives as []any from JSON unmarshal)
+		for i, block := range c {
+			if blockMap, ok := block.(map[string]any); ok {
+				// Sanitize text content in the block
+				if text, ok := blockMap["text"].(string); ok {
+					blockMap["text"] = security.SanitizeForPrompt(text)
+				}
+				// Sanitize tool input if present
+				if input, ok := blockMap["input"].(string); ok {
+					blockMap["input"] = security.SanitizeForPrompt(input)
+				}
+				// Sanitize tool result content
+				if content, ok := blockMap["content"].(string); ok {
+					blockMap["content"] = security.SanitizeForPrompt(content)
+				}
+				c[i] = blockMap
+			}
+		}
+		return c
+	case []toolbelt.ContentBlock:
+		// Handle typed []ContentBlock
+		for i := range c {
+			c[i].Text = security.SanitizeForPrompt(c[i].Text)
+			c[i].Content = security.SanitizeForPrompt(c[i].Content)
+		}
+		return c
+	default:
+		// Unknown type, return as-is
+		return content
+	}
 }
 
 // buildChecklistPrompt creates the initial prompt with checklist context
@@ -657,92 +1169,111 @@ func (r *RalphLoop) buildChecklistPrompt(items []*db.ChecklistItem) string {
 }
 
 // processChecklistSignals detects and processes checklist update signals
+// Uses findAllSignals to process all signals in a single pass without reset bugs
 func (r *RalphLoop) processChecklistSignals(response string) {
-	// Process CHECKLIST_DONE signals
-	for {
-		idx := strings.Index(response, SignalChecklistDone)
-		if idx == -1 {
-			break
-		}
-
-		// Extract item ID
-		remaining := response[idx+len(SignalChecklistDone):]
-		endIdx := strings.IndexAny(remaining, " \t\n\r")
-		if endIdx == -1 {
-			endIdx = len(remaining)
-		}
-		itemID := strings.TrimSpace(remaining[:endIdx])
-
+	// Process all CHECKLIST_DONE signals
+	doneSignals := findAllSignals(response, SignalChecklistDone)
+	for _, sig := range doneSignals {
+		itemID := strings.TrimSpace(sig)
 		if itemID != "" {
-			// Update item status in DB
 			if err := r.db.UpdateChecklistItemStatus(itemID, db.ChecklistItemStatusDone, ""); err != nil {
 				fmt.Printf("RalphLoop: warning - failed to update checklist item %s: %v\n", itemID, err)
 			} else {
-				// Record activity
 				if r.activity != nil {
 					r.activity.RecordChecklistUpdate(r.session.IterationCount, itemID, db.ChecklistItemStatusDone, "")
 				}
 				fmt.Printf("RalphLoop: marked checklist item %s as done\n", itemID)
-				// Notify for GitHub sync
 				r.manager.NotifyChecklistUpdated(r.session.TaskID)
 			}
 		}
-
-		// Move past this signal for next search
-		response = remaining[endIdx:]
 	}
 
-	// Process CHECKLIST_FAILED signals
-	response = response // Reset for second pass
+	// Process all CHECKLIST_FAILED signals
+	failedSignals := findAllSignals(response, SignalChecklistFailed)
+	for _, sig := range failedSignals {
+		// Format: <item_id>:<reason>
+		parts := strings.SplitN(sig, ":", 2)
+		itemID := strings.TrimSpace(parts[0])
+		reason := ""
+		if len(parts) > 1 {
+			reason = strings.TrimSpace(parts[1])
+		}
+
+		if itemID != "" {
+			if err := r.db.UpdateChecklistItemStatus(itemID, db.ChecklistItemStatusFailed, reason); err != nil {
+				fmt.Printf("RalphLoop: warning - failed to update checklist item %s: %v\n", itemID, err)
+			} else {
+				if r.activity != nil {
+					r.activity.RecordChecklistUpdate(r.session.IterationCount, itemID, db.ChecklistItemStatusFailed, reason)
+				}
+				fmt.Printf("RalphLoop: marked checklist item %s as failed: %s\n", itemID, reason)
+				r.manager.NotifyChecklistUpdated(r.session.TaskID)
+			}
+		}
+	}
+}
+
+// findAllSignals finds all instances of a signal and extracts their content
+func findAllSignals(content, signal string) []string {
+	var results []string
+	remaining := content
+
 	for {
-		idx := strings.Index(response, SignalChecklistFailed)
+		idx := strings.Index(remaining, signal)
 		if idx == -1 {
 			break
 		}
 
-		// Extract item ID and reason
-		remaining := response[idx+len(SignalChecklistFailed):]
+		// Extract signal content until newline or end
+		start := idx + len(signal)
+		contentAfter := remaining[start:]
 
-		// Format: CHECKLIST_FAILED:<item_id>:<reason>
-		parts := strings.SplitN(remaining, ":", 2)
-		if len(parts) >= 1 {
-			// Get item ID (may have trailing content)
-			itemPart := parts[0]
-			endIdx := strings.IndexAny(itemPart, " \t\n\r")
-			if endIdx == -1 {
-				endIdx = len(itemPart)
-			}
-			itemID := strings.TrimSpace(itemPart[:endIdx])
-
-			reason := ""
-			if len(parts) >= 2 {
-				reasonPart := parts[1]
-				endIdx := strings.IndexAny(reasonPart, "\n\r")
-				if endIdx == -1 {
-					endIdx = len(reasonPart)
-				}
-				reason = strings.TrimSpace(reasonPart[:endIdx])
-			}
-
-			if itemID != "" {
-				// Update item status in DB
-				if err := r.db.UpdateChecklistItemStatus(itemID, db.ChecklistItemStatusFailed, reason); err != nil {
-					fmt.Printf("RalphLoop: warning - failed to update checklist item %s: %v\n", itemID, err)
-				} else {
-					// Record activity
-					if r.activity != nil {
-						r.activity.RecordChecklistUpdate(r.session.IterationCount, itemID, db.ChecklistItemStatusFailed, reason)
-					}
-					fmt.Printf("RalphLoop: marked checklist item %s as failed: %s\n", itemID, reason)
-					// Notify for GitHub sync
-					r.manager.NotifyChecklistUpdated(r.session.TaskID)
-				}
-			}
+		// Find end of signal content (newline or double newline)
+		endIdx := strings.IndexAny(contentAfter, "\n\r")
+		if endIdx == -1 {
+			endIdx = len(contentAfter)
 		}
 
-		// Move past this signal
-		response = remaining
+		signalContent := strings.TrimSpace(contentAfter[:endIdx])
+		if signalContent != "" {
+			results = append(results, signalContent)
+		}
+
+		remaining = remaining[start+endIdx:]
 	}
+
+	return results
+}
+
+// parseScratchpadSignal extracts scratchpad content from a response
+// The scratchpad continues from the signal until the next major signal or end of text
+func parseScratchpadSignal(text string) (string, bool) {
+	idx := strings.Index(text, SignalScratchpad)
+	if idx == -1 {
+		return "", false
+	}
+
+	// Extract from signal to end or next major signal
+	content := text[idx+len(SignalScratchpad):]
+
+	// Find end of scratchpad (next signal or end)
+	// Check for common signals that would end the scratchpad
+	endSignals := []string{
+		SignalTaskComplete,
+		SignalHatComplete,
+		SignalHatTransition,
+		SignalChecklistDone,
+		SignalChecklistFailed,
+	}
+
+	endIdx := len(content)
+	for _, sig := range endSignals {
+		if sigIdx := strings.Index(content, sig); sigIdx != -1 && sigIdx < endIdx {
+			endIdx = sigIdx
+		}
+	}
+
+	return strings.TrimSpace(content[:endIdx]), true
 }
 
 // verifyChecklist checks if all selected checklist items are completed
@@ -761,4 +1292,212 @@ func (r *RalphLoop) verifyChecklist() (bool, []db.ChecklistIssue) {
 	}
 
 	return len(issues) == 0, issues
+}
+
+// formatChecklistIssues formats checklist issues for display to the AI
+func (r *RalphLoop) formatChecklistIssues(issues []db.ChecklistIssue) string {
+	var sb strings.Builder
+	for _, issue := range issues {
+		sb.WriteString(fmt.Sprintf("- [%s] %s (id: %s)", issue.Status, issue.Description, issue.ItemID))
+		if issue.Notes != "" {
+			sb.WriteString(fmt.Sprintf(" - %s", issue.Notes))
+		}
+		sb.WriteString("\n")
+	}
+	return sb.String()
+}
+
+// hatContinuations provides hat-specific continuation prompts
+var hatContinuations = map[string]string{
+	"explorer": `Continue exploring. When you have enough information:
+- Transition to planner to create strategy: HAT_TRANSITION:planner
+- Or transition to creator if ready to implement: HAT_TRANSITION:creator
+If exploration is complete, output TASK_COMPLETE.`,
+
+	"planner": `Continue planning. When the strategy is ready:
+- Transition to designer for architecture: HAT_TRANSITION:designer
+- Or transition to creator to implement: HAT_TRANSITION:creator
+If planning is complete, output TASK_COMPLETE.`,
+
+	"designer": `Continue designing. When the architecture is ready:
+- Transition to creator to implement: HAT_TRANSITION:creator
+If design is complete, output TASK_COMPLETE.`,
+
+	"creator": `Continue implementing. Report progress with CHECKLIST_DONE/FAILED signals.
+When implementation is complete:
+- Transition to critic for review: HAT_TRANSITION:critic
+- Or transition to editor to finalize: HAT_TRANSITION:editor
+If blocked, use HAT_TRANSITION:resolver.`,
+
+	"critic": `Continue reviewing. If issues found:
+- Send back to creator for fixes: HAT_TRANSITION:creator
+If approved:
+- Transition to editor for polish: HAT_TRANSITION:editor
+If review is complete, output TASK_COMPLETE.`,
+
+	"editor": `Continue polishing. When ready to finalize:
+- Commit any remaining changes
+- Create PR if needed
+- Output TASK_COMPLETE with the PR URL when done
+If blocked, use HAT_TRANSITION:resolver.`,
+
+	"resolver": `Continue resolving blockers. When resolved:
+- Return to creator: HAT_TRANSITION:creator
+- Return to critic: HAT_TRANSITION:critic
+- Or go to editor: HAT_TRANSITION:editor
+If all blockers resolved, output TASK_COMPLETE.`,
+}
+
+// getContinuationPrompt returns a hat-specific continuation prompt
+func (r *RalphLoop) getContinuationPrompt() string {
+	if cont, ok := hatContinuations[r.session.Hat]; ok {
+		return cont
+	}
+	return "Continue. Output TASK_COMPLETE when done or HAT_TRANSITION:<hat> to switch roles."
+}
+
+// processMemorySignals detects and stores memory signals from the response
+func (r *RalphLoop) processMemorySignals(response string) {
+	memories := findAllSignals(response, SignalMemory)
+	if len(memories) == 0 {
+		return
+	}
+
+	// Get task for project ID
+	task, err := r.db.GetTaskByID(r.session.TaskID)
+	if err != nil || task == nil {
+		fmt.Printf("RalphLoop: warning - cannot store memories without task: %v\n", err)
+		return
+	}
+
+	for _, sig := range memories {
+		memory, valid := parseMemorySignal(sig, task.ProjectID, r.session)
+		if !valid {
+			continue
+		}
+
+		if err := r.db.CreateMemory(memory); err != nil {
+			fmt.Printf("RalphLoop: warning - failed to store memory: %v\n", err)
+			continue
+		}
+
+		// Record memory creation in activity log
+		if r.activity != nil {
+			r.activity.RecordMemoryCreated(r.session.IterationCount, &MemoryCreatedData{
+				MemoryID: memory.ID,
+				Type:     string(memory.Type),
+				Title:    memory.Title,
+				Source:   string(memory.Source),
+			})
+		}
+
+		r.activity.Debug(r.session.IterationCount, fmt.Sprintf("Stored memory: %s - %s", memory.Type, memory.Title))
+	}
+}
+
+// parseMemorySignal parses a memory signal into a Memory struct
+// Format: MEMORY:<type>:<content>
+func parseMemorySignal(sig, projectID string, session *ActiveSession) (*db.Memory, bool) {
+	parts := strings.SplitN(sig, ":", 2)
+	if len(parts) != 2 {
+		return nil, false
+	}
+
+	memType := strings.TrimSpace(parts[0])
+	content := strings.TrimSpace(parts[1])
+
+	if content == "" || !db.IsValidMemoryType(memType) {
+		return nil, false
+	}
+
+	// Extract title (first sentence or line)
+	title := content
+	if idx := strings.IndexAny(content, ".\n"); idx != -1 {
+		title = content[:idx]
+	}
+	if len(title) > 100 {
+		title = title[:100] + "..."
+	}
+
+	return &db.Memory{
+		ID:                 uuid.New().String(),
+		ProjectID:          projectID,
+		Type:               db.MemoryType(memType),
+		Title:              title,
+		Content:            content,
+		Confidence:         db.InitialConfidenceExplicit,
+		CreatedByHat:       session.Hat,
+		CreatedByTaskID:    toNullString(session.TaskID),
+		CreatedBySessionID: toNullString(session.ID),
+		Source:             db.SourceExplicit,
+		CreatedAt:          time.Now(),
+	}, true
+}
+
+// toNullString converts a string to sql.NullString
+func toNullString(s string) sql.NullString {
+	if s == "" {
+		return sql.NullString{}
+	}
+	return sql.NullString{String: s, Valid: true}
+}
+
+// buildCommentData builds a CommentData struct for GitHub issue comments
+func (r *RalphLoop) buildCommentData(ctx context.Context) *github.CommentData {
+	data := &github.CommentData{
+		SessionID:   r.session.ID,
+		Iteration:   r.session.IterationCount,
+		TotalTokens: r.session.InputTokens + r.session.OutputTokens,
+		Hat:         r.session.Hat,
+	}
+
+	// Get task for branch name
+	if task, err := r.db.GetTaskByID(r.session.TaskID); err == nil && task != nil {
+		data.Branch = task.GetBranchName()
+
+		// Get checklist items for progress
+		if checklist, err := r.db.GetChecklistByTaskID(task.ID); err == nil && checklist != nil {
+			if items, err := r.db.GetChecklistItems(checklist.ID); err == nil {
+				for _, item := range items {
+					data.ChecklistItems = append(data.ChecklistItems, github.ChecklistItemStatus{
+						Description: item.Description,
+						Status:      item.Status,
+					})
+				}
+			}
+		}
+	}
+
+	// Note: Changed files could be populated from git status if needed
+	// For now, we rely on the checklist for progress tracking
+
+	return data
+}
+
+// getCompletionSummary returns a summary of completed checklist items
+func (r *RalphLoop) getCompletionSummary() []string {
+	var summary []string
+
+	task, err := r.db.GetTaskByID(r.session.TaskID)
+	if err != nil || task == nil {
+		return summary
+	}
+
+	checklist, err := r.db.GetChecklistByTaskID(task.ID)
+	if err != nil || checklist == nil {
+		return summary
+	}
+
+	items, err := r.db.GetChecklistItems(checklist.ID)
+	if err != nil {
+		return summary
+	}
+
+	for _, item := range items {
+		if item.Status == "done" {
+			summary = append(summary, item.Description)
+		}
+	}
+
+	return summary
 }

@@ -386,3 +386,93 @@ func GitHubCreatePRTool() Tool {
 		ReadOnly: false,
 	}
 }
+
+// Quality Gate Tools
+
+func RunTestsTool() Tool {
+	return Tool{
+		Name:        "run_tests",
+		Description: "Run the project's test suite. Auto-detects the test command based on project type (go test, npm test, cargo test, pytest, etc.). Returns test output and pass/fail status.",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"timeout_seconds": map[string]any{
+					"type":        "integer",
+					"description": "Optional timeout in seconds (default: 300, max: 600)",
+				},
+				"verbose": map[string]any{
+					"type":        "boolean",
+					"description": "If true, run tests in verbose mode (default: false)",
+				},
+			},
+			"required": []string{},
+		},
+		ReadOnly: false,
+	}
+}
+
+func RunLintTool() Tool {
+	return Tool{
+		Name:        "run_lint",
+		Description: "Run the project's linter. Auto-detects the lint command based on project type (go vet, golangci-lint, eslint, cargo clippy, ruff, etc.). Returns lint issues found.",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"fix": map[string]any{
+					"type":        "boolean",
+					"description": "If true, attempt to auto-fix lint issues (default: false)",
+				},
+			},
+			"required": []string{},
+		},
+		ReadOnly: false,
+	}
+}
+
+func RunBuildTool() Tool {
+	return Tool{
+		Name:        "run_build",
+		Description: "Run the project's build command. Auto-detects based on project type (go build, npm run build, cargo build, etc.). Returns build output and success/failure.",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"timeout_seconds": map[string]any{
+					"type":        "integer",
+					"description": "Optional timeout in seconds (default: 300, max: 600)",
+				},
+			},
+			"required": []string{},
+		},
+		ReadOnly: false,
+	}
+}
+
+func TaskCompleteTool() Tool {
+	return Tool{
+		Name:        "task_complete",
+		Description: "Signal that the task is complete and trigger quality gate validation. Runs tests, lint, and build checks automatically. Returns QUALITY_PASSED if all checks pass, or QUALITY_BLOCKED with specific feedback if any check fails. Use skip flags to bypass specific checks when appropriate.",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"summary": map[string]any{
+					"type":        "string",
+					"description": "Brief summary of what was accomplished",
+				},
+				"skip_tests": map[string]any{
+					"type":        "boolean",
+					"description": "Skip test validation (use when no tests exist or tests are not applicable)",
+				},
+				"skip_lint": map[string]any{
+					"type":        "boolean",
+					"description": "Skip lint validation (use when no linter configured)",
+				},
+				"skip_build": map[string]any{
+					"type":        "boolean",
+					"description": "Skip build validation (use when no build step or not applicable)",
+				},
+			},
+			"required": []string{"summary"},
+		},
+		ReadOnly: false,
+	}
+}

@@ -113,6 +113,16 @@ func (sm *StateMachine) Transition(taskID, targetStatus string) error {
 		}
 	}
 
+	// Additional validation for completion: check checklist status
+	if targetStatus == db.TaskStatusCompleted {
+		if canComplete, reason := sm.CanComplete(taskID); !canComplete {
+			return &ChecklistIncompleteError{
+				TaskID: taskID,
+				Reason: reason,
+			}
+		}
+	}
+
 	// Execute the transition atomically in the database
 	if err := sm.db.TransitionTaskStatus(taskID, currentStatus, targetStatus); err != nil {
 		// Check for concurrent modification
@@ -139,6 +149,47 @@ func (sm *StateMachine) Transition(taskID, targetStatus string) error {
 	}
 
 	return nil
+}
+
+// CanComplete checks if a task can be marked as completed
+// Returns true if the task can complete, false with reason if not
+func (sm *StateMachine) CanComplete(taskID string) (bool, string) {
+	checklist, err := sm.db.GetChecklistByTaskID(taskID)
+	if err != nil || checklist == nil {
+		// No checklist, can complete
+		return true, ""
+	}
+
+	items, err := sm.db.GetChecklistItems(checklist.ID)
+	if err != nil {
+		// Error getting items, allow completion (don't block on errors)
+		return true, ""
+	}
+
+	// Check for pending or in_progress items
+	for _, item := range items {
+		if item.Status == db.ChecklistItemStatusPending || item.Status == db.ChecklistItemStatusInProgress {
+			return false, fmt.Sprintf("checklist item %s is still %s: %s", item.ID, item.Status, item.Description)
+		}
+	}
+
+	return true, ""
+}
+
+// ChecklistIncompleteError is returned when completing a task with incomplete checklist
+type ChecklistIncompleteError struct {
+	TaskID string
+	Reason string
+}
+
+func (e *ChecklistIncompleteError) Error() string {
+	return fmt.Sprintf("cannot complete task %s: %s", e.TaskID, e.Reason)
+}
+
+// IsChecklistIncomplete checks if an error is a ChecklistIncompleteError
+func IsChecklistIncomplete(err error) bool {
+	_, ok := err.(*ChecklistIncompleteError)
+	return ok
 }
 
 // InvalidTransitionError is returned when an invalid status transition is attempted

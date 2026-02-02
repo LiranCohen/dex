@@ -334,3 +334,142 @@ func (r *ActivityRecorder) RecordChecklistUpdate(iteration int, itemID, status, 
 
 	return nil
 }
+
+// QualityGateData represents a quality gate validation attempt
+type QualityGateData struct {
+	Attempt    int            `json:"attempt"`
+	Passed     bool           `json:"passed"`
+	Tests      *CheckData     `json:"tests,omitempty"`
+	Lint       *CheckData     `json:"lint,omitempty"`
+	Build      *CheckData     `json:"build,omitempty"`
+	DurationMs int64          `json:"duration_ms"`
+}
+
+// CheckData represents a single quality check result
+type CheckData struct {
+	Passed     bool   `json:"passed"`
+	Skipped    bool   `json:"skipped"`
+	SkipReason string `json:"skip_reason,omitempty"`
+	DurationMs int64  `json:"duration_ms"`
+}
+
+// RecordQualityGate records a quality gate validation attempt
+func (r *ActivityRecorder) RecordQualityGate(iteration int, data *QualityGateData) error {
+	content, err := json.Marshal(data)
+	if err != nil {
+		return fmt.Errorf("failed to marshal quality gate data: %w", err)
+	}
+
+	activity, err := r.db.CreateSessionActivity(
+		r.sessionID,
+		iteration,
+		db.ActivityTypeQualityGate,
+		r.hat,
+		string(content),
+		nil,
+		nil,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to record quality gate: %w", err)
+	}
+
+	r.broadcastActivity(activity)
+	return nil
+}
+
+// LoopHealthData represents a loop health status change
+type LoopHealthData struct {
+	Status              string `json:"status"`
+	ConsecutiveFailures int    `json:"consecutive_failures"`
+	QualityGateAttempts int    `json:"quality_gate_attempts"`
+	TotalFailures       int    `json:"total_failures"`
+}
+
+// RecordLoopHealth records a loop health status change
+func (r *ActivityRecorder) RecordLoopHealth(iteration int, data *LoopHealthData) error {
+	content, err := json.Marshal(data)
+	if err != nil {
+		return fmt.Errorf("failed to marshal loop health data: %w", err)
+	}
+
+	activity, err := r.db.CreateSessionActivity(
+		r.sessionID,
+		iteration,
+		db.ActivityTypeLoopHealth,
+		r.hat,
+		string(content),
+		nil,
+		nil,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to record loop health: %w", err)
+	}
+
+	r.broadcastActivity(activity)
+	return nil
+}
+
+// DecisionData represents a completion/transition decision
+type DecisionData struct {
+	Type    string `json:"type"`              // "completion", "transition", "blocked", "quality_gate"
+	Signal  string `json:"signal,omitempty"`  // The signal that triggered this decision
+	FromHat string `json:"from_hat,omitempty"`
+	ToHat   string `json:"to_hat,omitempty"`
+	Reason  string `json:"reason,omitempty"`
+}
+
+// MemoryCreatedData represents a memory creation event
+type MemoryCreatedData struct {
+	MemoryID string `json:"memory_id"`
+	Type     string `json:"type"`
+	Title    string `json:"title"`
+	Source   string `json:"source"` // explicit, automatic
+}
+
+// RecordDecision records a completion or transition decision
+func (r *ActivityRecorder) RecordDecision(iteration int, data *DecisionData) error {
+	content, err := json.Marshal(data)
+	if err != nil {
+		return fmt.Errorf("failed to marshal decision data: %w", err)
+	}
+
+	activity, err := r.db.CreateSessionActivity(
+		r.sessionID,
+		iteration,
+		db.ActivityTypeDecision,
+		r.hat,
+		string(content),
+		nil,
+		nil,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to record decision: %w", err)
+	}
+
+	r.broadcastActivity(activity)
+	return nil
+}
+
+// RecordMemoryCreated records a memory creation event
+func (r *ActivityRecorder) RecordMemoryCreated(iteration int, data *MemoryCreatedData) error {
+	content, err := json.Marshal(data)
+	if err != nil {
+		return fmt.Errorf("failed to marshal memory data: %w", err)
+	}
+
+	activity, err := r.db.CreateSessionActivity(
+		r.sessionID,
+		iteration,
+		db.ActivityTypeMemoryCreated,
+		r.hat,
+		string(content),
+		nil,
+		nil,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to record memory created: %w", err)
+	}
+
+	r.broadcastActivity(activity)
+	return nil
+}

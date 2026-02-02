@@ -31,6 +31,7 @@ func ReadWriteTools() *Set {
 		GitLogTool(),
 		WebSearchTool(),
 		WebFetchTool(),
+		ListRuntimesTool(),
 		// Write tools
 		BashTool(),
 		WriteFileTool(),
@@ -40,6 +41,11 @@ func ReadWriteTools() *Set {
 		GitPushTool(),
 		GitHubCreateRepoTool(),
 		GitHubCreatePRTool(),
+		// Quality gate tools
+		RunTestsTool(),
+		RunLintTool(),
+		RunBuildTool(),
+		TaskCompleteTool(),
 	})
 }
 
@@ -66,5 +72,10 @@ func AllTools() []Tool {
 		GitPushTool(),
 		GitHubCreateRepoTool(),
 		GitHubCreatePRTool(),
+		// Quality gate
+		RunTestsTool(),
+		RunLintTool(),
+		RunBuildTool(),
+		TaskCompleteTool(),
 	}
 }

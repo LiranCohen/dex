@@ -398,20 +398,31 @@ func truncateForBroadcast(s string, maxLen int) string {
 func (h *Handler) parseObjectiveDrafts(content string) []ObjectiveDraft {
 	var drafts []ObjectiveDraft
 
-	// Match OBJECTIVE_DRAFT:{...} patterns
-	re := regexp.MustCompile(`OBJECTIVE_DRAFT:\s*(\{[^}]+(?:\{[^}]*\}[^}]*)*\})`)
-	matches := re.FindAllStringSubmatch(content, -1)
+	// Find all OBJECTIVE_DRAFT signals
+	marker := "OBJECTIVE_DRAFT:"
+	remaining := content
 
-	for _, match := range matches {
-		if len(match) < 2 {
+	for {
+		idx := strings.Index(remaining, marker)
+		if idx == -1 {
+			break
+		}
+
+		// Extract JSON portion using balanced brace matching
+		jsonStart := idx + len(marker)
+		jsonStr, endIdx := extractJSONObject(remaining[jsonStart:])
+		if jsonStr == "" {
+			remaining = remaining[jsonStart:]
 			continue
 		}
 
 		var draft ObjectiveDraft
-		if err := json.Unmarshal([]byte(match[1]), &draft); err != nil {
+		if err := json.Unmarshal([]byte(jsonStr), &draft); err != nil {
 			// Try to fix common JSON issues
-			fixed := h.fixJSON(match[1])
+			fixed := h.fixJSON(jsonStr)
 			if err := json.Unmarshal([]byte(fixed), &draft); err != nil {
+				fmt.Printf("warning: failed to parse OBJECTIVE_DRAFT JSON: %v\n", err)
+				remaining = remaining[jsonStart+endIdx:]
 				continue
 			}
 		}
@@ -419,9 +430,64 @@ func (h *Handler) parseObjectiveDrafts(content string) []ObjectiveDraft {
 		if draft.Title != "" {
 			drafts = append(drafts, draft)
 		}
+
+		remaining = remaining[jsonStart+endIdx:]
 	}
 
 	return drafts
+}
+
+// extractJSONObject extracts a JSON object from a string using balanced brace matching
+// Returns the JSON string and the end index
+func extractJSONObject(s string) (string, int) {
+	// Skip whitespace
+	start := 0
+	for start < len(s) && (s[start] == ' ' || s[start] == '\t' || s[start] == '\n' || s[start] == '\r') {
+		start++
+	}
+
+	if start >= len(s) || s[start] != '{' {
+		return "", 0
+	}
+
+	depth := 0
+	inString := false
+	escaped := false
+
+	for i := start; i < len(s); i++ {
+		c := s[i]
+
+		if escaped {
+			escaped = false
+			continue
+		}
+
+		if c == '\\' && inString {
+			escaped = true
+			continue
+		}
+
+		if c == '"' {
+			inString = !inString
+			continue
+		}
+
+		if inString {
+			continue
+		}
+
+		if c == '{' {
+			depth++
+		} else if c == '}' {
+			depth--
+			if depth == 0 {
+				return s[start : i+1], i + 1
+			}
+		}
+	}
+
+	// Unbalanced braces
+	return "", 0
 }
 
 // parseQuestions extracts QUESTION signals from a response
@@ -486,31 +552,121 @@ func (h *Handler) fixJSON(s string) string {
 
 // generateTitle creates a short title from the first user message
 func (h *Handler) generateTitle(content string) string {
-	// Take first 50 chars or first sentence
 	content = strings.TrimSpace(content)
 	if content == "" {
-		return ""
+		return "Untitled Quest"
 	}
 
-	// Find end of first sentence
-	endMarkers := []string{". ", "? ", "! ", "\n"}
-	minIdx := len(content)
-	for _, marker := range endMarkers {
-		if idx := strings.Index(content, marker); idx > 0 && idx < minIdx {
-			minIdx = idx
-		}
+	// Extract first sentence with proper punctuation handling
+	title := extractFirstSentence(content)
+
+	// Clean up the title
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return "Untitled Quest"
 	}
 
-	title := content[:minIdx]
-	if len(title) > 60 {
-		title = title[:57] + "..."
+	// Limit to 100 chars
+	if len(title) > 100 {
+		title = title[:97] + "..."
 	}
 
 	return title
 }
 
+// extractFirstSentence extracts the first sentence from content
+func extractFirstSentence(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+
+	// Find first sentence-ending punctuation
+	for i, r := range s {
+		if r == '.' || r == '!' || r == '?' {
+			// Make sure it's not a decimal point or abbreviation
+			if i+1 < len(s) {
+				next := rune(s[i+1])
+				// If followed by digit, it's likely a decimal
+				if next >= '0' && next <= '9' {
+					continue
+				}
+				// If followed by space or newline, it's end of sentence
+				if next == ' ' || next == '\n' || next == '\r' {
+					return strings.TrimSpace(s[:i+1])
+				}
+			} else {
+				// End of string
+				return strings.TrimSpace(s[:i+1])
+			}
+		}
+		if i > 150 { // Max scan length
+			break
+		}
+	}
+
+	// No sentence-ending punctuation found, use first line or truncate
+	if idx := strings.IndexAny(s, "\n\r"); idx > 0 && idx < 150 {
+		return strings.TrimSpace(s[:idx])
+	}
+
+	// Truncate at word boundary
+	if len(s) > 100 {
+		lastSpace := strings.LastIndex(s[:100], " ")
+		if lastSpace > 50 {
+			return s[:lastSpace] + "..."
+		}
+		return s[:97] + "..."
+	}
+
+	return s
+}
+
+// complexityToPriority maps complexity and estimated iterations to a priority value
+// Priority scale: 1 (critical) to 5 (low)
+func complexityToPriority(complexity string, estimatedIterations int) int {
+	switch complexity {
+	case "simple":
+		return 4 // Low priority - simple tasks
+	case "complex":
+		if estimatedIterations > 50 {
+			return 1 // Critical - large complex tasks
+		}
+		if estimatedIterations > 20 {
+			return 2 // High - medium complex tasks
+		}
+		return 2 // High - complex tasks default
+	default:
+		// Medium complexity or unspecified
+		if estimatedIterations > 30 {
+			return 2 // High
+		}
+		return 3 // Medium - default
+	}
+}
+
+// validStartingHats defines hats that can be used as starting hats for tasks
+var validStartingHats = []string{"explorer", "planner", "creator", "designer"}
+
 // CreateObjectiveFromDraft creates a task from an accepted draft
 func (h *Handler) CreateObjectiveFromDraft(ctx context.Context, questID string, draft ObjectiveDraft, selectedOptional []int) (*db.Task, error) {
+	// Validate hat
+	if !session.IsValidHat(draft.Hat) {
+		return nil, fmt.Errorf("invalid hat: %s", draft.Hat)
+	}
+
+	// Validate hat is valid as a starting hat
+	isValidStarter := false
+	for _, s := range validStartingHats {
+		if draft.Hat == s {
+			isValidStarter = true
+			break
+		}
+	}
+	if !isValidStarter {
+		return nil, fmt.Errorf("hat %s cannot be used as starting hat; valid starters: %v", draft.Hat, validStartingHats)
+	}
+
 	// Get the quest to find the project
 	quest, err := h.db.GetQuestByID(questID)
 	if err != nil {
@@ -526,6 +682,9 @@ func (h *Handler) CreateObjectiveFromDraft(ctx context.Context, questID string, 
 		model = db.TaskModelOpus
 	}
 
+	// Calculate priority from complexity and estimated iterations
+	priority := complexityToPriority(draft.Complexity, draft.EstimatedIterations)
+
 	// Create the task
 	task, err := h.db.CreateTaskForQuest(
 		questID,
@@ -535,7 +694,7 @@ func (h *Handler) CreateObjectiveFromDraft(ctx context.Context, questID string, 
 		draft.Hat,
 		db.TaskTypeTask,
 		model,
-		3, // Default priority
+		priority,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create task: %w", err)
@@ -785,7 +944,7 @@ func (h *Handler) executeListObjectives(questID string) tools.Result {
 		sb.WriteString(fmt.Sprintf("## %s\n", task.Title))
 		sb.WriteString(fmt.Sprintf("- **ID:** %s\n", task.ID))
 		sb.WriteString(fmt.Sprintf("- **Status:** %s\n", task.Status))
-		sb.WriteString(fmt.Sprintf("- **Hat:** %s\n", task.Hat))
+		sb.WriteString(fmt.Sprintf("- **Hat:** %s\n", task.Hat.String))
 
 		// Get checklist progress
 		if checklist, err := h.db.GetChecklistByTaskID(task.ID); err == nil && checklist != nil {
@@ -824,7 +983,7 @@ func (h *Handler) executeGetObjectiveDetails(objectiveID string) tools.Result {
 	sb.WriteString(fmt.Sprintf("# %s\n\n", task.Title))
 	sb.WriteString(fmt.Sprintf("**ID:** %s\n", task.ID))
 	sb.WriteString(fmt.Sprintf("**Status:** %s\n", task.Status))
-	sb.WriteString(fmt.Sprintf("**Hat:** %s\n", task.Hat))
+	sb.WriteString(fmt.Sprintf("**Hat:** %s\n", task.Hat.String))
 	sb.WriteString(fmt.Sprintf("**Created:** %s\n", task.CreatedAt.Format("2006-01-02 15:04:05")))
 
 	if task.Description.Valid && task.Description.String != "" {

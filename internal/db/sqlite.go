@@ -64,6 +64,7 @@ func (db *DB) Migrate() error {
 		migrationGitHubApp,
 		migrationOnboardingProgress,
 		migrationSecrets,
+		migrationMemories,
 	}
 
 	for i, migration := range migrations {
@@ -98,6 +99,9 @@ func (db *DB) Migrate() error {
 		"ALTER TABLE quests ADD COLUMN conversation_path TEXT",
 		// GitHub Issue sync for Quests (Tasks already have github_issue_number)
 		"ALTER TABLE quests ADD COLUMN github_issue_number INTEGER",
+		// Quality gate and termination tracking
+		"ALTER TABLE sessions ADD COLUMN termination_reason TEXT",
+		"ALTER TABLE sessions ADD COLUMN quality_gate_attempts INTEGER DEFAULT 0",
 	}
 	for _, migration := range optionalMigrations {
 		db.Exec(migration) // Ignore errors - column may already exist
@@ -418,4 +422,40 @@ CREATE TABLE IF NOT EXISTS secrets (
 	value TEXT NOT NULL,
 	created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
+`
+
+const migrationMemories = `
+-- Cross-session memory system for project learnings
+CREATE TABLE IF NOT EXISTS memories (
+	id TEXT PRIMARY KEY,
+	project_id TEXT NOT NULL,
+	type TEXT NOT NULL,
+	title TEXT NOT NULL,
+	content TEXT NOT NULL,
+
+	-- Relevance scoring
+	confidence REAL DEFAULT 0.5,
+	tags TEXT,           -- JSON array: ["testing", "go"]
+	file_refs TEXT,      -- JSON array: ["internal/session/*.go"]
+
+	-- Provenance
+	created_by_hat TEXT,
+	created_by_task_id TEXT,
+	created_by_session_id TEXT,
+	source TEXT DEFAULT 'automatic',  -- automatic, explicit, imported
+
+	-- Lifecycle
+	created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+	last_used_at DATETIME,
+	use_count INTEGER DEFAULT 0,
+	verified_at DATETIME,
+
+	FOREIGN KEY (project_id) REFERENCES projects(id),
+	FOREIGN KEY (created_by_task_id) REFERENCES tasks(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_memories_project ON memories(project_id);
+CREATE INDEX IF NOT EXISTS idx_memories_project_type ON memories(project_id, type);
+CREATE INDEX IF NOT EXISTS idx_memories_project_confidence ON memories(project_id, confidence DESC);
+CREATE INDEX IF NOT EXISTS idx_memories_last_used ON memories(last_used_at DESC);
 `
