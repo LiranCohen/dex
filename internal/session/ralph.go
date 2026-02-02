@@ -110,6 +110,17 @@ func (r *RalphLoop) Run(ctx context.Context) error {
 	r.activity = NewActivityRecorder(r.db, r.session.ID, r.session.TaskID, r.broadcastEvent)
 	r.activity.SetHat(r.session.Hat)
 
+	// Save checkpoint when function exits (success or failure) to preserve state for resume
+	defer func() {
+		if len(r.messages) > 0 && r.session.IterationCount > 0 {
+			if err := r.checkpoint(); err != nil {
+				fmt.Printf("RalphLoop.Run: warning - final checkpoint failed: %v\n", err)
+			} else {
+				fmt.Printf("RalphLoop.Run: saved final checkpoint at iteration %d with %d messages\n", r.session.IterationCount, len(r.messages))
+			}
+		}
+	}()
+
 	// Build initial system prompt from hat template
 	fmt.Printf("RalphLoop.Run: building prompt for hat %s\n", r.session.Hat)
 	systemPrompt, err := r.buildPrompt()
@@ -594,6 +605,9 @@ func (r *RalphLoop) RestoreFromCheckpoint(checkpoint *db.SessionCheckpoint) erro
 		r.activity.SetHat(state.Hat)
 	}
 	r.messages = state.Messages
+
+	fmt.Printf("RestoreFromCheckpoint: restored iteration=%d, hat=%s, messages=%d, inputTokens=%d, outputTokens=%d\n",
+		state.Iteration, state.Hat, len(state.Messages), state.InputTokens, state.OutputTokens)
 
 	// Use new fields if available, otherwise estimate from legacy
 	if state.InputTokens > 0 || state.OutputTokens > 0 {

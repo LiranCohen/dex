@@ -539,7 +539,11 @@ func (m *Manager) runSession(ctx context.Context, session *ActiveSession) {
 			fmt.Printf("runSession: restoring from previous session %s\n", checkpointSessionID)
 		}
 		checkpoint, err := m.db.GetLatestSessionCheckpoint(checkpointSessionID)
-		if err == nil && checkpoint != nil {
+		if err != nil {
+			fmt.Printf("runSession: error getting checkpoint for session %s: %v\n", checkpointSessionID, err)
+		} else if checkpoint == nil {
+			fmt.Printf("runSession: no checkpoint found for session %s\n", checkpointSessionID)
+		} else {
 			if restoreErr := loop.RestoreFromCheckpoint(checkpoint); restoreErr != nil {
 				fmt.Printf("warning: failed to restore checkpoint: %v\n", restoreErr)
 			} else {
