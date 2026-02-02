@@ -14,13 +14,13 @@ export function GitHubAppStep({ orgName, getManifest, error }: GitHubAppStepProp
     setIsLoading(true);
 
     try {
-      // Get the manifest from the server
-      const { manifest } = await getManifest();
+      // Get the manifest and org-specific URL from the server
+      const { manifest, manifest_url } = await getManifest();
 
-      // Create a form to POST to GitHub's manifest URL
+      // Create a form to POST to the org's GitHub App creation URL
       const form = document.createElement('form');
       form.method = 'POST';
-      form.action = 'https://github.com/settings/apps/new';
+      form.action = manifest_url; // Use org URL, not personal account
       form.target = '_self';
 
       const input = document.createElement('input');
