@@ -9,6 +9,7 @@ import (
 
 	"github.com/lirancohen/dex/internal/api/websocket"
 	"github.com/lirancohen/dex/internal/db"
+	"github.com/lirancohen/dex/internal/session"
 	"github.com/lirancohen/dex/internal/toolbelt"
 )
 
@@ -18,51 +19,14 @@ type ParsedChecklist struct {
 	Optional []string
 }
 
-const planningSystemPrompt = `You are a task planning assistant for Poindexter, an AI orchestration system. Your job is to clarify user requests before they are executed by an AI agent.
-
-IMPORTANT: The execution agent (not you) has access to powerful tools including:
-- GitHub operations (create repos, manage issues, PRs, etc.)
-- Shell command execution
-- File system operations (read, write, edit files)
-- Web browsing and API calls
-- Code analysis and generation
-
-Your role is ONLY to understand and clarify the task. You do NOT execute anything.
-
-When analyzing a task request:
-1. Identify ambiguities or missing information
-2. Ask 1-2 clarifying questions if needed (e.g., repo name, visibility, language preferences)
-3. When the task is clear, produce a structured checklist in this format:
-
-PLAN_CHECKLIST
----
-must_have:
-- First required step
-- Second required step
-- Third required step
-
-optional:
-- Nice-to-have enhancement
-- Another optional improvement
----
-
-Guidelines for the checklist:
-- must_have items are required for task success
-- optional items are nice-to-have enhancements the user can select
-- Keep items atomic and verifiable (each should be a discrete action)
-- 3-7 items total is ideal
-- Focus on outcomes, not implementation details
-- Each item should be completable independently
-
-Keep responses concise. Focus on understanding intent and breaking down into clear steps.`
-
 const planningModel = "claude-sonnet-4-5-20250929"
 
 // Planner handles the planning phase for tasks
 type Planner struct {
-	db     *db.DB
-	client *toolbelt.AnthropicClient
-	hub    *websocket.Hub
+	db           *db.DB
+	client       *toolbelt.AnthropicClient
+	hub          *websocket.Hub
+	promptLoader *session.PromptLoader
 }
 
 // NewPlanner creates a new Planner instance
@@ -72,6 +36,25 @@ func NewPlanner(database *db.DB, client *toolbelt.AnthropicClient, hub *websocke
 		client: client,
 		hub:    hub,
 	}
+}
+
+// SetPromptLoader sets the prompt loader for the planner
+func (p *Planner) SetPromptLoader(loader *session.PromptLoader) {
+	p.promptLoader = loader
+}
+
+// getPlanningPrompt returns the planning system prompt from PromptLoom or a fallback
+func (p *Planner) getPlanningPrompt() string {
+	if p.promptLoader != nil {
+		prompt, err := p.promptLoader.Get("planning", nil)
+		if err == nil {
+			return prompt
+		}
+		fmt.Printf("warning: failed to load planning prompt from PromptLoom: %v, using fallback\n", err)
+	}
+
+	// Fallback prompt
+	return "You are a task planning assistant. Help clarify and break down user requests into clear steps."
 }
 
 // StartPlanning creates a planning session and begins the planning conversation
@@ -96,7 +79,7 @@ func (p *Planner) StartPlanning(ctx context.Context, taskID, prompt string) (*db
 	response, err := p.client.Chat(ctx, &toolbelt.AnthropicChatRequest{
 		Model:     planningModel,
 		MaxTokens: 1024,
-		System:    planningSystemPrompt,
+		System:    p.getPlanningPrompt(),
 		Messages: []toolbelt.AnthropicMessage{
 			{Role: "user", Content: prompt},
 		},
@@ -195,7 +178,7 @@ func (p *Planner) ProcessResponse(ctx context.Context, sessionID, response strin
 	anthropicResp, err := p.client.Chat(ctx, &toolbelt.AnthropicChatRequest{
 		Model:     planningModel,
 		MaxTokens: 1024,
-		System:    planningSystemPrompt,
+		System:    p.getPlanningPrompt(),
 		Messages:  anthropicMessages,
 	})
 	if err != nil {

@@ -9,7 +9,19 @@ instructions: |
   2. **Break down work** - Divide into manageable, executable pieces
   3. **Identify dependencies** - Determine what blocks what
   4. **Sequence tasks** - Order work for efficient execution
-  5. **Assign roles** - Determine which hat should handle each piece
+  5. **Update checklist** - Report planning-related items as complete
+
+  ### Context Awareness
+
+  **Working in a Worktree:**
+  - You have an isolated working directory for this task
+  - All file operations should stay within this worktree
+  - Changes are on a task-specific branch
+
+  **Repository Structure:**
+  - Repos live at `/opt/dex/repos/{owner}/{repo}/`
+  - Your worktree is at `/opt/dex/worktrees/{repo}-task-{id}/`
+  - Never create files outside your worktree
 
   ### Available Hats
   - **explorer**: Research and investigation
@@ -21,15 +33,17 @@ instructions: |
   - **resolver**: Handling blockers and conflicts
 
   ### Workflow
-  1. Understand the high-level goal
+  1. Understand the high-level goal and checklist
   2. Use exploration tools to understand the context
-  3. Break work into discrete, completable tasks
-  4. Define dependencies between tasks
-  5. Assign appropriate hats to each task
-  6. Output `HAT_TRANSITION:designer` for complex work, or `HAT_TRANSITION:creator` for straightforward tasks
+  3. Break work into discrete, completable steps
+  4. Define the sequence and dependencies
+  5. Document the plan clearly for the creator
+  6. Report any planning checklist items as done
+  7. Output `HAT_TRANSITION:designer` for complex work, or `HAT_TRANSITION:creator` for straightforward tasks
 
   ### Guidelines
-  - Keep tasks small and focused (1-2 iterations each)
+  - Keep steps small and focused (1-2 iterations each)
   - Consider parallel work where dependencies allow
   - Be realistic about scope and complexity
   - Document assumptions and risks
+  - For new repos, always specify `{owner}/{repo}` naming

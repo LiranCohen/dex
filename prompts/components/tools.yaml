@@ -48,5 +48,41 @@ instructions: |
 
   ### Important Guidelines
   - Always check `git_status` before and after changes
-  - Use descriptive commit messages
+  - Use descriptive commit messages that explain WHY, not just WHAT
   - For new projects, create the files BEFORE the GitHub repo
+  - Commit frequently - small, focused commits are better than large ones
+
+  ### Repository Naming
+  - Always use `{owner}/{repo}` format for GitHub repos (e.g., `lirancohen/my-project`)
+  - The `owner` should be the GitHub organization or user
+  - Never create repos directly in `/opt/dex/repos/` root - always use the `{owner}/` subdirectory
+
+  ### PR Workflow
+  When your work is ready for review:
+  1. Ensure all changes are committed
+  2. Push your branch with `git_push`
+  3. Create a PR with `github_create_pr` - include:
+     - Clear title describing the change
+     - Description of what was done and why
+     - Any testing performed
+  4. Link the PR in your completion message
+
+  ### Restrictions - MUST FOLLOW
+  - **Stay in your worktree**: All file operations MUST be within your assigned working directory
+  - **Don't use dex-workspace for code**: The workspace repo is for tracking/metadata only
+  - **Don't create arbitrary directories**: Use the tools provided, don't mkdir outside your worktree
+  - **Don't access parent directories**: Never use `../` to escape your worktree
+
+  ### Git Safety - NEVER DO THESE
+  - **No force push**: Never use `git push --force` or `-f`
+  - **No hard reset**: Never use `git reset --hard`
+  - **No amending shared commits**: Don't amend commits that may have been seen by others
+  - **No deleting branches**: Don't delete remote branches without explicit approval
+  - **No rebasing shared branches**: Don't rebase branches others may be using
+
+  ### Sensitive Files - NEVER COMMIT
+  - `.env` files or any environment configuration with secrets
+  - API keys, tokens, passwords, or credentials
+  - Private keys or certificates
+  - Database connection strings with credentials
+  - Any file containing "secret", "password", "token", "key" values

@@ -23,7 +23,8 @@ func NewRepoManager(reposDir string) *RepoManager {
 
 // CreateOptions configures a new repository
 type CreateOptions struct {
-	Name          string // Directory name (will be sanitized)
+	Owner         string // GitHub owner/org (used for path: {reposDir}/{owner}/{repo})
+	Name          string // Repository name (will be sanitized)
 	Description   string // For README
 	DefaultBranch string // Default: "main"
 	InitialCommit bool   // Create initial commit with README
@@ -42,8 +43,17 @@ func (m *RepoManager) Create(opts CreateOptions) (string, error) {
 		return "", fmt.Errorf("invalid repository name: %s", opts.Name)
 	}
 
-	// Determine the full path
-	repoPath := filepath.Join(m.reposDir, safeName)
+	// Determine the full path using owner/repo structure if owner is provided
+	var repoPath string
+	if opts.Owner != "" {
+		safeOwner := sanitizeRepoName(opts.Owner)
+		if safeOwner == "" {
+			return "", fmt.Errorf("invalid owner name: %s", opts.Owner)
+		}
+		repoPath = filepath.Join(m.reposDir, safeOwner, safeName)
+	} else {
+		repoPath = filepath.Join(m.reposDir, safeName)
+	}
 
 	// Check if repo already exists
 	if m.Exists(repoPath) {
@@ -117,24 +127,65 @@ func (m *RepoManager) SetRemote(repoPath, remoteURL string) error {
 	return nil
 }
 
-// GetPath returns the full path for a repository name
+// GetPath returns the full path for a repository name (without owner)
+// For owner/repo paths, use GetPathWithOwner instead
 func (m *RepoManager) GetPath(name string) string {
 	safeName := sanitizeRepoName(name)
 	return filepath.Join(m.reposDir, safeName)
 }
 
+// GetPathWithOwner returns the full path for a repository with owner/repo structure
+func (m *RepoManager) GetPathWithOwner(owner, repo string) string {
+	safeOwner := sanitizeRepoName(owner)
+	safeRepo := sanitizeRepoName(repo)
+	return filepath.Join(m.reposDir, safeOwner, safeRepo)
+}
+
+// GetReposDir returns the base repos directory
+func (m *RepoManager) GetReposDir() string {
+	return m.reposDir
+}
+
+// CloneOptions configures a clone operation
+type CloneOptions struct {
+	URL    string // Clone URL
+	Owner  string // GitHub owner/org (for path: {reposDir}/{owner}/{repo})
+	Name   string // Repository name (extracted from URL if empty)
+}
+
 // Clone clones a repository from a URL
+// Deprecated: Use CloneWithOptions for owner/repo structure support
 func (m *RepoManager) Clone(cloneURL, name string) (string, error) {
+	return m.CloneWithOptions(CloneOptions{
+		URL:  cloneURL,
+		Name: name,
+	})
+}
+
+// CloneWithOptions clones a repository with full options including owner/repo structure
+func (m *RepoManager) CloneWithOptions(opts CloneOptions) (string, error) {
+	name := opts.Name
 	if name == "" {
 		// Extract name from URL
-		name = extractRepoNameFromURL(cloneURL)
+		name = extractRepoNameFromURL(opts.URL)
 	}
 	if name == "" {
 		return "", fmt.Errorf("could not determine repository name from URL")
 	}
 
 	safeName := sanitizeRepoName(name)
-	repoPath := filepath.Join(m.reposDir, safeName)
+
+	// Determine path with optional owner
+	var repoPath string
+	if opts.Owner != "" {
+		safeOwner := sanitizeRepoName(opts.Owner)
+		if safeOwner == "" {
+			return "", fmt.Errorf("invalid owner name: %s", opts.Owner)
+		}
+		repoPath = filepath.Join(m.reposDir, safeOwner, safeName)
+	} else {
+		repoPath = filepath.Join(m.reposDir, safeName)
+	}
 
 	// Check if repo already exists
 	if m.Exists(repoPath) {
@@ -142,17 +193,66 @@ func (m *RepoManager) Clone(cloneURL, name string) (string, error) {
 	}
 
 	// Ensure parent directory exists
-	if err := os.MkdirAll(m.reposDir, 0755); err != nil {
+	parentDir := filepath.Dir(repoPath)
+	if err := os.MkdirAll(parentDir, 0755); err != nil {
 		return "", fmt.Errorf("failed to create repos directory: %w", err)
 	}
 
 	// Clone the repository
-	cmd := exec.Command("git", "clone", cloneURL, repoPath)
+	cmd := exec.Command("git", "clone", opts.URL, repoPath)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return "", fmt.Errorf("failed to clone repository: %w\n%s", err, output)
 	}
 
 	return repoPath, nil
+}
+
+// SetUpstream adds or updates the upstream remote (for fork workflows)
+func (m *RepoManager) SetUpstream(repoPath, remoteURL string) error {
+	if !m.Exists(repoPath) {
+		return fmt.Errorf("repository does not exist: %s", repoPath)
+	}
+
+	// Check if upstream already exists
+	cmd := exec.Command("git", "remote", "get-url", "upstream")
+	cmd.Dir = repoPath
+	if err := cmd.Run(); err == nil {
+		// Upstream exists, update it
+		cmd = exec.Command("git", "remote", "set-url", "upstream", remoteURL)
+	} else {
+		// Upstream doesn't exist, add it
+		cmd = exec.Command("git", "remote", "add", "upstream", remoteURL)
+	}
+	cmd.Dir = repoPath
+
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to set upstream: %w\n%s", err, output)
+	}
+
+	return nil
+}
+
+// GetRemotes returns the origin and upstream remote URLs for a repository
+func (m *RepoManager) GetRemotes(repoPath string) (origin, upstream string, err error) {
+	if !m.Exists(repoPath) {
+		return "", "", fmt.Errorf("repository does not exist: %s", repoPath)
+	}
+
+	// Get origin
+	cmd := exec.Command("git", "remote", "get-url", "origin")
+	cmd.Dir = repoPath
+	if output, err := cmd.Output(); err == nil {
+		origin = strings.TrimSpace(string(output))
+	}
+
+	// Get upstream (may not exist)
+	cmd = exec.Command("git", "remote", "get-url", "upstream")
+	cmd.Dir = repoPath
+	if output, err := cmd.Output(); err == nil {
+		upstream = strings.TrimSpace(string(output))
+	}
+
+	return origin, upstream, nil
 }
 
 // createInitialCommit creates a README and initial commit
@@ -228,4 +328,44 @@ func extractRepoNameFromURL(url string) string {
 		return parts[len(parts)-1]
 	}
 	return ""
+}
+
+// ExtractOwnerRepoFromURL extracts the owner and repository name from a git URL
+// Supports formats like:
+//   - https://github.com/owner/repo.git
+//   - git@github.com:owner/repo.git
+//   - ssh://git@github.com/owner/repo.git
+func ExtractOwnerRepoFromURL(url string) (owner, repo string) {
+	// Remove trailing .git
+	url = strings.TrimSuffix(url, ".git")
+
+	// Handle SSH format: git@github.com:owner/repo
+	if strings.Contains(url, "@") && strings.Contains(url, ":") && !strings.Contains(url, "://") {
+		// git@github.com:owner/repo
+		parts := strings.SplitN(url, ":", 2)
+		if len(parts) == 2 {
+			pathParts := strings.Split(parts[1], "/")
+			if len(pathParts) >= 2 {
+				return pathParts[len(pathParts)-2], pathParts[len(pathParts)-1]
+			}
+		}
+		return "", ""
+	}
+
+	// Handle HTTPS/SSH URL format
+	// Remove protocol
+	url = strings.TrimPrefix(url, "https://")
+	url = strings.TrimPrefix(url, "http://")
+	url = strings.TrimPrefix(url, "ssh://")
+	url = strings.TrimPrefix(url, "git://")
+
+	// Remove host and possible user@
+	parts := strings.Split(url, "/")
+	// Skip host part (first element after removing protocol)
+	if len(parts) >= 3 {
+		// parts[0] = host, parts[1] = owner, parts[2] = repo
+		return parts[len(parts)-2], parts[len(parts)-1]
+	}
+
+	return "", ""
 }

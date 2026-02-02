@@ -10,7 +10,10 @@ instructions: |
   {{end}}
 
   ### Session
-  {{if .Values.worktree_path}}- **Working Directory:** {{.Values.worktree_path}}{{end}}
+  {{if .Values.worktree_path}}
+  - **Working Directory:** {{.Values.worktree_path}}
+  - **IMPORTANT:** All file operations MUST be within this directory. Do not create, modify, or read files outside your working directory.
+  {{end}}
   {{if .Values.branch_name}}- **Branch:** {{.Values.branch_name}}{{end}}
   {{if .Values.is_new_project}}- **New Project:** Yes - use git_init to initialize before committing{{end}}
 

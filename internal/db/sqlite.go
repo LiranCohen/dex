@@ -90,6 +90,14 @@ func (db *DB) Migrate() error {
 		"ALTER TABLE session_activity ADD COLUMN hat TEXT",
 		// GitHub org ID for targeting installation
 		"ALTER TABLE onboarding_progress ADD COLUMN github_org_id INTEGER",
+		// Project remote tracking for fork workflows
+		"ALTER TABLE projects ADD COLUMN remote_origin TEXT",
+		"ALTER TABLE projects ADD COLUMN remote_upstream TEXT",
+		// Task/Quest content stored in git files
+		"ALTER TABLE tasks ADD COLUMN content_path TEXT",
+		"ALTER TABLE quests ADD COLUMN conversation_path TEXT",
+		// GitHub Issue sync for Quests (Tasks already have github_issue_number)
+		"ALTER TABLE quests ADD COLUMN github_issue_number INTEGER",
 	}
 	for _, migration := range optionalMigrations {
 		db.Exec(migration) // Ignore errors - column may already exist

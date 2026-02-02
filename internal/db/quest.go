@@ -36,12 +36,14 @@ func (db *DB) GetQuestByID(id string) (*Quest, error) {
 	quest := &Quest{}
 
 	err := db.QueryRow(
-		`SELECT id, project_id, title, status, model, auto_start_default, created_at, completed_at
+		`SELECT id, project_id, title, status, model, auto_start_default, conversation_path,
+		        github_issue_number, created_at, completed_at
 		 FROM quests WHERE id = ?`,
 		id,
 	).Scan(
 		&quest.ID, &quest.ProjectID, &quest.Title, &quest.Status,
-		&quest.Model, &quest.AutoStartDefault, &quest.CreatedAt, &quest.CompletedAt,
+		&quest.Model, &quest.AutoStartDefault, &quest.ConversationPath,
+		&quest.GitHubIssueNumber, &quest.CreatedAt, &quest.CompletedAt,
 	)
 
 	if err == sql.ErrNoRows {
@@ -57,7 +59,8 @@ func (db *DB) GetQuestByID(id string) (*Quest, error) {
 // GetQuestsByProjectID retrieves all Quests for a project
 func (db *DB) GetQuestsByProjectID(projectID string) ([]*Quest, error) {
 	rows, err := db.Query(
-		`SELECT id, project_id, title, status, model, auto_start_default, created_at, completed_at
+		`SELECT id, project_id, title, status, model, auto_start_default, conversation_path,
+		        github_issue_number, created_at, completed_at
 		 FROM quests WHERE project_id = ? ORDER BY created_at DESC`,
 		projectID,
 	)
@@ -71,7 +74,8 @@ func (db *DB) GetQuestsByProjectID(projectID string) ([]*Quest, error) {
 		quest := &Quest{}
 		err := rows.Scan(
 			&quest.ID, &quest.ProjectID, &quest.Title, &quest.Status,
-			&quest.Model, &quest.AutoStartDefault, &quest.CreatedAt, &quest.CompletedAt,
+			&quest.Model, &quest.AutoStartDefault, &quest.ConversationPath,
+			&quest.GitHubIssueNumber, &quest.CreatedAt, &quest.CompletedAt,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan quest: %w", err)
@@ -89,7 +93,8 @@ func (db *DB) GetQuestsByProjectID(projectID string) ([]*Quest, error) {
 // GetActiveQuests retrieves all active Quests for a project
 func (db *DB) GetActiveQuests(projectID string) ([]*Quest, error) {
 	rows, err := db.Query(
-		`SELECT id, project_id, title, status, model, auto_start_default, created_at, completed_at
+		`SELECT id, project_id, title, status, model, auto_start_default, conversation_path,
+		        github_issue_number, created_at, completed_at
 		 FROM quests WHERE project_id = ? AND status = ? ORDER BY created_at DESC`,
 		projectID, QuestStatusActive,
 	)
@@ -103,7 +108,8 @@ func (db *DB) GetActiveQuests(projectID string) ([]*Quest, error) {
 		quest := &Quest{}
 		err := rows.Scan(
 			&quest.ID, &quest.ProjectID, &quest.Title, &quest.Status,
-			&quest.Model, &quest.AutoStartDefault, &quest.CreatedAt, &quest.CompletedAt,
+			&quest.Model, &quest.AutoStartDefault, &quest.ConversationPath,
+			&quest.GitHubIssueNumber, &quest.CreatedAt, &quest.CompletedAt,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan quest: %w", err)
@@ -126,6 +132,42 @@ func (db *DB) UpdateQuestTitle(id, title string) error {
 	)
 	if err != nil {
 		return fmt.Errorf("failed to update quest title: %w", err)
+	}
+
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("quest not found: %s", id)
+	}
+
+	return nil
+}
+
+// UpdateQuestConversationPath updates the conversation_path of a Quest
+func (db *DB) UpdateQuestConversationPath(id, conversationPath string) error {
+	result, err := db.Exec(
+		`UPDATE quests SET conversation_path = ? WHERE id = ?`,
+		conversationPath, id,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to update quest conversation path: %w", err)
+	}
+
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("quest not found: %s", id)
+	}
+
+	return nil
+}
+
+// UpdateQuestGitHubIssue updates the GitHub Issue number for a Quest
+func (db *DB) UpdateQuestGitHubIssue(id string, issueNumber int64) error {
+	result, err := db.Exec(
+		`UPDATE quests SET github_issue_number = ? WHERE id = ?`,
+		issueNumber, id,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to update quest GitHub issue: %w", err)
 	}
 
 	rows, _ := result.RowsAffected()

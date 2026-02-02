@@ -71,6 +71,21 @@ func (s *ActiveSession) Cost() float64 {
 // This allows the session manager to get installation-specific clients for GitHub Apps
 type GitHubClientFetcher func(ctx context.Context, login string) (*toolbelt.GitHubClient, error)
 
+// TaskCompletedCallback is called when a task completes (for GitHub sync)
+type TaskCompletedCallback func(taskID string)
+
+// TaskFailedCallback is called when a task fails or is cancelled (for GitHub sync)
+type TaskFailedCallback func(taskID string, reason string)
+
+// PRCreatedCallback is called when a PR is created for a task (for GitHub sync)
+type PRCreatedCallback func(taskID string, prNumber int)
+
+// ChecklistUpdatedCallback is called when a checklist item is updated (for GitHub sync)
+type ChecklistUpdatedCallback func(taskID string)
+
+// TaskStatusCallback is called when a task status changes (for GitHub sync)
+type TaskStatusCallback func(taskID string, status string)
+
 type Manager struct {
 	db           *db.DB
 	scheduler    *orchestrator.Scheduler
@@ -85,6 +100,13 @@ type Manager struct {
 	gitOps              *git.Operations
 	githubClient        *toolbelt.GitHubClient // Static client (PAT-based)
 	githubClientFetcher GitHubClientFetcher    // Dynamic client fetcher (GitHub App)
+
+	// Event callbacks for GitHub sync
+	onTaskCompleted    TaskCompletedCallback
+	onTaskFailed       TaskFailedCallback
+	onPRCreated        PRCreatedCallback
+	onChecklistUpdated ChecklistUpdatedCallback
+	onTaskStatus       TaskStatusCallback
 
 	mu       sync.RWMutex
 	sessions map[string]*ActiveSession // sessionID -> session
@@ -112,6 +134,11 @@ func NewManager(database *db.DB, scheduler *orchestrator.Scheduler, promptsDir s
 		byTask:               make(map[string]string),
 		defaultMaxIterations: 100,
 	}
+}
+
+// GetPromptLoader returns the prompt loader for external use (e.g., quest handler)
+func (m *Manager) GetPromptLoader() *PromptLoader {
+	return m.promptLoader
 }
 
 // SetDefaults configures default budget limits for new sessions
@@ -165,6 +192,61 @@ func (m *Manager) SetGitHubClientFetcher(fetcher GitHubClientFetcher) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.githubClientFetcher = fetcher
+}
+
+// SetOnTaskCompleted sets a callback for task completion events (for GitHub sync)
+func (m *Manager) SetOnTaskCompleted(callback TaskCompletedCallback) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.onTaskCompleted = callback
+}
+
+// SetOnPRCreated sets a callback for PR creation events (for GitHub sync)
+func (m *Manager) SetOnPRCreated(callback PRCreatedCallback) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.onPRCreated = callback
+}
+
+// SetOnTaskFailed sets a callback for task failure events (for GitHub sync)
+func (m *Manager) SetOnTaskFailed(callback TaskFailedCallback) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.onTaskFailed = callback
+}
+
+// SetOnChecklistUpdated sets a callback for checklist update events (for GitHub sync)
+func (m *Manager) SetOnChecklistUpdated(callback ChecklistUpdatedCallback) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.onChecklistUpdated = callback
+}
+
+// NotifyChecklistUpdated is called by ralph loop when a checklist item is updated
+func (m *Manager) NotifyChecklistUpdated(taskID string) {
+	m.mu.RLock()
+	callback := m.onChecklistUpdated
+	m.mu.RUnlock()
+	if callback != nil {
+		go callback(taskID)
+	}
+}
+
+// SetOnTaskStatus sets a callback for task status change events (for GitHub sync)
+func (m *Manager) SetOnTaskStatus(callback TaskStatusCallback) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.onTaskStatus = callback
+}
+
+// notifyTaskStatus notifies listeners of a task status change
+func (m *Manager) notifyTaskStatus(taskID string, status string) {
+	m.mu.RLock()
+	callback := m.onTaskStatus
+	m.mu.RUnlock()
+	if callback != nil {
+		go callback(taskID, status)
+	}
 }
 
 // CreateSession creates a new session for a task
@@ -232,6 +314,9 @@ func (m *Manager) Start(ctx context.Context, sessionID string) error {
 		return fmt.Errorf("failed to update session status: %w", err)
 	}
 
+	// Notify task started (for GitHub sync)
+	m.notifyTaskStatus(session.TaskID, "running")
+
 	// Launch session in background
 	go m.runSession(sessionCtx, session)
 
@@ -282,13 +367,21 @@ func (m *Manager) Pause(sessionID string) error {
 	}
 
 	session.State = StatePaused
+	taskID := session.TaskID
 	if session.cancel != nil {
 		session.cancel()
 	}
 	m.mu.Unlock()
 
 	// Update DB
-	return m.db.UpdateSessionStatus(sessionID, string(StatePaused))
+	if err := m.db.UpdateSessionStatus(sessionID, string(StatePaused)); err != nil {
+		return err
+	}
+
+	// Notify task paused (for GitHub sync)
+	m.notifyTaskStatus(taskID, "paused")
+
+	return nil
 }
 
 // Get returns an active session by ID
@@ -504,8 +597,28 @@ func (m *Manager) runSession(ctx context.Context, session *ActiveSession) {
 	if finalState == StateCompleted {
 		_ = m.db.UpdateTaskStatus(taskID, db.TaskStatusCompleted)
 
+		// Notify task completed (for GitHub sync)
+		m.mu.RLock()
+		onTaskCompleted := m.onTaskCompleted
+		m.mu.RUnlock()
+		if onTaskCompleted != nil {
+			go onTaskCompleted(taskID)
+		}
+
 		// Push branch and create PR (non-blocking, log errors)
 		go m.createPRForTask(taskID, worktreePath)
+	} else if finalState == StateFailed {
+		// Notify task failed (for GitHub sync)
+		m.mu.RLock()
+		onTaskFailed := m.onTaskFailed
+		m.mu.RUnlock()
+		if onTaskFailed != nil {
+			reason := "Session failed"
+			if loopErr != nil {
+				reason = loopErr.Error()
+			}
+			go onTaskFailed(taskID, reason)
+		}
 	}
 }
 
@@ -718,5 +831,13 @@ func (m *Manager) createPRForTask(taskID, worktreePath string) {
 			return
 		}
 		fmt.Printf("createPRForTask: created PR #%d for task %s\n", *pr.Number, taskID)
+
+		// Notify PR created (for GitHub sync)
+		m.mu.RLock()
+		onPRCreated := m.onPRCreated
+		m.mu.RUnlock()
+		if onPRCreated != nil {
+			onPRCreated(taskID, *pr.Number)
+		}
 	}
 }

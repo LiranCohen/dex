@@ -53,6 +53,7 @@ func (s *Server) initGitHubApp() error {
 
 	s.githubAppMu.Lock()
 	s.githubApp = appManager
+	s.githubSync = github.NewSyncService(s.db, appManager)
 	s.githubAppMu.Unlock()
 
 	fmt.Printf("initGitHubApp: GitHub App manager initialized for %s\n", config.AppSlug)
@@ -405,6 +406,48 @@ func (s *Server) handleGitHubSyncInstallations(c echo.Context) error {
 		"synced":        len(installations),
 		"installations": installations,
 	})
+}
+
+// getSyncConfig returns the GitHub sync configuration, or nil if not configured
+func (s *Server) getSyncConfig(ctx context.Context) *github.SyncConfig {
+	// Check if GitHub App is configured
+	s.githubAppMu.RLock()
+	appManager := s.githubApp
+	s.githubAppMu.RUnlock()
+
+	if appManager == nil {
+		return nil
+	}
+
+	// Get onboarding progress for org info
+	progress, err := s.db.GetOnboardingProgress()
+	if err != nil || progress == nil {
+		return nil
+	}
+
+	orgName := progress.GetGitHubOrgName()
+	if orgName == "" {
+		return nil
+	}
+
+	// Get installation ID for the org
+	installID, err := appManager.GetInstallationIDForLogin(ctx, orgName)
+	if err != nil {
+		fmt.Printf("getSyncConfig: failed to get installation ID: %v\n", err)
+		return nil
+	}
+
+	// Get app config for app ID
+	appConfig, err := s.db.GetGitHubAppConfig()
+	if err != nil || appConfig == nil {
+		return nil
+	}
+
+	return &github.SyncConfig{
+		OrgName:        orgName,
+		InstallationID: installID,
+		AppID:          appConfig.AppID,
+	}
 }
 
 // handleGitHubDeleteApp removes the GitHub App configuration

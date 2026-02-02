@@ -14,6 +14,7 @@ import (
 
 	"github.com/lirancohen/dex/internal/api/websocket"
 	"github.com/lirancohen/dex/internal/db"
+	"github.com/lirancohen/dex/internal/session"
 	"github.com/lirancohen/dex/internal/toolbelt"
 	"github.com/lirancohen/dex/internal/tools"
 )
@@ -63,6 +64,7 @@ type Handler struct {
 	client         *toolbelt.AnthropicClient
 	github         *toolbelt.GitHubClient
 	hub            *websocket.Hub
+	promptLoader   *session.PromptLoader
 	githubUsername string        // cached GitHub username
 	toolSet        *tools.Set    // Read-only tools for Quest exploration
 	readOnlyTools  []toolbelt.AnthropicTool
@@ -95,6 +97,11 @@ func (h *Handler) SetGitHubClient(client *toolbelt.GitHubClient) {
 	h.github = client
 }
 
+// SetPromptLoader sets the prompt loader for the handler
+func (h *Handler) SetPromptLoader(loader *session.PromptLoader) {
+	h.promptLoader = loader
+}
+
 // getGitHubUsername returns the cached GitHub username, fetching it if needed
 func (h *Handler) getGitHubUsername(ctx context.Context) string {
 	if h.githubUsername != "" {
@@ -111,67 +118,28 @@ func (h *Handler) getGitHubUsername(ctx context.Context) string {
 	return username
 }
 
-// questSystemPrompt is the system prompt for Quest conversations
-const questSystemPrompt = `You are Dex, Poindexter's AI orchestration genius. You help users plan and break down their work into discrete objectives (tasks) that can be executed by AI agents.
+// buildQuestPrompt builds the system prompt for quest conversations using PromptLoom
+func (h *Handler) buildQuestPrompt(ctx context.Context, projectID, questID string) string {
+	var basePrompt string
 
-Your role is to:
-1. Understand what the user wants to accomplish
-2. Ask clarifying questions when needed (keep them focused, 1-2 at a time)
-3. Break complex requests into separate, atomic objectives
-4. Propose objectives with clear checklists
+	// Try to get prompt from PromptLoom
+	if h.promptLoader != nil {
+		prompt, err := h.promptLoader.Get("quest", nil)
+		if err == nil {
+			basePrompt = prompt
+		} else {
+			fmt.Printf("warning: failed to load quest prompt from PromptLoom: %v, using fallback\n", err)
+		}
+	}
 
-When you've gathered enough information to propose an objective, output it using this signal format:
+	// Fallback if PromptLoom not available
+	if basePrompt == "" {
+		basePrompt = "You are Dex, an AI orchestration assistant. Help users break down work into objectives."
+	}
 
-OBJECTIVE_DRAFT:{
-  "draft_id": "draft-1",
-  "title": "Short descriptive title",
-  "description": "Detailed description of what this objective accomplishes",
-  "hat": "creator",
-  "checklist": {
-    "must_have": ["Required step 1", "Required step 2"],
-    "optional": ["Nice-to-have enhancement"]
-  },
-  "blocked_by": [],
-  "auto_start": true,
-  "complexity": "simple",
-  "estimated_iterations": 3,
-  "estimated_budget": 0.50
+	// Add dynamic context that can't be in YAML
+	return basePrompt + h.buildUserContext(ctx) + h.buildCrossQuestContext(projectID, questID)
 }
-
-Guidelines for objectives:
-- Each objective should be atomic and independently completable
-- Title should be action-oriented (e.g., "Add user authentication", "Fix login bug")
-- Description provides context for the executing agent
-- Hat options: "explorer" (research), "planner" (strategy), "designer" (structure), "creator" (building), "critic" (review), "editor" (refinement), "resolver" (issues)
-- Checklist must_have items are required for completion (3-5 items ideal)
-- Checklist optional items are nice-to-have enhancements
-- Use blocked_by to reference other draft_ids if there are dependencies
-- auto_start: true means start immediately when ready, false requires manual start
-- complexity: "simple" or "complex" - determines which AI model executes the objective:
-  * "simple": Fast model (Sonnet) - straightforward tasks, single files, clear requirements
-  * "complex": Advanced model (Opus) - architectural decisions, multi-file refactoring, ambiguous requirements, debugging intricate issues
-- estimated_iterations: estimated number of iterations needed (1-5 for simple, 5-10 for moderate, 10-20 for complex)
-- estimated_budget: estimated cost in USD based on complexity ($0.20-$0.50 for simple, $0.50-$2.00 for moderate, $2.00-$10.00 for complex with Opus)
-
-When asking a clarifying question, output ONLY the signal on its own line (no surrounding text):
-QUESTION:{"question": "Your question here?", "options": ["Option 1", "Option 2"]}
-
-When all objectives for a request are drafted:
-QUEST_READY:{"drafts": ["draft-1", "draft-2"], "summary": "Brief summary of what will be accomplished"}
-
-IMPORTANT SIGNAL RULES:
-- Signals (OBJECTIVE_DRAFT, QUESTION, QUEST_READY) are parsed and rendered as UI components
-- Output signals on their own lines without any surrounding prose
-- Do NOT repeat or describe the signal content in plain text
-- If you need to ask a question, ONLY output the QUESTION signal, nothing else
-- Keep any conversational text brief and separate from signals
-
-CRITICAL: Do NOT mix QUESTION and OBJECTIVE_DRAFT signals in the same response.
-- If you still need information, ask questions FIRST (no drafts)
-- Once you have enough information, propose objectives WITHOUT asking more questions
-- When you output an OBJECTIVE_DRAFT, you are committing to that proposal - no follow-up questions in the same message
-
-Keep your conversational responses concise and focused. You can include multiple OBJECTIVE_DRAFT signals in one response if proposing several related objectives.`
 
 // ProcessMessage handles a user message in a quest conversation
 func (h *Handler) ProcessMessage(ctx context.Context, questID, content string) (*db.QuestMessage, error) {
@@ -219,8 +187,8 @@ func (h *Handler) ProcessMessage(ctx context.Context, questID, content string) (
 		model = ModelOpus
 	}
 
-	// Build system prompt with user context, cross-quest awareness, and tool instructions
-	systemPrompt := questSystemPrompt + h.buildToolContext() + h.buildUserContext(ctx) + h.buildCrossQuestContext(quest.ProjectID, questID)
+	// Build system prompt with user context and cross-quest awareness
+	systemPrompt := h.buildQuestPrompt(ctx, quest.ProjectID, questID)
 
 	// Create tool executor for this project (read-only mode)
 	// Always create an executor - use project path if available, otherwise use temp dir for web tools
@@ -396,46 +364,6 @@ func (h *Handler) ProcessMessage(ctx context.Context, questID, content string) (
 	}
 
 	return nil, fmt.Errorf("tool execution loop exceeded maximum iterations")
-}
-
-// buildToolContext creates instructions for using tools
-func (h *Handler) buildToolContext() string {
-	if len(h.readOnlyTools) == 0 {
-		return ""
-	}
-
-	return `
-
-## Your Tools (Read-Only for Exploration)
-You have access to read-only tools for exploring the codebase before proposing objectives:
-- read_file: Read file contents
-- list_files: List directory contents
-- glob: Find files by pattern
-- grep: Search file contents
-- git_status: Show git status
-- git_diff: Show git changes
-- git_log: Show commit history
-- web_search: Search the web for information
-- web_fetch: Fetch URL content
-
-Use these tools to understand the codebase before making recommendations.
-
-## Objective Capabilities (Full Write Access)
-When you create objectives, the AI agents that execute them have FULL capabilities including:
-- Writing and editing files
-- Running bash commands
-- Git operations (init, commit, push)
-- GitHub operations (create repos, create PRs, create issues)
-
-So while YOU can only read and explore, the objectives you create CAN:
-- Create new GitHub repositories (private or public)
-- Initialize projects with files and structure
-- Create pull requests and issues
-- Execute any shell commands
-- Commit and push code changes
-
-When a user asks to create a GitHub repo, initialize a project, or perform other write operations, create an objective for it - the executing agent has the tools to do it.
-`
 }
 
 // truncateForBroadcast truncates a string for WebSocket broadcast

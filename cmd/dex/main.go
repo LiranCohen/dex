@@ -28,8 +28,7 @@ func main() {
 	keyFile := flag.String("key", "", "Path to TLS key (optional)")
 	staticDir := flag.String("static", "", "Path to frontend static files (e.g., ./frontend/dist)")
 	toolbeltConfig := flag.String("toolbelt", "", "Path to toolbelt.yaml config file (optional)")
-	worktreeBase := flag.String("worktree-base", "", "Base directory for git worktrees (e.g., ~/src/worktrees)")
-	reposDir := flag.String("repos-dir", "", "Base directory for git repositories (e.g., /opt/dex/repos)")
+	baseDir := flag.String("base-dir", "", "Base Dex directory (default: /opt/dex). Repos at {base-dir}/repos/, worktrees at {base-dir}/worktrees/")
 	jwtSecret := flag.String("jwt-secret", "", "JWT signing secret (auto-generated if not provided)")
 	showVersion := flag.Bool("version", false, "Show version and exit")
 	flag.Parse()
@@ -59,6 +58,15 @@ func main() {
 	}
 	fmt.Println("Database initialized successfully")
 
+	// Determine base directory - used for repos, worktrees, and secrets
+	dataDir := *baseDir
+	if dataDir == "" {
+		dataDir = os.Getenv("DEX_DATA_DIR")
+	}
+	if dataDir == "" {
+		dataDir = "/opt/dex"
+	}
+
 	// Load toolbelt configuration (optional)
 	var tb *toolbelt.Toolbelt
 	if *toolbeltConfig != "" {
@@ -80,10 +88,6 @@ func main() {
 		}
 	} else {
 		// Try loading from secrets.json (created during setup)
-		dataDir := os.Getenv("DEX_DATA_DIR")
-		if dataDir == "" {
-			dataDir = "/opt/dex"
-		}
 		secretsPath := filepath.Join(dataDir, "secrets.json")
 		if _, err := os.Stat(secretsPath); err == nil {
 			fmt.Printf("Loading toolbelt from secrets: %s\n", secretsPath)
@@ -137,14 +141,13 @@ func main() {
 
 	// Create API server
 	server := api.NewServer(database, api.Config{
-		Addr:         *addr,
-		CertFile:     *certFile,
-		KeyFile:      *keyFile,
-		StaticDir:    *staticDir,
-		Toolbelt:     tb,
-		WorktreeBase: *worktreeBase,
-		ReposDir:     *reposDir,
-		TokenConfig:  tokenConfig,
+		Addr:        *addr,
+		CertFile:    *certFile,
+		KeyFile:     *keyFile,
+		StaticDir:   *staticDir,
+		Toolbelt:    tb,
+		BaseDir:     dataDir,
+		TokenConfig: tokenConfig,
 	})
 
 	// Start server in goroutine

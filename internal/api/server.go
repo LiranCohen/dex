@@ -47,6 +47,7 @@ type Server struct {
 	planner        *planning.Planner
 	questHandler   *quest.Handler
 	githubApp      *github.AppManager
+	githubSync     *github.SyncService
 	setupHandler   *setup.Handler
 	hub            *websocket.Hub
 	addr           string
@@ -54,7 +55,7 @@ type Server struct {
 	keyFile        string
 	tokenConfig    *auth.TokenConfig
 	staticDir      string
-	reposDir       string
+	baseDir        string // Base Dex directory (e.g., /opt/dex)
 	challenges     map[string]challengeEntry // challenge -> expiry
 	challengesMu   sync.RWMutex
 	toolbeltMu     sync.RWMutex // Protects toolbelt updates
@@ -63,14 +64,13 @@ type Server struct {
 
 // Config holds server configuration
 type Config struct {
-	Addr         string             // e.g., ":8443" or "0.0.0.0:8443"
-	CertFile     string             // Path to TLS certificate (optional for dev)
-	KeyFile      string             // Path to TLS key (optional for dev)
-	TokenConfig  *auth.TokenConfig  // JWT configuration (optional for dev)
-	StaticDir    string             // Path to frontend static files (e.g., "./frontend/dist")
-	Toolbelt     *toolbelt.Toolbelt // Toolbelt for external service integrations (optional)
-	WorktreeBase string             // Base directory for git worktrees (optional)
-	ReposDir     string             // Base directory for git repositories (optional)
+	Addr        string             // e.g., ":8443" or "0.0.0.0:8443"
+	CertFile    string             // Path to TLS certificate (optional for dev)
+	KeyFile     string             // Path to TLS key (optional for dev)
+	TokenConfig *auth.TokenConfig  // JWT configuration (optional for dev)
+	StaticDir   string             // Path to frontend static files (e.g., "./frontend/dist")
+	Toolbelt    *toolbelt.Toolbelt // Toolbelt for external service integrations (optional)
+	BaseDir     string             // Base Dex directory (default: /opt/dex). Derived: {BaseDir}/repos/, {BaseDir}/worktrees/
 }
 
 // NewServer creates a new API server
@@ -99,13 +99,15 @@ func NewServer(database *db.DB, cfg Config) *Server {
 		keyFile:     cfg.KeyFile,
 		tokenConfig: cfg.TokenConfig,
 		staticDir:   cfg.StaticDir,
-		reposDir:    cfg.ReposDir,
+		baseDir:     cfg.BaseDir,
 		challenges:  make(map[string]challengeEntry),
 	}
 
-	// Setup git service if worktree base is configured
-	if cfg.WorktreeBase != "" {
-		s.gitService = git.NewService(database, cfg.WorktreeBase, cfg.ReposDir)
+	// Setup git service with derived paths from base directory
+	if cfg.BaseDir != "" {
+		worktreeDir := filepath.Join(cfg.BaseDir, "worktrees")
+		reposDir := filepath.Join(cfg.BaseDir, "repos")
+		s.gitService = git.NewService(database, worktreeDir, reposDir)
 	}
 
 	// Create scheduler for session management
@@ -138,10 +140,29 @@ func NewServer(database *db.DB, cfg Config) *Server {
 
 	s.sessionManager = sessionMgr
 
+	// Wire up GitHub sync callbacks for task lifecycle events
+	sessionMgr.SetOnTaskCompleted(func(taskID string) {
+		s.onTaskCompletedSync(taskID)
+	})
+	sessionMgr.SetOnTaskFailed(func(taskID string, reason string) {
+		s.failObjectiveGitHubIssue(taskID, reason)
+	})
+	sessionMgr.SetOnPRCreated(func(taskID string, prNumber int) {
+		s.onPRCreatedSync(taskID, prNumber)
+	})
+	sessionMgr.SetOnChecklistUpdated(func(taskID string) {
+		s.updateObjectiveChecklistSync(taskID)
+	})
+	sessionMgr.SetOnTaskStatus(func(taskID string, status string) {
+		s.updateObjectiveStatusSync(taskID, status)
+	})
+
 	// Create planner for task planning phase
 	if cfg.Toolbelt != nil && cfg.Toolbelt.Anthropic != nil {
 		s.planner = planning.NewPlanner(database, cfg.Toolbelt.Anthropic, hub)
+		s.planner.SetPromptLoader(sessionMgr.GetPromptLoader())
 		s.questHandler = quest.NewHandler(database, cfg.Toolbelt.Anthropic, hub)
+		s.questHandler.SetPromptLoader(sessionMgr.GetPromptLoader())
 		if cfg.Toolbelt.GitHub != nil {
 			s.questHandler.SetGitHubClient(cfg.Toolbelt.GitHub)
 		}
@@ -741,9 +762,9 @@ func (s *Server) startTaskInternal(ctx context.Context, taskID string, baseBranc
 			}
 		} else {
 			// Project path is empty or invalid (e.g., system directory)
-			// Create a task-specific directory in the configured repos directory
-			if s.reposDir != "" {
-				worktreePath = filepath.Join(s.reposDir, "task-"+taskID)
+			// Create a task-specific directory in the worktrees directory
+			if s.baseDir != "" {
+				worktreePath = filepath.Join(s.baseDir, "worktrees", "task-"+taskID)
 			} else {
 				worktreePath = filepath.Join(os.TempDir(), "dex-task-"+taskID)
 			}
@@ -1536,6 +1557,9 @@ func (s *Server) handleCancelTask(c echo.Context) error {
 		},
 	})
 
+	// Close GitHub Issue as cancelled (async)
+	go s.cancelObjectiveGitHubIssue(taskID)
+
 	return c.JSON(http.StatusOK, map[string]any{
 		"message": "task cancelled",
 		"task_id": taskID,
@@ -1787,6 +1811,11 @@ func (s *Server) Shutdown(ctx context.Context) error {
 
 // getDataDir returns the data directory path
 func (s *Server) getDataDir() string {
+	// Use configured baseDir first
+	if s.baseDir != "" {
+		return s.baseDir
+	}
+	// Fall back to environment variable
 	if dir := os.Getenv("DEX_DATA_DIR"); dir != "" {
 		return dir
 	}
@@ -1843,12 +1872,14 @@ func (s *Server) ReloadToolbelt() error {
 		// Update planner with new Anthropic client
 		if s.planner == nil {
 			s.planner = planning.NewPlanner(s.db, tb.Anthropic, s.hub)
+			s.planner.SetPromptLoader(s.sessionManager.GetPromptLoader())
 			fmt.Println("ReloadToolbelt: Planner created")
 		}
 
 		// Update quest handler with new Anthropic client
 		if s.questHandler == nil {
 			s.questHandler = quest.NewHandler(s.db, tb.Anthropic, s.hub)
+			s.questHandler.SetPromptLoader(s.sessionManager.GetPromptLoader())
 			fmt.Println("ReloadToolbelt: Quest handler created")
 		}
 	}
@@ -2212,6 +2243,9 @@ func (s *Server) handleUpdateChecklistItem(c echo.Context) error {
 			"item":         toChecklistItemResponse(updatedItem),
 		},
 	})
+
+	// Update GitHub Issue with checklist progress (async)
+	go s.updateObjectiveChecklistSync(taskID)
 
 	return c.JSON(http.StatusOK, toChecklistItemResponse(updatedItem))
 }
@@ -2688,6 +2722,9 @@ func (s *Server) handleSendQuestMessage(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("failed to process message: %v", err))
 	}
 
+	// Sync to GitHub Issue (async, on first message when quest doesn't have an issue yet)
+	go s.syncQuestToGitHubIssue(questID)
+
 	return c.JSON(http.StatusCreated, map[string]any{
 		"user_message":      toQuestMessageResponse(userMsg),
 		"assistant_message": toQuestMessageResponse(assistantMsg),
@@ -2727,6 +2764,9 @@ func (s *Server) handleCompleteQuest(c echo.Context) error {
 		},
 	})
 
+	// Close GitHub Issue (async)
+	go s.closeQuestGitHubIssue(questID, summary)
+
 	return c.JSON(http.StatusOK, toQuestResponse(quest, summary))
 }
 
@@ -2762,6 +2802,9 @@ func (s *Server) handleReopenQuest(c echo.Context) error {
 			"project_id": quest.ProjectID,
 		},
 	})
+
+	// Reopen GitHub Issue (async)
+	go s.reopenQuestGitHubIssue(questID)
 
 	return c.JSON(http.StatusOK, toQuestResponse(quest, summary))
 }
@@ -2887,6 +2930,9 @@ func (s *Server) handleCreateObjective(c echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
+
+	// Sync objective to GitHub Issue (async)
+	go s.syncObjectiveToGitHubIssue(createdTask.ID)
 
 	// Add a message to the quest history indicating the objective was accepted
 	acceptMessage := fmt.Sprintf("✓ Accepted objective: **%s**", req.Title)
@@ -3071,4 +3117,533 @@ func (s *Server) handleDeleteQuestTemplate(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]string{
 		"message": "template deleted",
 	})
+}
+
+// syncQuestToGitHubIssue creates or updates a GitHub Issue for a quest
+// This runs asynchronously and logs errors rather than failing
+func (s *Server) syncQuestToGitHubIssue(questID string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Get sync config
+	syncConfig := s.getSyncConfig(ctx)
+	if syncConfig == nil || !syncConfig.IsConfigured() {
+		return // GitHub sync not configured
+	}
+
+	// Get sync service
+	s.githubAppMu.RLock()
+	syncService := s.githubSync
+	s.githubAppMu.RUnlock()
+
+	if syncService == nil {
+		return
+	}
+
+	// Get quest for repo info
+	quest, err := s.db.GetQuestByID(questID)
+	if err != nil || quest == nil {
+		fmt.Printf("syncQuestToGitHubIssue: failed to get quest %s: %v\n", questID, err)
+		return
+	}
+
+	// Determine repo for this quest
+	workspaceRepo := syncConfig.GetWorkspaceRepo()
+	repo, err := syncService.GetRepoInfoForQuest(quest, workspaceRepo)
+	if err != nil {
+		fmt.Printf("syncQuestToGitHubIssue: failed to get repo for quest %s: %v\n", questID, err)
+		return
+	}
+
+	// Ensure labels exist (idempotent)
+	if err := syncService.EnsureRepoLabels(ctx, repo, syncConfig.InstallationID); err != nil {
+		fmt.Printf("syncQuestToGitHubIssue: failed to ensure labels for %s/%s: %v\n", repo.Owner, repo.Repo, err)
+		// Continue anyway - issue creation will work, just without labels
+	}
+
+	// Sync quest to issue
+	if err := syncService.SyncQuestToIssue(ctx, questID, repo, syncConfig.InstallationID); err != nil {
+		fmt.Printf("syncQuestToGitHubIssue: failed to sync quest %s: %v\n", questID, err)
+		return
+	}
+
+	fmt.Printf("syncQuestToGitHubIssue: synced quest %s to %s/%s\n", questID, repo.Owner, repo.Repo)
+}
+
+// closeQuestGitHubIssue closes the GitHub Issue for a completed quest
+// This runs asynchronously and logs errors rather than failing
+func (s *Server) closeQuestGitHubIssue(questID string, summary *db.QuestSummary) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Get sync config
+	syncConfig := s.getSyncConfig(ctx)
+	if syncConfig == nil || !syncConfig.IsConfigured() {
+		return // GitHub sync not configured
+	}
+
+	// Get sync service
+	s.githubAppMu.RLock()
+	syncService := s.githubSync
+	s.githubAppMu.RUnlock()
+
+	if syncService == nil {
+		return
+	}
+
+	// Get quest for repo info
+	quest, err := s.db.GetQuestByID(questID)
+	if err != nil || quest == nil {
+		fmt.Printf("closeQuestGitHubIssue: failed to get quest %s: %v\n", questID, err)
+		return
+	}
+
+	// Determine repo for this quest
+	workspaceRepo := syncConfig.GetWorkspaceRepo()
+	repo, err := syncService.GetRepoInfoForQuest(quest, workspaceRepo)
+	if err != nil {
+		fmt.Printf("closeQuestGitHubIssue: failed to get repo for quest %s: %v\n", questID, err)
+		return
+	}
+
+	// Build summary text
+	summaryText := "Quest completed."
+	if summary != nil {
+		summaryText = fmt.Sprintf("Quest completed with %d/%d tasks completed.",
+			summary.CompletedTasks, summary.TotalTasks)
+		if summary.TotalDollarsUsed > 0 {
+			summaryText += fmt.Sprintf(" Total cost: $%.4f", summary.TotalDollarsUsed)
+		}
+	}
+
+	// Close the issue
+	if err := syncService.CompleteQuestIssue(ctx, questID, summaryText, repo, syncConfig.InstallationID); err != nil {
+		fmt.Printf("closeQuestGitHubIssue: failed to close issue for quest %s: %v\n", questID, err)
+		return
+	}
+
+	fmt.Printf("closeQuestGitHubIssue: closed issue for quest %s\n", questID)
+}
+
+// reopenQuestGitHubIssue reopens the GitHub Issue for a reopened quest
+// This runs asynchronously and logs errors rather than failing
+func (s *Server) reopenQuestGitHubIssue(questID string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Get sync config
+	syncConfig := s.getSyncConfig(ctx)
+	if syncConfig == nil || !syncConfig.IsConfigured() {
+		return // GitHub sync not configured
+	}
+
+	// Get sync service
+	s.githubAppMu.RLock()
+	syncService := s.githubSync
+	s.githubAppMu.RUnlock()
+
+	if syncService == nil {
+		return
+	}
+
+	// Get quest for repo info
+	quest, err := s.db.GetQuestByID(questID)
+	if err != nil || quest == nil {
+		fmt.Printf("reopenQuestGitHubIssue: failed to get quest %s: %v\n", questID, err)
+		return
+	}
+
+	// Determine repo for this quest
+	workspaceRepo := syncConfig.GetWorkspaceRepo()
+	repo, err := syncService.GetRepoInfoForQuest(quest, workspaceRepo)
+	if err != nil {
+		fmt.Printf("reopenQuestGitHubIssue: failed to get repo for quest %s: %v\n", questID, err)
+		return
+	}
+
+	// Reopen the issue
+	if err := syncService.ReopenQuestIssue(ctx, questID, repo, syncConfig.InstallationID); err != nil {
+		fmt.Printf("reopenQuestGitHubIssue: failed to reopen issue for quest %s: %v\n", questID, err)
+		return
+	}
+
+	fmt.Printf("reopenQuestGitHubIssue: reopened issue for quest %s\n", questID)
+}
+
+// onTaskCompletedSync is called when a task completes (callback from session manager)
+// It closes the objective's GitHub Issue
+func (s *Server) onTaskCompletedSync(taskID string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Get sync config
+	syncConfig := s.getSyncConfig(ctx)
+	if syncConfig == nil || !syncConfig.IsConfigured() {
+		return
+	}
+
+	// Get sync service
+	s.githubAppMu.RLock()
+	syncService := s.githubSync
+	s.githubAppMu.RUnlock()
+
+	if syncService == nil {
+		return
+	}
+
+	// Get task
+	task, err := s.db.GetTaskByID(taskID)
+	if err != nil || task == nil {
+		fmt.Printf("onTaskCompletedSync: failed to get task %s: %v\n", taskID, err)
+		return
+	}
+
+	// Get project for repo info
+	project, err := s.db.GetProjectByID(task.ProjectID)
+	if err != nil || project == nil {
+		fmt.Printf("onTaskCompletedSync: failed to get project for task %s: %v\n", taskID, err)
+		return
+	}
+
+	// Determine repo
+	repo, ok := github.GetRepoInfoFromProject(project)
+	if !ok {
+		repo = syncConfig.GetWorkspaceRepo()
+	}
+
+	// Close the objective issue
+	if err := syncService.CompleteObjectiveIssue(ctx, taskID, repo, syncConfig.InstallationID); err != nil {
+		fmt.Printf("onTaskCompletedSync: failed to close issue for task %s: %v\n", taskID, err)
+		return
+	}
+
+	fmt.Printf("onTaskCompletedSync: closed issue for task %s\n", taskID)
+
+	// Update parent quest issue to reflect objective completion
+	s.updateQuestIssueForTask(ctx, task, syncService, syncConfig)
+}
+
+// onPRCreatedSync is called when a PR is created (callback from session manager)
+// It links the PR to the objective's GitHub Issue
+func (s *Server) onPRCreatedSync(taskID string, prNumber int) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Get sync config
+	syncConfig := s.getSyncConfig(ctx)
+	if syncConfig == nil || !syncConfig.IsConfigured() {
+		return
+	}
+
+	// Get sync service
+	s.githubAppMu.RLock()
+	syncService := s.githubSync
+	s.githubAppMu.RUnlock()
+
+	if syncService == nil {
+		return
+	}
+
+	// Get task
+	task, err := s.db.GetTaskByID(taskID)
+	if err != nil || task == nil {
+		fmt.Printf("onPRCreatedSync: failed to get task %s: %v\n", taskID, err)
+		return
+	}
+
+	// Get project for repo info
+	project, err := s.db.GetProjectByID(task.ProjectID)
+	if err != nil || project == nil {
+		fmt.Printf("onPRCreatedSync: failed to get project for task %s: %v\n", taskID, err)
+		return
+	}
+
+	// Determine repo
+	repo, ok := github.GetRepoInfoFromProject(project)
+	if !ok {
+		repo = syncConfig.GetWorkspaceRepo()
+	}
+
+	// Link PR to the objective issue
+	if err := syncService.LinkPRToObjective(ctx, taskID, prNumber, repo, syncConfig.InstallationID); err != nil {
+		fmt.Printf("onPRCreatedSync: failed to link PR to task %s: %v\n", taskID, err)
+		return
+	}
+
+	fmt.Printf("onPRCreatedSync: linked PR #%d to task %s\n", prNumber, taskID)
+}
+
+// cancelObjectiveGitHubIssue closes the GitHub Issue for a cancelled task
+func (s *Server) cancelObjectiveGitHubIssue(taskID string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	syncConfig := s.getSyncConfig(ctx)
+	if syncConfig == nil || !syncConfig.IsConfigured() {
+		return
+	}
+
+	s.githubAppMu.RLock()
+	syncService := s.githubSync
+	s.githubAppMu.RUnlock()
+
+	if syncService == nil {
+		return
+	}
+
+	task, err := s.db.GetTaskByID(taskID)
+	if err != nil || task == nil {
+		fmt.Printf("cancelObjectiveGitHubIssue: failed to get task %s: %v\n", taskID, err)
+		return
+	}
+
+	project, err := s.db.GetProjectByID(task.ProjectID)
+	if err != nil || project == nil {
+		fmt.Printf("cancelObjectiveGitHubIssue: failed to get project for task %s: %v\n", taskID, err)
+		return
+	}
+
+	repo, ok := github.GetRepoInfoFromProject(project)
+	if !ok {
+		repo = syncConfig.GetWorkspaceRepo()
+	}
+
+	if err := syncService.CancelObjectiveIssue(ctx, taskID, repo, syncConfig.InstallationID); err != nil {
+		fmt.Printf("cancelObjectiveGitHubIssue: failed to cancel issue for task %s: %v\n", taskID, err)
+		return
+	}
+
+	fmt.Printf("cancelObjectiveGitHubIssue: cancelled issue for task %s\n", taskID)
+
+	// Update parent quest issue to reflect objective cancellation
+	s.updateQuestIssueForTask(ctx, task, syncService, syncConfig)
+}
+
+// failObjectiveGitHubIssue closes the GitHub Issue for a failed task
+func (s *Server) failObjectiveGitHubIssue(taskID string, reason string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	syncConfig := s.getSyncConfig(ctx)
+	if syncConfig == nil || !syncConfig.IsConfigured() {
+		return
+	}
+
+	s.githubAppMu.RLock()
+	syncService := s.githubSync
+	s.githubAppMu.RUnlock()
+
+	if syncService == nil {
+		return
+	}
+
+	task, err := s.db.GetTaskByID(taskID)
+	if err != nil || task == nil {
+		fmt.Printf("failObjectiveGitHubIssue: failed to get task %s: %v\n", taskID, err)
+		return
+	}
+
+	project, err := s.db.GetProjectByID(task.ProjectID)
+	if err != nil || project == nil {
+		fmt.Printf("failObjectiveGitHubIssue: failed to get project for task %s: %v\n", taskID, err)
+		return
+	}
+
+	repo, ok := github.GetRepoInfoFromProject(project)
+	if !ok {
+		repo = syncConfig.GetWorkspaceRepo()
+	}
+
+	if err := syncService.FailObjectiveIssue(ctx, taskID, reason, repo, syncConfig.InstallationID); err != nil {
+		fmt.Printf("failObjectiveGitHubIssue: failed to fail issue for task %s: %v\n", taskID, err)
+		return
+	}
+
+	fmt.Printf("failObjectiveGitHubIssue: failed issue for task %s\n", taskID)
+
+	// Update parent quest issue to reflect objective failure
+	s.updateQuestIssueForTask(ctx, task, syncService, syncConfig)
+}
+
+// updateQuestIssueForTask updates the parent quest's GitHub issue when an objective status changes
+func (s *Server) updateQuestIssueForTask(ctx context.Context, task *db.Task, syncService *github.SyncService, syncConfig *github.SyncConfig) {
+	// Skip if task has no parent quest
+	if !task.QuestID.Valid {
+		return
+	}
+
+	quest, err := s.db.GetQuestByID(task.QuestID.String)
+	if err != nil || quest == nil || !quest.GitHubIssueNumber.Valid {
+		return
+	}
+
+	workspaceRepo := syncConfig.GetWorkspaceRepo()
+	repo, err := syncService.GetRepoInfoForQuest(quest, workspaceRepo)
+	if err != nil {
+		fmt.Printf("updateQuestIssueForTask: failed to get repo for quest %s: %v\n", quest.ID, err)
+		return
+	}
+
+	if err := syncService.SyncQuestToIssue(ctx, quest.ID, repo, syncConfig.InstallationID); err != nil {
+		fmt.Printf("updateQuestIssueForTask: failed to update quest issue %s: %v\n", quest.ID, err)
+		return
+	}
+
+	fmt.Printf("updateQuestIssueForTask: updated quest issue for %s\n", quest.ID)
+}
+
+// updateObjectiveStatusSync adds a status comment to the objective's GitHub Issue
+func (s *Server) updateObjectiveStatusSync(taskID string, status string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	syncConfig := s.getSyncConfig(ctx)
+	if syncConfig == nil || !syncConfig.IsConfigured() {
+		return
+	}
+
+	s.githubAppMu.RLock()
+	syncService := s.githubSync
+	s.githubAppMu.RUnlock()
+
+	if syncService == nil {
+		return
+	}
+
+	task, err := s.db.GetTaskByID(taskID)
+	if err != nil || task == nil {
+		fmt.Printf("updateObjectiveStatusSync: failed to get task %s: %v\n", taskID, err)
+		return
+	}
+
+	project, err := s.db.GetProjectByID(task.ProjectID)
+	if err != nil || project == nil {
+		fmt.Printf("updateObjectiveStatusSync: failed to get project for task %s: %v\n", taskID, err)
+		return
+	}
+
+	repo, ok := github.GetRepoInfoFromProject(project)
+	if !ok {
+		repo = syncConfig.GetWorkspaceRepo()
+	}
+
+	if err := syncService.AddObjectiveStatusComment(ctx, taskID, status, repo, syncConfig.InstallationID); err != nil {
+		fmt.Printf("updateObjectiveStatusSync: failed to add status comment for task %s: %v\n", taskID, err)
+		return
+	}
+
+	fmt.Printf("updateObjectiveStatusSync: added %s status comment for task %s\n", status, taskID)
+}
+
+// updateObjectiveChecklistSync updates the objective's GitHub Issue with checklist progress
+func (s *Server) updateObjectiveChecklistSync(taskID string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	syncConfig := s.getSyncConfig(ctx)
+	if syncConfig == nil || !syncConfig.IsConfigured() {
+		return
+	}
+
+	s.githubAppMu.RLock()
+	syncService := s.githubSync
+	s.githubAppMu.RUnlock()
+
+	if syncService == nil {
+		return
+	}
+
+	task, err := s.db.GetTaskByID(taskID)
+	if err != nil || task == nil {
+		fmt.Printf("updateObjectiveChecklistSync: failed to get task %s: %v\n", taskID, err)
+		return
+	}
+
+	project, err := s.db.GetProjectByID(task.ProjectID)
+	if err != nil || project == nil {
+		fmt.Printf("updateObjectiveChecklistSync: failed to get project for task %s: %v\n", taskID, err)
+		return
+	}
+
+	repo, ok := github.GetRepoInfoFromProject(project)
+	if !ok {
+		repo = syncConfig.GetWorkspaceRepo()
+	}
+
+	if err := syncService.UpdateObjectiveIssueChecklist(ctx, taskID, repo, syncConfig.InstallationID); err != nil {
+		fmt.Printf("updateObjectiveChecklistSync: failed to update issue for task %s: %v\n", taskID, err)
+		return
+	}
+
+	fmt.Printf("updateObjectiveChecklistSync: updated issue checklist for task %s\n", taskID)
+}
+
+// syncObjectiveToGitHubIssue creates a GitHub Issue for an objective (task)
+// This runs asynchronously and logs errors rather than failing
+func (s *Server) syncObjectiveToGitHubIssue(taskID string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Get sync config
+	syncConfig := s.getSyncConfig(ctx)
+	if syncConfig == nil || !syncConfig.IsConfigured() {
+		return // GitHub sync not configured
+	}
+
+	// Get sync service
+	s.githubAppMu.RLock()
+	syncService := s.githubSync
+	s.githubAppMu.RUnlock()
+
+	if syncService == nil {
+		return
+	}
+
+	// Get task
+	task, err := s.db.GetTaskByID(taskID)
+	if err != nil || task == nil {
+		fmt.Printf("syncObjectiveToGitHubIssue: failed to get task %s: %v\n", taskID, err)
+		return
+	}
+
+	// Get project for repo info
+	project, err := s.db.GetProjectByID(task.ProjectID)
+	if err != nil || project == nil {
+		fmt.Printf("syncObjectiveToGitHubIssue: failed to get project for task %s: %v\n", taskID, err)
+		return
+	}
+
+	// Determine repo
+	repo, ok := github.GetRepoInfoFromProject(project)
+	if !ok {
+		// Fall back to workspace repo
+		repo = syncConfig.GetWorkspaceRepo()
+	}
+
+	// Ensure labels exist
+	if err := syncService.EnsureRepoLabels(ctx, repo, syncConfig.InstallationID); err != nil {
+		fmt.Printf("syncObjectiveToGitHubIssue: failed to ensure labels: %v\n", err)
+	}
+
+	// Sync objective to issue
+	if err := syncService.SyncObjectiveToIssue(ctx, taskID, repo, syncConfig.InstallationID); err != nil {
+		fmt.Printf("syncObjectiveToGitHubIssue: failed to sync task %s: %v\n", taskID, err)
+		return
+	}
+
+	fmt.Printf("syncObjectiveToGitHubIssue: synced task %s to %s/%s\n", taskID, repo.Owner, repo.Repo)
+
+	// Also update the quest issue to show the new objective in the checklist
+	if task.QuestID.Valid {
+		quest, err := s.db.GetQuestByID(task.QuestID.String)
+		if err == nil && quest != nil && quest.GitHubIssueNumber.Valid {
+			workspaceRepo := syncConfig.GetWorkspaceRepo()
+			questRepo, err := syncService.GetRepoInfoForQuest(quest, workspaceRepo)
+			if err == nil {
+				if err := syncService.SyncQuestToIssue(ctx, quest.ID, questRepo, syncConfig.InstallationID); err != nil {
+					fmt.Printf("syncObjectiveToGitHubIssue: failed to update quest issue: %v\n", err)
+				}
+			}
+		}
+	}
 }

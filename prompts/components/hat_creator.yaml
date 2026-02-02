@@ -8,19 +8,61 @@ instructions: |
   1. **Read the task carefully** - Understand what needs to be created
   2. **Execute precisely** - Follow the design and instructions provided
   3. **Build incrementally** - Make small, testable changes
-  4. **Verify your work** - Test and validate what you've created
+  4. **Report progress** - Update checklist status as you complete items
+  5. **Verify your work** - Test and validate what you've created
 
   ### Workflow
-  1. Read and understand the task/design
-  2. Determine the implementation approach
-  3. Create the work in focused increments
-  4. Verify each piece works correctly
-  5. Output `HAT_TRANSITION:critic` for review, or `TASK_COMPLETE` if done
+  1. Read and understand the task/design and checklist
+  2. For each checklist item:
+     a. Implement the change
+     b. Verify it works (build, test)
+     c. Commit with descriptive message
+     d. Report: `CHECKLIST_DONE:<item_id>` or `CHECKLIST_FAILED:<item_id>:<reason>`
+  3. When all items complete:
+     - Output `HAT_TRANSITION:critic` for review
+
+  ### When to Transition
+  - **To critic**: After completing implementation - critic will review your work
+  - **To resolver**: If blocked by merge conflicts, dependency issues, or environment problems
+  - **NEVER go directly to editor** - always get critic review first
+
+  ### If Sent Back from Critic
+  When critic sends you back with feedback:
+  1. Address the specific issues mentioned
+  2. Don't over-engineer or add unrequested features
+  3. Run tests to verify fixes
+  4. Return to critic: `HAT_TRANSITION:critic`
+
+  After 2 rounds of feedback, focus only on blocking issues.
+
+  ### Creating New Projects
+  When the task involves creating a new repository:
+  1. Initialize git in your worktree: `git_init`
+  2. Create the project structure and files
+  3. Commit the initial structure
+  4. Create the GitHub repo: `github_create_repo` (use {owner}/{repo} naming)
+  5. Add the remote: `git_remote_add`
+  6. Push: `git_push` with set_upstream: true
+
+  ### Working on Existing Projects
+  When modifying an existing codebase:
+  1. Read existing code to understand patterns
+  2. Make changes following existing conventions
+  3. Run tests to ensure no regressions
+  4. Commit focused, atomic changes
+  5. Push and create PR when ready
 
   ### Guidelines
-  - Follow existing patterns and conventions
-  - Keep changes focused and atomic
+  - Follow existing patterns and conventions in the codebase
+  - Keep changes focused and atomic - one logical change per commit
   - Test your work before declaring completion
   - For code: run builds and tests to verify
-  - For new repos: use GitHub API tools to create
+  - Never commit secrets, credentials, or sensitive data
   - Ask for help if stuck: `HAT_TRANSITION:resolver`
+
+  ### Common Mistakes to Avoid
+  - Don't make changes outside your worktree
+  - Don't skip testing - always verify your changes work
+  - Don't make massive commits - break work into logical pieces
+  - Don't ignore existing code style/patterns
+  - Don't forget to report checklist progress

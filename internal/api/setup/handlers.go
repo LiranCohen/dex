@@ -62,8 +62,9 @@ func NewHandler(cfg HandlerConfig) *Handler {
 	}
 }
 
-// getWorkspaceInfo returns the workspace repo name and local path based on the GitHub App ID
+// getWorkspaceInfo returns the workspace repo name and local path based on the GitHub App ID and org
 // Returns ("dex-workspace", path) as fallback if no app is configured
+// Path follows the {org}/dex-{appId}/ structure when org is available
 func (h *Handler) getWorkspaceInfo() (repoName string, localPath string) {
 	dataDir := h.getDataDir()
 
@@ -74,7 +75,15 @@ func (h *Handler) getWorkspaceInfo() (repoName string, localPath string) {
 		repoName = "dex-workspace" // fallback
 	}
 
-	localPath = filepath.Join(dataDir, "repos", repoName)
+	// Try to get the org name for the owner/repo path structure
+	progress, err := h.db.GetOnboardingProgress()
+	if err == nil && progress != nil && progress.GetGitHubOrgName() != "" {
+		// Use {org}/{repo} structure: /opt/dex/repos/{org}/dex-{appId}/
+		localPath = filepath.Join(dataDir, "repos", progress.GetGitHubOrgName(), repoName)
+	} else {
+		// Fallback to flat structure
+		localPath = filepath.Join(dataDir, "repos", repoName)
+	}
 	return repoName, localPath
 }
 
@@ -403,8 +412,9 @@ func (h *Handler) HandleComplete(c echo.Context) error {
 	repoName, workspacePath := h.getWorkspaceInfo()
 	gitService := h.getGitService()
 	if gitService != nil && !gitService.RepoExists(workspacePath) {
-		reposDir := filepath.Join(dataDir, "repos")
-		if err := os.MkdirAll(reposDir, 0755); err != nil {
+		// Ensure parent directory exists (may be {dataDir}/repos/{org}/)
+		parentDir := filepath.Dir(workspacePath)
+		if err := os.MkdirAll(parentDir, 0755); err != nil {
 			return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("failed to create repos directory: %v", err))
 		}
 
@@ -463,13 +473,14 @@ func (h *Handler) HandleComplete(c echo.Context) error {
 
 // HandleWorkspaceSetup creates or repairs the workspace repository
 func (h *Handler) HandleWorkspaceSetup(c echo.Context) error {
-	dataDir := h.getDataDir()
+	_ = h.getDataDir() // Ensure getDataDir is called for consistency
 	repoName, workspacePath := h.getWorkspaceInfo()
 
 	// Ensure local repo exists
 	if _, err := os.Stat(filepath.Join(workspacePath, ".git")); os.IsNotExist(err) {
-		reposDir := filepath.Join(dataDir, "repos")
-		if err := os.MkdirAll(reposDir, 0755); err != nil {
+		// Ensure parent directory exists (may be {dataDir}/repos/{org}/)
+		parentDir := filepath.Dir(workspacePath)
+		if err := os.MkdirAll(parentDir, 0755); err != nil {
 			return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("failed to create repos directory: %v", err))
 		}
 

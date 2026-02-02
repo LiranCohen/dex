@@ -176,3 +176,64 @@ func (s *Service) GetRepoPath(name string) string {
 	}
 	return s.repos.GetPath(name)
 }
+
+// GetRepoPathWithOwner returns the full path for a repository with owner/repo structure
+func (s *Service) GetRepoPathWithOwner(owner, repo string) string {
+	if s.repos == nil {
+		return ""
+	}
+	return s.repos.GetPathWithOwner(owner, repo)
+}
+
+// CloneRepoWithOptions clones a repository with full options including owner/repo structure
+func (s *Service) CloneRepoWithOptions(opts CloneOptions) (string, error) {
+	if s.repos == nil {
+		return "", fmt.Errorf("repository manager not configured")
+	}
+	return s.repos.CloneWithOptions(opts)
+}
+
+// SetRepoUpstream adds or updates the upstream remote for fork workflows
+func (s *Service) SetRepoUpstream(repoPath, remoteURL string) error {
+	if s.repos == nil {
+		return fmt.Errorf("repository manager not configured")
+	}
+	return s.repos.SetUpstream(repoPath, remoteURL)
+}
+
+// GetRepoRemotes returns the origin and upstream remote URLs for a repository
+func (s *Service) GetRepoRemotes(repoPath string) (origin, upstream string, err error) {
+	if s.repos == nil {
+		return "", "", fmt.Errorf("repository manager not configured")
+	}
+	return s.repos.GetRemotes(repoPath)
+}
+
+// GetReposDir returns the base repos directory
+func (s *Service) GetReposDir() string {
+	if s.repos == nil {
+		return ""
+	}
+	return s.repos.GetReposDir()
+}
+
+// GetWorktreeBase returns the base directory for worktrees
+func (s *Service) GetWorktreeBase() string {
+	if s.worktrees == nil {
+		return ""
+	}
+	return s.worktrees.GetWorktreeBase()
+}
+
+// CommitTaskContent stages and commits task content files in a directory
+func (s *Service) CommitTaskContent(dir, taskID, message string) (string, error) {
+	return s.operations.CommitTaskContent(dir, CommitContentOptions{
+		TaskID:  taskID,
+		Message: message,
+	})
+}
+
+// CommitQuestContent stages and commits quest content files in a directory
+func (s *Service) CommitQuestContent(dir, questID, message string) (string, error) {
+	return s.operations.CommitQuestContent(dir, questID, message)
+}

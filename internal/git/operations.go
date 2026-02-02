@@ -236,6 +236,68 @@ func (o *Operations) Fetch(dir, remote string) error {
 	return nil
 }
 
+// CommitContentOptions configures a task content commit
+type CommitContentOptions struct {
+	TaskID  string   // Task ID for the commit message
+	Message string   // Optional custom message (default: "Add task content for {taskID}")
+	Paths   []string // Specific paths to stage (relative to dir)
+}
+
+// CommitTaskContent stages and commits task content files
+// If no paths specified, it stages the entire tasks/{taskID}/ directory
+func (o *Operations) CommitTaskContent(dir string, opts CommitContentOptions) (string, error) {
+	if opts.TaskID == "" {
+		return "", fmt.Errorf("task ID is required")
+	}
+
+	// Determine paths to stage
+	paths := opts.Paths
+	if len(paths) == 0 {
+		// Default to the task content directory
+		paths = []string{fmt.Sprintf("tasks/%s", opts.TaskID)}
+	}
+
+	// Stage the files
+	if err := o.Stage(dir, paths...); err != nil {
+		return "", fmt.Errorf("failed to stage content: %w", err)
+	}
+
+	// Build commit message
+	message := opts.Message
+	if message == "" {
+		message = fmt.Sprintf("Add task content for %s", opts.TaskID)
+	}
+
+	// Commit with Dex as author
+	return o.Commit(dir, CommitOptions{
+		Message: message,
+		Author:  "Dex <dex@local>",
+	})
+}
+
+// CommitQuestContent stages and commits quest content files
+func (o *Operations) CommitQuestContent(dir, questID, message string) (string, error) {
+	if questID == "" {
+		return "", fmt.Errorf("quest ID is required")
+	}
+
+	// Stage the quest content directory
+	path := fmt.Sprintf("quests/%s", questID)
+	if err := o.Stage(dir, path); err != nil {
+		return "", fmt.Errorf("failed to stage content: %w", err)
+	}
+
+	// Build commit message
+	if message == "" {
+		message = fmt.Sprintf("Update quest conversation for %s", questID)
+	}
+
+	return o.Commit(dir, CommitOptions{
+		Message: message,
+		Author:  "Dex <dex@local>",
+	})
+}
+
 // LogEntry represents a git log entry
 type LogEntry struct {
 	Hash    string

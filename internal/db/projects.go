@@ -47,12 +47,13 @@ func (db *DB) GetProjectByID(id string) (*Project, error) {
 	var servicesJSON sql.NullString
 
 	err := db.QueryRow(
-		`SELECT id, name, repo_path, github_owner, github_repo, default_branch, services, created_at
+		`SELECT id, name, repo_path, github_owner, github_repo, remote_origin, remote_upstream, default_branch, services, created_at
 		 FROM projects WHERE id = ?`,
 		id,
 	).Scan(
 		&project.ID, &project.Name, &project.RepoPath,
 		&project.GitHubOwner, &project.GitHubRepo,
+		&project.RemoteOrigin, &project.RemoteUpstream,
 		&project.DefaultBranch, &servicesJSON, &project.CreatedAt,
 	)
 
@@ -75,7 +76,7 @@ func (db *DB) GetProjectByID(id string) (*Project, error) {
 // ListProjects returns all projects
 func (db *DB) ListProjects() ([]*Project, error) {
 	rows, err := db.Query(
-		`SELECT id, name, repo_path, github_owner, github_repo, default_branch, services, created_at
+		`SELECT id, name, repo_path, github_owner, github_repo, remote_origin, remote_upstream, default_branch, services, created_at
 		 FROM projects ORDER BY created_at DESC`,
 	)
 	if err != nil {
@@ -91,6 +92,7 @@ func (db *DB) ListProjects() ([]*Project, error) {
 		err := rows.Scan(
 			&project.ID, &project.Name, &project.RepoPath,
 			&project.GitHubOwner, &project.GitHubRepo,
+			&project.RemoteOrigin, &project.RemoteUpstream,
 			&project.DefaultBranch, &servicesJSON, &project.CreatedAt,
 		)
 		if err != nil {
@@ -168,6 +170,32 @@ func (db *DB) UpdateProjectServices(id string, services ProjectServices) error {
 	return nil
 }
 
+// UpdateProjectRemotes sets the origin and upstream remote URLs for a project
+func (db *DB) UpdateProjectRemotes(id string, origin, upstream string) error {
+	var originVal, upstreamVal sql.NullString
+	if origin != "" {
+		originVal = sql.NullString{String: origin, Valid: true}
+	}
+	if upstream != "" {
+		upstreamVal = sql.NullString{String: upstream, Valid: true}
+	}
+
+	result, err := db.Exec(
+		`UPDATE projects SET remote_origin = ?, remote_upstream = ? WHERE id = ?`,
+		originVal, upstreamVal, id,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to update project remotes: %w", err)
+	}
+
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("project not found: %s", id)
+	}
+
+	return nil
+}
+
 // DeleteProject removes a project from the database
 func (db *DB) DeleteProject(id string) error {
 	result, err := db.Exec(`DELETE FROM projects WHERE id = ?`, id)
@@ -204,12 +232,13 @@ func (db *DB) GetProjectByRepoPath(repoPath string) (*Project, error) {
 	var servicesJSON sql.NullString
 
 	err := db.QueryRow(
-		`SELECT id, name, repo_path, github_owner, github_repo, default_branch, services, created_at
+		`SELECT id, name, repo_path, github_owner, github_repo, remote_origin, remote_upstream, default_branch, services, created_at
 		 FROM projects WHERE repo_path = ?`,
 		repoPath,
 	).Scan(
 		&project.ID, &project.Name, &project.RepoPath,
 		&project.GitHubOwner, &project.GitHubRepo,
+		&project.RemoteOrigin, &project.RemoteUpstream,
 		&project.DefaultBranch, &servicesJSON, &project.CreatedAt,
 	)
 

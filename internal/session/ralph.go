@@ -649,6 +649,8 @@ func (r *RalphLoop) processChecklistSignals(response string) {
 					r.activity.RecordChecklistUpdate(r.session.IterationCount, itemID, db.ChecklistItemStatusDone, "")
 				}
 				fmt.Printf("RalphLoop: marked checklist item %s as done\n", itemID)
+				// Notify for GitHub sync
+				r.manager.NotifyChecklistUpdated(r.session.TaskID)
 			}
 		}
 
@@ -698,6 +700,8 @@ func (r *RalphLoop) processChecklistSignals(response string) {
 						r.activity.RecordChecklistUpdate(r.session.IterationCount, itemID, db.ChecklistItemStatusFailed, reason)
 					}
 					fmt.Printf("RalphLoop: marked checklist item %s as failed: %s\n", itemID, reason)
+					// Notify for GitHub sync
+					r.manager.NotifyChecklistUpdated(r.session.TaskID)
 				}
 			}
 		}

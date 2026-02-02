@@ -33,6 +33,17 @@ func WorkspaceRepoName(appID int64) string {
 	return fmt.Sprintf("dex-%d", appID)
 }
 
+// WorkspaceRepoPath returns the local path for a workspace repo
+// Uses the {owner}/{repo} structure: {baseDir}/repos/{org}/dex-{appId}/
+func WorkspaceRepoPath(baseDir, org string, appID int64) string {
+	repoName := WorkspaceRepoName(appID)
+	if org != "" {
+		return filepath.Join(baseDir, "repos", org, repoName)
+	}
+	// Fallback without org
+	return filepath.Join(baseDir, "repos", repoName)
+}
+
 // EnsureRemoteExists creates the dex-workspace repo on GitHub if needed
 // and sets up the remote on the local repository
 func (s *Service) EnsureRemoteExists(ctx context.Context) error {

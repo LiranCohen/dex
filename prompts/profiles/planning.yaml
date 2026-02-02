@@ -1,0 +1,4 @@
+name: planning
+components:
+  - system
+  - hat_planning

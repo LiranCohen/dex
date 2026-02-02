@@ -251,3 +251,8 @@ func (m *WorktreeManager) GetWorktreePath(projectPath, taskID string) string {
 	projectName := filepath.Base(projectPath)
 	return filepath.Join(m.worktreeBase, fmt.Sprintf("%s-task-%s", projectName, taskID))
 }
+
+// GetWorktreeBase returns the base directory for worktrees
+func (m *WorktreeManager) GetWorktreeBase() string {
+	return m.worktreeBase
+}

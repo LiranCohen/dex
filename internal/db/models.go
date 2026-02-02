@@ -29,14 +29,37 @@ type WebAuthnCredential struct {
 
 // Project represents a managed project
 type Project struct {
-	ID            string
-	Name          string
-	RepoPath      string
-	GitHubOwner   sql.NullString
-	GitHubRepo    sql.NullString
-	DefaultBranch string
-	Services      ProjectServices
-	CreatedAt     time.Time
+	ID             string
+	Name           string
+	RepoPath       string
+	GitHubOwner    sql.NullString // GitHub owner/org for this project
+	GitHubRepo     sql.NullString // GitHub repo name
+	RemoteOrigin   sql.NullString // git remote origin URL (e.g., git@github.com:user/repo.git)
+	RemoteUpstream sql.NullString // git remote upstream URL (if fork, e.g., git@github.com:org/repo.git)
+	DefaultBranch  string
+	Services       ProjectServices
+	CreatedAt      time.Time
+}
+
+// IsFork returns true if this project has an upstream remote (indicating it's a fork)
+func (p *Project) IsFork() bool {
+	return p.RemoteUpstream.Valid && p.RemoteUpstream.String != ""
+}
+
+// GetOwner returns the GitHub owner or empty string if not set
+func (p *Project) GetOwner() string {
+	if p.GitHubOwner.Valid {
+		return p.GitHubOwner.String
+	}
+	return ""
+}
+
+// GetRepo returns the GitHub repo name or empty string if not set
+func (p *Project) GetRepo() string {
+	if p.GitHubRepo.Valid {
+		return p.GitHubRepo.String
+	}
+	return ""
 }
 
 // ProjectServices tracks which toolbelt services are used by a project
@@ -56,7 +79,7 @@ type Task struct {
 	ID                string
 	ProjectID         string
 	QuestID           sql.NullString // Optional: the Quest that spawned this task
-	GitHubIssueNumber sql.NullInt64
+	GitHubIssueNumber sql.NullInt64  // GitHub Issue number for this Objective
 	Title             string
 	Description       sql.NullString
 	ParentID          sql.NullString
@@ -69,6 +92,7 @@ type Task struct {
 	BaseBranch        string
 	WorktreePath      sql.NullString
 	BranchName        sql.NullString
+	ContentPath       sql.NullString // Path to git content (relative to repo): tasks/{task-id}/
 	PRNumber          sql.NullInt64
 	TokenBudget       sql.NullInt64
 	TokenUsed         int64
@@ -79,6 +103,14 @@ type Task struct {
 	CreatedAt         time.Time
 	StartedAt         sql.NullTime
 	CompletedAt       sql.NullTime
+}
+
+// GetContentPath returns the content path string, or empty if null
+func (t *Task) GetContentPath() string {
+	if t.ContentPath.Valid {
+		return t.ContentPath.String
+	}
+	return ""
 }
 
 // Task model constants
@@ -308,20 +340,30 @@ const (
 
 // Quest represents a conversation with Dex that spawns tasks
 type Quest struct {
-	ID               string
-	ProjectID        string
-	Title            sql.NullString
-	Status           string
-	Model            string
-	AutoStartDefault bool
-	CreatedAt        time.Time
-	CompletedAt      sql.NullTime
+	ID                string
+	ProjectID         string
+	Title             sql.NullString
+	Status            string
+	Model             string
+	AutoStartDefault  bool
+	ConversationPath  sql.NullString // Path to git conversation file: quests/{quest-id}/conversation.md
+	GitHubIssueNumber sql.NullInt64  // GitHub Issue number for this Quest
+	CreatedAt         time.Time
+	CompletedAt       sql.NullTime
 }
 
 // GetTitle returns the title string, or empty if null
 func (q *Quest) GetTitle() string {
 	if q.Title.Valid {
 		return q.Title.String
+	}
+	return ""
+}
+
+// GetConversationPath returns the conversation path string, or empty if null
+func (q *Quest) GetConversationPath() string {
+	if q.ConversationPath.Valid {
+		return q.ConversationPath.String
 	}
 	return ""
 }

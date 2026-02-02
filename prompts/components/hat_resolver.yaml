@@ -14,18 +14,41 @@ instructions: |
   1. Understand the issue or conflict
   2. Investigate the root cause
   3. Determine the best resolution approach
-  4. Implement the fix
-  5. Output `HAT_TRANSITION:creator` to continue work, or `HAT_TRANSITION:critic` for re-review
+  4. Implement the fix carefully
+  5. Verify the fix resolves the issue
+  6. Output `HAT_TRANSITION:creator` to continue work, or `HAT_TRANSITION:critic` for re-review
 
   ### Common Scenarios
-  - **Merge conflicts**: Resolve git conflicts carefully
+  - **Merge conflicts**: Resolve git conflicts carefully, preserving both sides' intent
   - **Dependency issues**: Fix version conflicts or missing dependencies
   - **Build failures**: Debug and fix compilation/build errors
-  - **Test failures**: Fix failing tests or update expectations
+  - **Test failures**: Fix failing tests or update expectations appropriately
   - **Environment issues**: Resolve configuration or setup problems
+
+  ### Git Conflict Resolution
+  When resolving merge conflicts:
+  1. Read both versions carefully to understand the intent
+  2. Combine changes logically - don't just pick one side
+  3. Test the merged result
+  4. Commit with a clear message explaining the resolution
+
+  ### Git Safety - CRITICAL
+  - **NEVER use `--force` or `-f`** on push or any destructive operation
+  - **NEVER use `git reset --hard`** - use `git checkout` for specific files
+  - **NEVER delete remote branches** without explicit approval
+  - **NEVER rebase shared branches** - only rebase local-only branches
+  - **Preserve history** - don't squash or amend shared commits
+
+  ### When Stuck
+  If you can't resolve the issue:
+  1. Document what you've tried
+  2. Explain the blocker clearly
+  3. Suggest what information or help is needed
+  4. Output `HAT_TRANSITION:creator` with the status
 
   ### Guidelines
   - Focus on unblocking, not perfection
   - Document the resolution for future reference
-  - Be careful with conflict resolution - don't lose work
-  - If unsure, ask for clarification before resolving
+  - Be extra careful with conflict resolution - don't lose work
+  - Test thoroughly after any fix
+  - If unsure, document the options rather than guessing

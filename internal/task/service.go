@@ -4,6 +4,7 @@ package task
 import (
 	"fmt"
 
+	"github.com/lirancohen/dex/internal/content"
 	"github.com/lirancohen/dex/internal/db"
 )
 
@@ -140,4 +141,106 @@ func IsValidStatus(s string) bool {
 		return true
 	}
 	return false
+}
+
+// CreateTaskContentOptions holds options for creating task content files
+type CreateTaskContentOptions struct {
+	Title       string
+	Description string
+	ProjectName string
+	QuestID     string
+	Checklist   []content.ChecklistItem
+}
+
+// GitOperations interface for git operations needed by task service
+type GitOperations interface {
+	CommitTaskContent(dir, taskID, message string) (string, error)
+}
+
+// WriteTaskContent writes task content files to the given base path
+// and updates the task's content_path in the database
+func (s *Service) WriteTaskContent(taskID, basePath string, opts CreateTaskContentOptions) error {
+	// Create content manager for this path
+	mgr := content.NewManager(basePath)
+
+	// Write the content files
+	if err := mgr.InitTaskContent(
+		taskID,
+		opts.Title,
+		opts.Description,
+		opts.ProjectName,
+		opts.QuestID,
+		opts.Checklist,
+	); err != nil {
+		return fmt.Errorf("failed to write task content: %w", err)
+	}
+
+	// Update the task's content_path in the database
+	contentPath := content.TaskContentPath(taskID)
+	if err := s.db.UpdateTaskContentPath(taskID, contentPath); err != nil {
+		return fmt.Errorf("failed to update task content path: %w", err)
+	}
+
+	return nil
+}
+
+// WriteTaskContentAndCommit writes task content files and commits them to git
+func (s *Service) WriteTaskContentAndCommit(taskID, basePath string, opts CreateTaskContentOptions, git GitOperations) (string, error) {
+	// Write the content files first
+	if err := s.WriteTaskContent(taskID, basePath, opts); err != nil {
+		return "", err
+	}
+
+	// Commit the content
+	commitHash, err := git.CommitTaskContent(basePath, taskID, "")
+	if err != nil {
+		return "", fmt.Errorf("failed to commit task content: %w", err)
+	}
+
+	return commitHash, nil
+}
+
+// ReadTaskSpec reads the task specification from content files
+func (s *Service) ReadTaskSpec(taskID, basePath string) (string, error) {
+	mgr := content.NewManager(basePath)
+	return mgr.ReadTaskSpec(taskID)
+}
+
+// ReadTaskChecklist reads the task checklist from content files
+func (s *Service) ReadTaskChecklist(taskID, basePath string) ([]content.ChecklistItem, error) {
+	mgr := content.NewManager(basePath)
+	return mgr.ReadTaskChecklist(taskID)
+}
+
+// UpdateTaskChecklistItem updates a checklist item's status in the content files
+func (s *Service) UpdateTaskChecklistItem(taskID, basePath, description string, status content.ChecklistStatus) error {
+	mgr := content.NewManager(basePath)
+	return mgr.UpdateTaskChecklistItem(taskID, description, status)
+}
+
+// GetTaskContentPath returns the full path to task content for a given base path
+func (s *Service) GetTaskContentPath(taskID, basePath string) string {
+	mgr := content.NewManager(basePath)
+	return mgr.GetTaskContentPath(taskID)
+}
+
+// WriteTaskContentFromPlanning creates task content files from planning session data
+// This is called when a planning session completes and the task is ready to be written to git
+func (s *Service) WriteTaskContentFromPlanning(taskID, basePath string, opts CreateTaskContentOptions, mustHave, optional []string) error {
+	// Convert planning checklist items to content checklist items
+	if len(mustHave) > 0 || len(optional) > 0 {
+		opts.Checklist = content.ChecklistFromPlanningItems(mustHave, optional)
+	}
+
+	return s.WriteTaskContent(taskID, basePath, opts)
+}
+
+// WriteTaskContentFromPlanningAndCommit creates task content from planning data and commits to git
+func (s *Service) WriteTaskContentFromPlanningAndCommit(taskID, basePath string, opts CreateTaskContentOptions, mustHave, optional []string, git GitOperations) (string, error) {
+	// Convert planning checklist items to content checklist items
+	if len(mustHave) > 0 || len(optional) > 0 {
+		opts.Checklist = content.ChecklistFromPlanningItems(mustHave, optional)
+	}
+
+	return s.WriteTaskContentAndCommit(taskID, basePath, opts, git)
 }

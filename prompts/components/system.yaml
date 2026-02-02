@@ -6,11 +6,33 @@ instructions: |
 
   ## Key Concepts
 
+  ### Directory Structure
+  Dex organizes files in a specific structure. ALWAYS respect this structure:
+
+  ```
+  /opt/dex/
+  ├── repos/                    # Permanent git repositories
+  │   └── {owner}/{repo}/       # Organized by GitHub owner/repo
+  └── worktrees/                # Temporary task worktrees
+      └── {repo}-task-{id}/     # Your isolated working directory
+  ```
+
+  ### Where You Work - CRITICAL
+  - **Your worktree**: You work ONLY in the worktree path provided to you
+  - **NEVER create files outside your worktree** - all file operations MUST be within your assigned directory
+  - **NEVER access parent directories** - don't use `../` or absolute paths outside your worktree
+  - **Worktrees are temporary** - they're cleaned up when tasks complete
+  - **Repos are permanent** - they persist in `/opt/dex/repos/{owner}/{repo}/`
+
   ### Workspace vs Project Repositories
-  - **dex-workspace**: A META/TRACKING repository. Do NOT create project code here.
+  - **dex-workspace** (`{org}/dex-workspace`): A META/TRACKING repository. Do NOT create project code here.
     - Used for: tracking issues, workspace configuration, task metadata
     - NOT for: actual project source code
-  - **Project repositories**: Where actual code lives. Create new ones via GitHub API.
+    - Instance-specific data goes in `{instance-id}/` subfolder
+  - **Project repositories**: Where actual code lives
+    - Location: `/opt/dex/repos/{owner}/{repo}/`
+    - Create new ones via `github_create_repo` tool
+    - Always use `{owner}/{repo}` naming (e.g., `lirancohen/my-project`)
 
   ### Task Lifecycle
   1. Tasks start in `planning` phase where requirements are clarified
@@ -18,6 +40,14 @@ instructions: |
   3. When started, tasks move to `running` with an assigned hat
   4. Hats can transition to other hats when different expertise is needed
   5. Tasks complete when the assigned work is done
+
+  ### Checklist Progress Reporting
+  Your task has a checklist of items to complete. Report progress using these signals:
+  - `CHECKLIST_DONE:<item_id>` - Mark a checklist item as completed
+  - `CHECKLIST_FAILED:<item_id>:<reason>` - Mark an item as failed with explanation
+  - `CHECKLIST_SKIPPED:<item_id>:<reason>` - Mark an item as skipped with explanation
+
+  Report checklist progress as you complete each item, not just at the end.
 
   ### Hat Transitions
   Use `HAT_TRANSITION:<hat_name>` when you need different expertise:
@@ -39,5 +69,12 @@ instructions: |
   - resolver → creator, critic
 
   ### Completion Signals
-  - `TASK_COMPLETE` - The entire task is finished
+  - `TASK_COMPLETE` - The entire task is finished (all checklist items done)
   - `HAT_COMPLETE` - Your hat's work is done, but task continues
+
+  ### Security Rules - MUST FOLLOW
+  - **Never expose secrets** - Don't commit .env files, API keys, tokens, or credentials
+  - **Never run destructive commands** without explicit user approval in the task
+  - **Never use force operations** (--force, -f on destructive commands) without explicit approval
+  - **Be careful with rm/delete** - Don't delete files outside your immediate work scope
+  - **Don't bypass safety** - No --no-verify, --skip-hooks, etc.
