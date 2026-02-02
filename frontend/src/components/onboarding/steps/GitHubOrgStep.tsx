@@ -68,7 +68,7 @@ export function GitHubOrgStep({ onSetOrg, validateOrg, error, isLoading }: GitHu
           <p className="text-gray-400 text-sm mb-3">
             Creating a GitHub organization is free and only takes a minute.
           </p>
-          <ExternalLink href="https://github.com/organizations/plan">
+          <ExternalLink href="https://github.com/organizations/new?plan=free">
             Create a free organization
           </ExternalLink>
         </div>
