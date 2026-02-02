@@ -11,9 +11,10 @@ import (
 
 // GitHubClient wraps the go-github client for Poindexter's needs
 type GitHubClient struct {
-	client     *github.Client
-	token      string // Stored for git HTTPS operations
-	defaultOrg string
+	client      *github.Client
+	token       string // Stored for git HTTPS operations
+	defaultOrg  string
+	accountType string // "User" or "Organization" - affects how repos are created
 }
 
 // NewGitHubClient creates a new GitHubClient from configuration
@@ -33,7 +34,8 @@ func NewGitHubClient(config *GitHubConfig) *GitHubClient {
 
 // NewGitHubClientFromToken creates a new GitHubClient from a token string.
 // This is useful for GitHub App installation tokens.
-func NewGitHubClientFromToken(token string, defaultOrg string) *GitHubClient {
+// accountType should be "User" or "Organization" to determine how repos are created.
+func NewGitHubClientFromToken(token string, defaultOrg string, accountType string) *GitHubClient {
 	if token == "" {
 		return nil
 	}
@@ -41,9 +43,10 @@ func NewGitHubClientFromToken(token string, defaultOrg string) *GitHubClient {
 	client := github.NewClient(nil).WithAuthToken(token)
 
 	return &GitHubClient{
-		client:     client,
-		token:      token,
-		defaultOrg: defaultOrg,
+		client:      client,
+		token:       token,
+		defaultOrg:  defaultOrg,
+		accountType: accountType,
 	}
 }
 
@@ -108,9 +111,12 @@ func (g *GitHubClient) CreateRepo(ctx context.Context, opts CreateRepoOptions) (
 	var created *github.Repository
 	var err error
 
-	if org != "" {
+	// For organization accounts, pass the org name
+	// For user accounts, pass empty string (creates under authenticated user)
+	if org != "" && g.accountType == "Organization" {
 		created, _, err = g.client.Repositories.Create(ctx, org, repo)
 	} else {
+		// User account or no org specified - create under user
 		created, _, err = g.client.Repositories.Create(ctx, "", repo)
 	}
 

@@ -108,7 +108,8 @@ func (s *Server) GetToolbeltGitHubClient(ctx context.Context, login string) (*to
 		return nil, fmt.Errorf("GitHub App not configured")
 	}
 
-	// If no login specified, use the first available installation
+	// Get installation from database (need login and account type)
+	var accountType string
 	if login == "" {
 		installations, err := s.db.ListGitHubInstallations()
 		if err != nil {
@@ -118,7 +119,20 @@ func (s *Server) GetToolbeltGitHubClient(ctx context.Context, login string) (*to
 			return nil, fmt.Errorf("no GitHub App installations found")
 		}
 		login = installations[0].Login
-		fmt.Printf("GetToolbeltGitHubClient: using default installation %s\n", login)
+		accountType = installations[0].AccountType
+		fmt.Printf("GetToolbeltGitHubClient: using default installation %s (type: %s)\n", login, accountType)
+	} else {
+		// Look up account type for specified login
+		installations, err := s.db.ListGitHubInstallations()
+		if err != nil {
+			return nil, fmt.Errorf("failed to list installations: %w", err)
+		}
+		for _, inst := range installations {
+			if inst.Login == login {
+				accountType = inst.AccountType
+				break
+			}
+		}
 	}
 
 	// Get installation ID for login
@@ -134,7 +148,8 @@ func (s *Server) GetToolbeltGitHubClient(ctx context.Context, login string) (*to
 	}
 
 	// Create toolbelt client from token
-	return toolbelt.NewGitHubClientFromToken(token, login), nil
+	// accountType determines how repos are created (user vs org)
+	return toolbelt.NewGitHubClientFromToken(token, login, accountType), nil
 }
 
 // GitHubAppStatus represents the GitHub App configuration status
