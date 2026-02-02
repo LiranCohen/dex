@@ -439,13 +439,17 @@ func (s *SyncService) AddObjectiveStatusComment(ctx context.Context, taskID stri
 	}
 
 	var comment string
-	switch status {
-	case "running":
+	switch {
+	case status == "running":
 		comment = "🚀 Work started on this objective."
-	case "paused":
+	case status == "paused":
 		comment = "⏸️ Work paused on this objective."
-	case "resumed":
+	case status == "resumed":
 		comment = "▶️ Work resumed on this objective."
+	case strings.HasPrefix(status, "error:"):
+		// Error with reason: "error:API timeout after 120s"
+		reason := strings.TrimPrefix(status, "error:")
+		comment = fmt.Sprintf("⚠️ Work paused due to error: %s\n\nThis objective can be resumed.", reason)
 	default:
 		comment = fmt.Sprintf("Status changed to: %s", status)
 	}

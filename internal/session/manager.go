@@ -613,17 +613,12 @@ func (m *Manager) runSession(ctx context.Context, session *ActiveSession) {
 		// Mark task as paused so it can be resumed after fixing the issue
 		_ = m.db.UpdateTaskStatus(taskID, db.TaskStatusPaused)
 
-		// Notify task failed (for GitHub sync)
-		m.mu.RLock()
-		onTaskFailed := m.onTaskFailed
-		m.mu.RUnlock()
-		if onTaskFailed != nil {
-			reason := "Session failed"
-			if loopErr != nil {
-				reason = loopErr.Error()
-			}
-			go onTaskFailed(taskID, reason)
+		// Notify with error status (adds comment to GitHub issue, doesn't close it)
+		reason := "Session failed"
+		if loopErr != nil {
+			reason = loopErr.Error()
 		}
+		m.notifyTaskStatus(taskID, "error:"+reason)
 
 	case StatePaused, StateStopped:
 		// Mark task as paused so it can be resumed
