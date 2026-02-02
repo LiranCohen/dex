@@ -845,9 +845,12 @@ func (m *Manager) LoadActiveSessions() error {
 // createPRForTask pushes the branch and creates a PR after task completion
 // This runs in a goroutine and logs errors without failing the session
 func (m *Manager) createPRForTask(taskID, worktreePath string) {
+	ctx := context.Background()
+
 	m.mu.RLock()
 	gitOps := m.gitOps
 	githubClient := m.githubClient
+	githubClientFetcher := m.githubClientFetcher
 	m.mu.RUnlock()
 
 	// Get task from DB
@@ -897,6 +900,17 @@ func (m *Manager) createPRForTask(taskID, worktreePath string) {
 	}
 	fmt.Printf("createPRForTask: pushed branch %s for task %s\n", branchName, taskID)
 
+	// Get GitHub client - try static client first, then fetcher (same pattern as runSession)
+	if githubClient == nil && githubClientFetcher != nil {
+		fetchedClient, err := githubClientFetcher(ctx, owner)
+		if err != nil {
+			fmt.Printf("createPRForTask: warning - failed to fetch GitHub client for %q: %v\n", owner, err)
+		} else {
+			githubClient = fetchedClient
+			fmt.Printf("createPRForTask: using GitHub App client for %q\n", owner)
+		}
+	}
+
 	// Create PR via GitHub client if configured
 	if githubClient == nil {
 		fmt.Printf("createPRForTask: no GitHub client configured, skipping PR creation\n")
@@ -913,7 +927,7 @@ func (m *Manager) createPRForTask(taskID, worktreePath string) {
 		Draft: false,
 	}
 
-	pr, err := githubClient.CreatePR(context.Background(), prOpts)
+	pr, err := githubClient.CreatePR(ctx, prOpts)
 	if err != nil {
 		fmt.Printf("createPRForTask: failed to create PR for task %s: %v\n", taskID, err)
 		return
