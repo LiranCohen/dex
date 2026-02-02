@@ -589,8 +589,3 @@ func BuildSyncConfig(progress *db.OnboardingProgress, installationID int64) *Syn
 		InstallationID: installationID,
 	}
 }
-
-// Helper to check if string contains github.com
-func isGitHubURL(url string) bool {
-	return strings.Contains(url, "github.com")
-}

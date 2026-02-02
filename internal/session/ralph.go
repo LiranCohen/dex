@@ -565,7 +565,7 @@ func (r *RalphLoop) Run(ctx context.Context) error {
 				Content: results,
 			})
 
-			r.activity.Debug(r.session.IterationCount, fmt.Sprintf("All tools complete, continuing to next iteration"))
+			r.activity.Debug(r.session.IterationCount, "All tools complete, continuing to next iteration")
 
 			// Continue loop without adding continuation prompt
 			continue

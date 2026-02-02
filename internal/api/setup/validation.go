@@ -187,7 +187,7 @@ func checkGitHubUser(ctx context.Context, username string) (*GitHubOrgInfo, erro
 	}
 
 	// It's a user account, not an organization
-	return nil, fmt.Errorf("'%s' is a personal account, not an organization. GitHub Apps can only create repositories in organizations. Please create or use a GitHub organization.", username)
+	return nil, fmt.Errorf("'%s' is a personal account, not an organization: GitHub Apps can only create repositories in organizations", username)
 }
 
 // ValidateGitHubTokenFormat checks if a token has the expected format

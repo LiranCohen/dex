@@ -55,6 +55,11 @@ func (g *GitHubClient) Token() string {
 	return g.token
 }
 
+// Client returns the underlying go-github client for direct API access
+func (g *GitHubClient) Client() *github.Client {
+	return g.client
+}
+
 // AuthURL returns the authenticated URL for a git remote.
 // Converts https://github.com/owner/repo to https://x-access-token:{token}@github.com/owner/repo
 func (g *GitHubClient) AuthURL(repoURL string) string {

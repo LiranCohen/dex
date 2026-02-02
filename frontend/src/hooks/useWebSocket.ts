@@ -18,6 +18,7 @@ export function useWebSocket(): UseWebSocketReturn {
   const wsRef = useRef<WebSocket | null>(null);
   const handlersRef = useRef<Set<MessageHandler>>(new Set());
   const reconnectTimeoutRef = useRef<number | null>(null);
+  const connectRef = useRef<() => void>(() => {});
 
   const token = useAuthStore((state) => state.token);
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
@@ -44,11 +45,11 @@ export function useWebSocket(): UseWebSocketReturn {
         wsRef.current = null;
         console.log('[WebSocket] Disconnected', event.code, event.reason);
 
-        // Reconnect if still authenticated
+        // Reconnect if still authenticated - use ref to get latest connect function
         if (isAuthenticated) {
           reconnectTimeoutRef.current = window.setTimeout(() => {
             console.log('[WebSocket] Attempting reconnect...');
-            connect();
+            connectRef.current();
           }, WS_RECONNECT_DELAY);
         }
       };
@@ -80,6 +81,11 @@ export function useWebSocket(): UseWebSocketReturn {
       console.error('[WebSocket] Failed to connect:', err);
     }
   }, [isAuthenticated, token]);
+
+  // Keep connectRef updated with latest connect function
+  useEffect(() => {
+    connectRef.current = connect;
+  }, [connect]);
 
   // Connect/disconnect based on auth state
   useEffect(() => {

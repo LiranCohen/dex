@@ -3697,7 +3697,7 @@ func (s *Server) generatePredecessorHandoff(task *db.Task) string {
 		sb.WriteString(fmt.Sprintf("**Description**: %s\n", task.Description.String))
 	}
 
-	sb.WriteString(fmt.Sprintf("**Status**: Completed\n"))
+	sb.WriteString("**Status**: Completed\n")
 
 	if task.WorktreePath.Valid && task.WorktreePath.String != "" {
 		sb.WriteString(fmt.Sprintf("**Working Directory**: %s\n", task.WorktreePath.String))

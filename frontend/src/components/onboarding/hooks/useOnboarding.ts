@@ -78,9 +78,39 @@ export function useOnboarding() {
     }
   }, []);
 
+  // Fetch status on mount
   useEffect(() => {
-    fetchStatus();
-  }, [fetchStatus]);
+    let cancelled = false;
+
+    const loadInitialStatus = async () => {
+      try {
+        const data = await api.get<SetupStatus>('/setup/status');
+        if (!cancelled) {
+          setState({
+            status: data,
+            currentStep: data.current_step || 'welcome',
+            isLoading: false,
+            error: null,
+          });
+        }
+      } catch (err) {
+        if (!cancelled) {
+          const message = err instanceof Error ? err.message : 'Failed to fetch setup status';
+          setState(prev => ({
+            ...prev,
+            isLoading: false,
+            error: message,
+          }));
+        }
+      }
+    };
+
+    loadInitialStatus();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const setError = useCallback((error: string | null) => {
     setState(prev => ({ ...prev, error }));
