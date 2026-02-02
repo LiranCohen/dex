@@ -18,6 +18,15 @@ import (
 	"github.com/lirancohen/dex/internal/toolbelt"
 )
 
+// buildInstallURL creates the GitHub App installation URL with optional org targeting
+func (s *Server) buildInstallURL(appSlug string) string {
+	installURL := fmt.Sprintf("https://github.com/apps/%s/installations/new", appSlug)
+	if progress, err := s.db.GetOnboardingProgress(); err == nil && progress.GetGitHubOrgID() != 0 {
+		installURL = fmt.Sprintf("%s?suggested_target_id=%d", installURL, progress.GetGitHubOrgID())
+	}
+	return installURL
+}
+
 // initGitHubApp initializes the GitHub App manager from database configuration.
 // It also sets up the session manager's GitHub client fetcher if not already set.
 // This method is safe to call multiple times - it will reinitialize if needed.
@@ -177,13 +186,7 @@ func (s *Server) handleGitHubAppStatus(c echo.Context) error {
 		status.AppSlug = config.AppSlug
 		status.AuthMethod = "app"
 
-		// Build install URL, targeting the selected org if available
-		// Use /permissions path to properly support suggested_target_id parameter
-		installURL := fmt.Sprintf("https://github.com/apps/%s/installations/new/permissions", config.AppSlug)
-		if progress, err := s.db.GetOnboardingProgress(); err == nil && progress.GetGitHubOrgID() != 0 {
-			installURL = fmt.Sprintf("%s?suggested_target_id=%d", installURL, progress.GetGitHubOrgID())
-		}
-		status.InstallURL = installURL
+		status.InstallURL = s.buildInstallURL(config.AppSlug)
 
 		// Get installation count
 		installs, err := s.db.ListGitHubInstallations()
@@ -205,6 +208,16 @@ func (s *Server) handleGitHubAppStatus(c echo.Context) error {
 
 // handleGitHubAppManifest returns the manifest for creating a GitHub App
 func (s *Server) handleGitHubAppManifest(c echo.Context) error {
+	// Get the org name - the app must be created under the org to install on it
+	progress, err := s.db.GetOnboardingProgress()
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to get onboarding progress")
+	}
+	orgName := progress.GetGitHubOrgName()
+	if orgName == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "GitHub organization must be set before creating the app")
+	}
+
 	// Get the base URL from the request or config
 	baseURL := c.Request().Header.Get("X-Forwarded-Host")
 	if baseURL == "" {
@@ -229,15 +242,18 @@ func (s *Server) handleGitHubAppManifest(c echo.Context) error {
 	)
 
 	// Return the manifest and the URL to redirect to
+	// Use organization URL so the app is owned by the org (required for org installation)
 	manifestJSON, err := json.Marshal(manifest)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to marshal manifest")
 	}
 
+	orgManifestURL := fmt.Sprintf("https://github.com/organizations/%s/settings/apps/new", orgName)
+
 	return c.JSON(http.StatusOK, map[string]any{
 		"manifest":     manifest,
-		"manifest_url": "https://github.com/settings/apps/new",
-		"redirect_url": fmt.Sprintf("https://github.com/settings/apps/new?manifest=%s", string(manifestJSON)),
+		"manifest_url": orgManifestURL,
+		"redirect_url": fmt.Sprintf("%s?manifest=%s", orgManifestURL, string(manifestJSON)),
 	})
 }
 
@@ -277,17 +293,8 @@ func (s *Server) handleGitHubAppCallback(c echo.Context) error {
 		fmt.Printf("Warning: failed to initialize GitHub App after creation: %v\n", err)
 	}
 
-	// Return success and redirect URL to install the app
-	// Use /installations/new/permissions with suggested_target_id to pre-select the org
-	// See: https://docs.github.com/en/apps/creating-github-apps/about-creating-github-apps/migrating-oauth-apps-to-github-apps
-	installURL := fmt.Sprintf("https://github.com/apps/%s/installations/new/permissions", appConfig.AppSlug)
-
-	// Add org targeting if we have an org ID stored
-	if progress, err := s.db.GetOnboardingProgress(); err == nil && progress.GetGitHubOrgID() != 0 {
-		installURL = fmt.Sprintf("%s?suggested_target_id=%d", installURL, progress.GetGitHubOrgID())
-	}
-
-	// Redirect to frontend with success parameter (URL-encode the install_url)
+	// Redirect to frontend with install URL
+	installURL := s.buildInstallURL(appConfig.AppSlug)
 	return c.Redirect(http.StatusFound, "/?github_app=created&install_url="+url.QueryEscape(installURL))
 }
 
