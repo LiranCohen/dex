@@ -102,20 +102,33 @@ func (h *Handler) SetPromptLoader(loader *session.PromptLoader) {
 	h.promptLoader = loader
 }
 
-// getGitHubUsername returns the cached GitHub username, fetching it if needed
+// getGitHubUsername returns the cached GitHub username/org, fetching it if needed
+// Tries: 1) cached value, 2) onboarding progress (org name), 3) GitHub client (PAT auth)
 func (h *Handler) getGitHubUsername(ctx context.Context) string {
 	if h.githubUsername != "" {
 		return h.githubUsername
 	}
-	if h.github == nil {
-		return ""
+
+	// Try to get org name from onboarding progress (works with GitHub App auth)
+	progress, err := h.db.GetOnboardingProgress()
+	if err == nil && progress != nil {
+		orgName := progress.GetGitHubOrgName()
+		if orgName != "" {
+			h.githubUsername = orgName
+			return orgName
+		}
 	}
-	username, err := h.github.GetUsername(ctx)
-	if err != nil {
-		return ""
+
+	// Fall back to GitHub client (PAT auth)
+	if h.github != nil {
+		username, err := h.github.GetUsername(ctx)
+		if err == nil && username != "" {
+			h.githubUsername = username
+			return username
+		}
 	}
-	h.githubUsername = username
-	return username
+
+	return ""
 }
 
 // buildQuestPrompt builds the system prompt for quest conversations using PromptLoom
