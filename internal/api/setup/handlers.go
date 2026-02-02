@@ -62,6 +62,22 @@ func NewHandler(cfg HandlerConfig) *Handler {
 	}
 }
 
+// getWorkspaceInfo returns the workspace repo name and local path based on the GitHub App ID
+// Returns ("dex-workspace", path) as fallback if no app is configured
+func (h *Handler) getWorkspaceInfo() (repoName string, localPath string) {
+	dataDir := h.getDataDir()
+
+	// Try to get app ID for unique workspace name
+	if appConfig, err := h.db.GetGitHubAppConfig(); err == nil && appConfig != nil {
+		repoName = workspace.WorkspaceRepoName(appConfig.AppID)
+	} else {
+		repoName = "dex-workspace" // fallback
+	}
+
+	localPath = filepath.Join(dataDir, "repos", repoName)
+	return repoName, localPath
+}
+
 // HandleStatus returns the current setup status
 func (h *Handler) HandleStatus(c echo.Context) error {
 	// Get onboarding progress from database
@@ -118,7 +134,7 @@ func (h *Handler) HandleStatus(c echo.Context) error {
 
 	// Check workspace status
 	dataDir := h.getDataDir()
-	workspacePath := filepath.Join(dataDir, "repos", "dex-workspace")
+	_, workspacePath := h.getWorkspaceInfo()
 	if _, err := os.Stat(filepath.Join(workspacePath, ".git")); err == nil {
 		status.WorkspaceReady = true
 		status.WorkspacePath = workspacePath
@@ -384,7 +400,7 @@ func (h *Handler) HandleComplete(c echo.Context) error {
 	}
 
 	// Create workspace repo if it doesn't exist
-	workspacePath := filepath.Join(dataDir, "repos", "dex-workspace")
+	repoName, workspacePath := h.getWorkspaceInfo()
 	gitService := h.getGitService()
 	if gitService != nil && !gitService.RepoExists(workspacePath) {
 		reposDir := filepath.Join(dataDir, "repos")
@@ -408,7 +424,7 @@ func (h *Handler) HandleComplete(c echo.Context) error {
 	if err != nil {
 		workspaceError = fmt.Sprintf("failed to get GitHub client: %v", err)
 	} else {
-		ws := workspace.NewService(githubClient, workspacePath)
+		ws := workspace.NewService(githubClient, workspacePath, repoName)
 		if err := ws.EnsureRemoteExists(c.Request().Context()); err != nil {
 			workspaceError = fmt.Sprintf("failed to create GitHub workspace: %v", err)
 		}
@@ -445,10 +461,10 @@ func (h *Handler) HandleComplete(c echo.Context) error {
 	return c.JSON(http.StatusOK, result)
 }
 
-// HandleWorkspaceSetup creates or repairs the dex-workspace repository
+// HandleWorkspaceSetup creates or repairs the workspace repository
 func (h *Handler) HandleWorkspaceSetup(c echo.Context) error {
 	dataDir := h.getDataDir()
-	workspacePath := filepath.Join(dataDir, "repos", "dex-workspace")
+	repoName, workspacePath := h.getWorkspaceInfo()
 
 	// Ensure local repo exists
 	if _, err := os.Stat(filepath.Join(workspacePath, ".git")); os.IsNotExist(err) {
@@ -474,7 +490,7 @@ func (h *Handler) HandleWorkspaceSetup(c echo.Context) error {
 			if err != nil {
 				githubError = fmt.Sprintf("failed to get GitHub client: %v", err)
 			} else {
-				ws := workspace.NewService(client, workspacePath)
+				ws := workspace.NewService(client, workspacePath, repoName)
 				if err := ws.EnsureRemoteExists(c.Request().Context()); err != nil {
 					githubError = fmt.Sprintf("failed to create GitHub workspace: %v", err)
 				} else {

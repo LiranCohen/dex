@@ -20,12 +20,17 @@ type Service struct {
 }
 
 // NewService creates a new workspace Service
-func NewService(github *toolbelt.GitHubClient, localPath string) *Service {
+func NewService(github *toolbelt.GitHubClient, localPath string, repoName string) *Service {
 	return &Service{
 		github:    github,
-		repoName:  "dex-workspace",
+		repoName:  repoName,
 		localPath: localPath,
 	}
+}
+
+// WorkspaceRepoName returns the workspace repo name for a given app ID
+func WorkspaceRepoName(appID int64) string {
+	return fmt.Sprintf("dex-%d", appID)
 }
 
 // EnsureRemoteExists creates the dex-workspace repo on GitHub if needed
