@@ -62,23 +62,17 @@ func NewHandler(cfg HandlerConfig) *Handler {
 	}
 }
 
-// getWorkspaceInfo returns the workspace repo name and local path based on the GitHub App ID and org
-// Returns ("dex-workspace", path) as fallback if no app is configured
-// Path follows the {org}/dex-{appId}/ structure when org is available
+// getWorkspaceInfo returns the workspace repo name and local path
+// All instances share one "dex-workspace" repo; instance data goes in subfolders
+// Path follows the {org}/dex-workspace/ structure when org is available
 func (h *Handler) getWorkspaceInfo() (repoName string, localPath string) {
 	dataDir := h.getDataDir()
-
-	// Try to get app ID for unique workspace name
-	if appConfig, err := h.db.GetGitHubAppConfig(); err == nil && appConfig != nil {
-		repoName = workspace.WorkspaceRepoName(appConfig.AppID)
-	} else {
-		repoName = "dex-workspace" // fallback
-	}
+	repoName = workspace.WorkspaceRepoName() // Always "dex-workspace"
 
 	// Try to get the org name for the owner/repo path structure
 	progress, err := h.db.GetOnboardingProgress()
 	if err == nil && progress != nil && progress.GetGitHubOrgName() != "" {
-		// Use {org}/{repo} structure: /opt/dex/repos/{org}/dex-{appId}/
+		// Use {org}/{repo} structure: /opt/dex/repos/{org}/dex-workspace/
 		localPath = filepath.Join(dataDir, "repos", progress.GetGitHubOrgName(), repoName)
 	} else {
 		// Fallback to flat structure

@@ -28,20 +28,27 @@ func NewService(github *toolbelt.GitHubClient, localPath string, repoName string
 	}
 }
 
-// WorkspaceRepoName returns the workspace repo name for a given app ID
-func WorkspaceRepoName(appID int64) string {
-	return fmt.Sprintf("dex-%d", appID)
+// WorkspaceRepoName returns the singular workspace repo name
+// All instances share one workspace repo; instance-specific data goes in {instanceId}/ subfolders
+func WorkspaceRepoName() string {
+	return "dex-workspace"
 }
 
-// WorkspaceRepoPath returns the local path for a workspace repo
-// Uses the {owner}/{repo} structure: {baseDir}/repos/{org}/dex-{appId}/
-func WorkspaceRepoPath(baseDir, org string, appID int64) string {
-	repoName := WorkspaceRepoName(appID)
+// WorkspaceRepoPath returns the local path for the workspace repo
+// Uses the {owner}/{repo} structure: {baseDir}/repos/{org}/dex-workspace/
+func WorkspaceRepoPath(baseDir, org string) string {
+	repoName := WorkspaceRepoName()
 	if org != "" {
 		return filepath.Join(baseDir, "repos", org, repoName)
 	}
 	// Fallback without org
 	return filepath.Join(baseDir, "repos", repoName)
+}
+
+// InstanceDataPath returns the path for instance-specific data within the workspace
+// Structure: {workspacePath}/{instanceId}/
+func InstanceDataPath(workspacePath, instanceID string) string {
+	return filepath.Join(workspacePath, instanceID)
 }
 
 // EnsureRemoteExists creates the dex-workspace repo on GitHub if needed
