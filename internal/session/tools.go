@@ -6,14 +6,6 @@ import (
 	"github.com/lirancohen/dex/internal/tools"
 )
 
-// GetToolDefinitions returns all available tools for the Ralph loop
-// Uses the shared tools package with read-write tools for objective execution
-// Deprecated: Use GetToolDefinitionsForHat instead for hat-specific tool sets
-func GetToolDefinitions() []toolbelt.AnthropicTool {
-	toolSet := tools.ReadWriteTools()
-	return toolSetToAnthropic(toolSet)
-}
-
 // GetToolDefinitionsForHat returns tools appropriate for a specific hat
 // Uses the tool profile system to provide role-appropriate tools
 func GetToolDefinitionsForHat(hat string) []toolbelt.AnthropicTool {

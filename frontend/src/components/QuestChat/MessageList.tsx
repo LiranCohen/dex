@@ -1,4 +1,4 @@
-import { useRef, useEffect, useCallback, memo } from 'react';
+import { useRef, useEffect, useCallback, memo, useState } from 'react';
 import { MessageBubble } from './MessageBubble';
 import type { QuestMessage } from '../../lib/types';
 
@@ -15,7 +15,7 @@ export const MessageList = memo(function MessageList({
 }: MessageListProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
-  const isAutoScrollingRef = useRef(true);
+  const [isAtBottom, setIsAtBottom] = useState(true);
 
   // Check if we're near the bottom
   const isNearBottom = useCallback(() => {
@@ -27,25 +27,37 @@ export const MessageList = memo(function MessageList({
     return position >= container.scrollHeight - threshold;
   }, []);
 
-  // Scroll to bottom
+  // Scroll to bottom (called from button click)
   const scrollToBottom = useCallback((smooth = true) => {
     bottomRef.current?.scrollIntoView({
       behavior: smooth ? 'smooth' : 'auto',
       block: 'end',
     });
+    setIsAtBottom(true);
     onScrollToBottom?.();
   }, [onScrollToBottom]);
 
   // Auto-scroll when new messages arrive (if already at bottom)
   useEffect(() => {
-    if (isAutoScrollingRef.current || isNearBottom()) {
-      scrollToBottom(true);
+    // Only auto-scroll if we're already at the bottom
+    const container = containerRef.current;
+    if (!container) return;
+
+    const threshold = 100;
+    const position = container.scrollTop + container.clientHeight;
+    const nearBottom = position >= container.scrollHeight - threshold;
+
+    if (nearBottom) {
+      bottomRef.current?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'end',
+      });
     }
-  }, [messages, isStreaming, scrollToBottom, isNearBottom]);
+  }, [messages, isStreaming]);
 
   // Handle scroll events
   const handleScroll = useCallback(() => {
-    isAutoScrollingRef.current = isNearBottom();
+    setIsAtBottom(isNearBottom());
   }, [isNearBottom]);
 
   // Determine if we should show timestamp for consecutive messages
@@ -104,7 +116,7 @@ export const MessageList = memo(function MessageList({
       <div ref={bottomRef} />
 
       {/* Scroll to bottom button (visible when not at bottom) */}
-      {!isAutoScrollingRef.current && messages.length > 5 && (
+      {!isAtBottom && messages.length > 5 && (
         <button
           onClick={() => scrollToBottom(true)}
           className="fixed bottom-24 right-8 bg-gray-700 hover:bg-gray-600 text-white rounded-full p-2 shadow-lg transition-colors z-10"

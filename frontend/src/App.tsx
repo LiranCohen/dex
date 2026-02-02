@@ -2407,7 +2407,6 @@ function ApprovalsPage() {
 // Protected route wrapper that also handles onboarding
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
-  const [_setupStatus, setSetupStatus] = useState<SetupStatus | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [showOnboarding, setShowOnboarding] = useState(false);
 
@@ -2421,7 +2420,6 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
     setIsLoading(true);
     try {
       const status = await api.get<SetupStatus>('/setup/status');
-      setSetupStatus(status);
 
       // Show onboarding if setup is not complete
       // Check for either GitHub auth method (app or token)

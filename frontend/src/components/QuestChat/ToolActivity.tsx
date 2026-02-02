@@ -176,7 +176,9 @@ function getObjectivesSummary(tc: QuestToolCall): string {
   try {
     const data = JSON.parse(tc.output);
     if (Array.isArray(data)) return `${data.length} objectives`;
-  } catch {}
+  } catch {
+    // Ignore parse errors - output may not be JSON
+  }
   return 'Loaded';
 }
 
