@@ -84,6 +84,8 @@ func (e *Executor) Execute(ctx context.Context, toolName string, input map[strin
 		result = e.executeWebSearch(ctx, input)
 	case "web_fetch":
 		result = e.executeWebFetch(ctx, input)
+	case "list_runtimes":
+		result = e.executeListRuntimes()
 	// Write tools
 	case "bash":
 		result = e.executeBash(ctx, input)
@@ -493,6 +495,184 @@ func (e *Executor) executeWebFetch(ctx context.Context, input map[string]any) Re
 	}
 
 	return Result{Output: content, IsError: false}
+}
+
+// runtimeCheck represents a runtime to check for
+type runtimeCheck struct {
+	name    string
+	cmd     string
+	args    []string
+	extract func(string) string // optional function to extract version
+}
+
+func (e *Executor) executeListRuntimes() Result {
+	// List of runtimes to check
+	runtimes := []runtimeCheck{
+		// Languages
+		{name: "Go", cmd: "go", args: []string{"version"}},
+		{name: "Node.js", cmd: "node", args: []string{"--version"}},
+		{name: "Bun", cmd: "bun", args: []string{"--version"}},
+		{name: "Deno", cmd: "deno", args: []string{"--version"}, extract: func(s string) string {
+			lines := strings.Split(s, "\n")
+			if len(lines) > 0 {
+				return strings.TrimSpace(lines[0])
+			}
+			return s
+		}},
+		{name: "Python", cmd: "python3", args: []string{"--version"}},
+		{name: "Python 2", cmd: "python", args: []string{"--version"}},
+		{name: "Ruby", cmd: "ruby", args: []string{"--version"}},
+		{name: "PHP", cmd: "php", args: []string{"--version"}, extract: func(s string) string {
+			lines := strings.Split(s, "\n")
+			if len(lines) > 0 {
+				return strings.TrimSpace(lines[0])
+			}
+			return s
+		}},
+		{name: "Perl", cmd: "perl", args: []string{"--version"}, extract: func(s string) string {
+			// Extract version from verbose output
+			if idx := strings.Index(s, "(v"); idx != -1 {
+				end := strings.Index(s[idx:], ")")
+				if end > 0 {
+					return "perl " + s[idx+1:idx+end]
+				}
+			}
+			return "perl installed"
+		}},
+		// Rust
+		{name: "Rust (rustc)", cmd: "rustc", args: []string{"--version"}},
+		{name: "Cargo", cmd: "cargo", args: []string{"--version"}},
+		// C/C++
+		{name: "GCC", cmd: "gcc", args: []string{"--version"}, extract: func(s string) string {
+			lines := strings.Split(s, "\n")
+			if len(lines) > 0 {
+				return strings.TrimSpace(lines[0])
+			}
+			return s
+		}},
+		{name: "G++", cmd: "g++", args: []string{"--version"}, extract: func(s string) string {
+			lines := strings.Split(s, "\n")
+			if len(lines) > 0 {
+				return strings.TrimSpace(lines[0])
+			}
+			return s
+		}},
+		{name: "Clang", cmd: "clang", args: []string{"--version"}, extract: func(s string) string {
+			lines := strings.Split(s, "\n")
+			if len(lines) > 0 {
+				return strings.TrimSpace(lines[0])
+			}
+			return s
+		}},
+		// JVM
+		{name: "Java", cmd: "java", args: []string{"-version"}, extract: func(s string) string {
+			lines := strings.Split(s, "\n")
+			if len(lines) > 0 {
+				return strings.TrimSpace(lines[0])
+			}
+			return s
+		}},
+		{name: "Kotlin", cmd: "kotlin", args: []string{"-version"}},
+		{name: "Scala", cmd: "scala", args: []string{"-version"}},
+		{name: "Gradle", cmd: "gradle", args: []string{"--version"}, extract: func(s string) string {
+			for _, line := range strings.Split(s, "\n") {
+				if strings.HasPrefix(line, "Gradle ") {
+					return strings.TrimSpace(line)
+				}
+			}
+			return "gradle installed"
+		}},
+		{name: "Maven", cmd: "mvn", args: []string{"--version"}, extract: func(s string) string {
+			lines := strings.Split(s, "\n")
+			if len(lines) > 0 {
+				return strings.TrimSpace(lines[0])
+			}
+			return s
+		}},
+		// Other
+		{name: "Zig", cmd: "zig", args: []string{"version"}},
+		{name: "Elixir", cmd: "elixir", args: []string{"--version"}, extract: func(s string) string {
+			lines := strings.Split(s, "\n")
+			if len(lines) > 0 {
+				return strings.TrimSpace(lines[0])
+			}
+			return s
+		}},
+		{name: "Erlang", cmd: "erl", args: []string{"-eval", "erlang:display(erlang:system_info(otp_release)), halt().", "-noshell"}},
+		// Package managers
+		{name: "npm", cmd: "npm", args: []string{"--version"}, extract: func(s string) string { return "npm " + strings.TrimSpace(s) }},
+		{name: "yarn", cmd: "yarn", args: []string{"--version"}, extract: func(s string) string { return "yarn " + strings.TrimSpace(s) }},
+		{name: "pnpm", cmd: "pnpm", args: []string{"--version"}, extract: func(s string) string { return "pnpm " + strings.TrimSpace(s) }},
+		{name: "pip", cmd: "pip3", args: []string{"--version"}, extract: func(s string) string {
+			parts := strings.Fields(s)
+			if len(parts) >= 2 {
+				return "pip " + parts[1]
+			}
+			return s
+		}},
+		{name: "gem", cmd: "gem", args: []string{"--version"}, extract: func(s string) string { return "gem " + strings.TrimSpace(s) }},
+		{name: "composer", cmd: "composer", args: []string{"--version"}, extract: func(s string) string {
+			parts := strings.Fields(s)
+			if len(parts) >= 3 {
+				return parts[0] + " " + parts[2]
+			}
+			return s
+		}},
+		// Build tools
+		{name: "Make", cmd: "make", args: []string{"--version"}, extract: func(s string) string {
+			lines := strings.Split(s, "\n")
+			if len(lines) > 0 {
+				return strings.TrimSpace(lines[0])
+			}
+			return s
+		}},
+		{name: "CMake", cmd: "cmake", args: []string{"--version"}, extract: func(s string) string {
+			lines := strings.Split(s, "\n")
+			if len(lines) > 0 {
+				return strings.TrimSpace(lines[0])
+			}
+			return s
+		}},
+		// Containers
+		{name: "Docker", cmd: "docker", args: []string{"--version"}},
+		{name: "Podman", cmd: "podman", args: []string{"--version"}},
+	}
+
+	var found []string
+	var notFound []string
+
+	for _, rt := range runtimes {
+		cmd := exec.Command(rt.cmd, rt.args...)
+		output, err := cmd.CombinedOutput()
+		if err == nil {
+			version := strings.TrimSpace(string(output))
+			if rt.extract != nil {
+				version = rt.extract(version)
+			}
+			found = append(found, fmt.Sprintf("✓ %s: %s", rt.name, version))
+		} else {
+			notFound = append(notFound, rt.name)
+		}
+	}
+
+	var sb strings.Builder
+	sb.WriteString("## Available Runtimes\n\n")
+
+	if len(found) > 0 {
+		for _, f := range found {
+			sb.WriteString(f + "\n")
+		}
+	} else {
+		sb.WriteString("No common runtimes detected.\n")
+	}
+
+	if len(notFound) > 0 {
+		sb.WriteString("\n## Not Installed\n")
+		sb.WriteString(strings.Join(notFound, ", "))
+		sb.WriteString("\n")
+	}
+
+	return Result{Output: sb.String(), IsError: false}
 }
 
 // Write tool implementations

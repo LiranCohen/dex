@@ -191,6 +191,19 @@ func WebFetchTool() Tool {
 	}
 }
 
+func ListRuntimesTool() Tool {
+	return Tool{
+		Name:        "list_runtimes",
+		Description: "List available programming language runtimes and tools installed on the system. Use this to discover what languages and package managers are available before running build commands.",
+		InputSchema: map[string]any{
+			"type":       "object",
+			"properties": map[string]any{},
+			"required":   []string{},
+		},
+		ReadOnly: true,
+	}
+}
+
 // ReadWrite tools - only for objective execution (RalphLoop)
 
 func BashTool() Tool {

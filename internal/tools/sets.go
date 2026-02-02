@@ -13,6 +13,7 @@ func ReadOnlyTools() *Set {
 		GitLogTool(),
 		WebSearchTool(),
 		WebFetchTool(),
+		ListRuntimesTool(),
 	})
 }
 
@@ -55,6 +56,7 @@ func AllTools() []Tool {
 		GitLogTool(),
 		WebSearchTool(),
 		WebFetchTool(),
+		ListRuntimesTool(),
 		// Write
 		BashTool(),
 		WriteFileTool(),
