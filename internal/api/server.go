@@ -1490,20 +1490,54 @@ func (s *Server) handlePauseTask(c echo.Context) error {
 func (s *Server) handleResumeTask(c echo.Context) error {
 	taskID := c.Param("id")
 
-	// Find the session for this task
+	// First check if there's an active session in memory
 	sess := s.sessionManager.GetByTask(taskID)
-	if sess == nil {
-		return echo.NewHTTPError(http.StatusNotFound, "no active session for task")
-	}
 
-	// Check that session is paused
-	if sess.State != session.StatePaused {
-		return echo.NewHTTPError(http.StatusBadRequest, "session is not paused")
-	}
+	if sess != nil {
+		// Active session exists - check that it's paused
+		if sess.State != session.StatePaused {
+			return echo.NewHTTPError(http.StatusBadRequest, "session is not paused")
+		}
 
-	// Resume by starting the session again
-	if err := s.sessionManager.Start(c.Request().Context(), sess.ID); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		// Resume by starting the session again
+		if err := s.sessionManager.Start(c.Request().Context(), sess.ID); err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		}
+	} else {
+		// No active session - check if task is paused and recreate session
+		task, err := s.db.GetTaskByID(taskID)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("failed to get task: %v", err))
+		}
+		if task == nil {
+			return echo.NewHTTPError(http.StatusNotFound, "task not found")
+		}
+		if task.Status != db.TaskStatusPaused {
+			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("task is not paused (status: %s)", task.Status))
+		}
+
+		// Get the last session for this task to restore hat and worktree path
+		sessions, err := s.db.ListSessionsByTask(taskID)
+		if err != nil || len(sessions) == 0 {
+			return echo.NewHTTPError(http.StatusBadRequest, "no previous session found for task")
+		}
+		lastSession := sessions[0] // Most recent first
+
+		// Create a new session with the same parameters
+		newSess, err := s.sessionManager.CreateSession(taskID, lastSession.Hat, lastSession.WorktreePath)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("failed to create session: %v", err))
+		}
+
+		// Set the session to restore from the previous session's checkpoint
+		newSess.RestoreFromSessionID = lastSession.ID
+
+		// Start the new session (RalphLoop will load from checkpoint)
+		if err := s.sessionManager.Start(c.Request().Context(), newSess.ID); err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		}
+
+		sess = newSess
 	}
 
 	// Update task status in database so frontend sees the change

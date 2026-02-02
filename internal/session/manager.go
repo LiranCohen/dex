@@ -49,6 +49,9 @@ type ActiveSession struct {
 	StartedAt    time.Time
 	LastActivity time.Time
 
+	// For resuming from a previous session's checkpoint
+	RestoreFromSessionID string
+
 	// For cancellation
 	cancel context.CancelFunc
 	done   chan struct{}
@@ -529,10 +532,18 @@ func (m *Manager) runSession(ctx context.Context, session *ActiveSession) {
 		}
 
 		// Try to restore from checkpoint
-		checkpoint, err := m.db.GetLatestSessionCheckpoint(session.ID)
+		// Use RestoreFromSessionID if set (for resuming from a previous session's state)
+		checkpointSessionID := session.ID
+		if session.RestoreFromSessionID != "" {
+			checkpointSessionID = session.RestoreFromSessionID
+			fmt.Printf("runSession: restoring from previous session %s\n", checkpointSessionID)
+		}
+		checkpoint, err := m.db.GetLatestSessionCheckpoint(checkpointSessionID)
 		if err == nil && checkpoint != nil {
 			if restoreErr := loop.RestoreFromCheckpoint(checkpoint); restoreErr != nil {
 				fmt.Printf("warning: failed to restore checkpoint: %v\n", restoreErr)
+			} else {
+				fmt.Printf("runSession: restored from checkpoint (iteration %d)\n", checkpoint.Iteration)
 			}
 		}
 
