@@ -327,7 +327,7 @@ func GitHubCreateRepoTool() Tool {
 			"properties": map[string]any{
 				"name": map[string]any{
 					"type":        "string",
-					"description": "Repository name",
+					"description": "Repository name. Can be just 'repo-name' (uses project owner) or 'owner/repo-name' for a different owner.",
 				},
 				"description": map[string]any{
 					"type":        "string",

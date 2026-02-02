@@ -279,9 +279,17 @@ func (e *ToolExecutor) executeGitHubCreateRepo(ctx context.Context, input map[st
 		return ToolResult{Output: "name is required", IsError: true}
 	}
 
+	// Parse owner/repo format if provided, otherwise use project owner
+	owner := e.owner
+	if strings.Contains(name, "/") {
+		parts := strings.SplitN(name, "/", 2)
+		owner = parts[0]
+		name = parts[1]
+	}
+
 	opts := toolbelt.CreateRepoOptions{
 		Name: name,
-		Org:  e.owner, // Use project owner for consistency
+		Org:  owner,
 	}
 
 	if desc, ok := input["description"].(string); ok {

@@ -32,7 +32,7 @@ instructions: |
   - **Project repositories**: Where actual code lives
     - Location: `/opt/dex/repos/{owner}/{repo}/`
     - Create new ones via `github_create_repo` tool
-    - Always use `{owner}/{repo}` naming (e.g., `lirancohen/my-project`)
+    - Name can be `repo-name` (uses project owner) or `owner/repo-name` for different owner
 
   ### Task Lifecycle
   1. Tasks start in `planning` phase where requirements are clarified

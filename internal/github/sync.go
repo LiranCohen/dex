@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/go-github/v68/github"
 	"github.com/lirancohen/dex/internal/db"
+	"github.com/lirancohen/dex/internal/workspace"
 )
 
 // SyncService coordinates GitHub Issue sync for Quests and Objectives
@@ -526,11 +527,10 @@ func ParseGitHubURL(url string) (owner, repo string, ok bool) {
 }
 
 // GetWorkspaceRepoInfo returns the repo info for the Dex workspace repo
-func GetWorkspaceRepoInfo(orgName string, appID int64) RepoInfo {
-	repoName := fmt.Sprintf("dex-%d", appID)
+func GetWorkspaceRepoInfo(orgName string) RepoInfo {
 	return RepoInfo{
 		Owner: orgName,
-		Repo:  repoName,
+		Repo:  workspace.WorkspaceRepoName(),
 	}
 }
 
@@ -562,12 +562,11 @@ func (s *SyncService) GetRepoInfoForQuest(quest *db.Quest, workspaceRepo RepoInf
 type SyncConfig struct {
 	OrgName        string // GitHub organization name
 	InstallationID int64  // GitHub App installation ID
-	AppID          int64  // GitHub App ID (for workspace repo name)
 }
 
 // GetWorkspaceRepo returns the workspace repo info from config
 func (c *SyncConfig) GetWorkspaceRepo() RepoInfo {
-	return GetWorkspaceRepoInfo(c.OrgName, c.AppID)
+	return GetWorkspaceRepoInfo(c.OrgName)
 }
 
 // IsConfigured returns true if sync is properly configured
@@ -576,7 +575,7 @@ func (c *SyncConfig) IsConfigured() bool {
 }
 
 // BuildSyncConfig builds sync configuration from onboarding progress and app settings
-func BuildSyncConfig(progress *db.OnboardingProgress, appID int64, installationID int64) *SyncConfig {
+func BuildSyncConfig(progress *db.OnboardingProgress, installationID int64) *SyncConfig {
 	if progress == nil {
 		return &SyncConfig{}
 	}
@@ -584,7 +583,6 @@ func BuildSyncConfig(progress *db.OnboardingProgress, appID int64, installationI
 	return &SyncConfig{
 		OrgName:        progress.GetGitHubOrgName(),
 		InstallationID: installationID,
-		AppID:          appID,
 	}
 }
 

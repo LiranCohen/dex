@@ -40,7 +40,7 @@ instructions: |
   1. Initialize git in your worktree: `git_init`
   2. Create the project structure and files
   3. Commit the initial structure
-  4. Create the GitHub repo: `github_create_repo` (use {owner}/{repo} naming)
+  4. Create the GitHub repo: `github_create_repo` (just repo name uses project owner, or specify owner/repo)
   5. Add the remote: `git_remote_add`
   6. Push: `git_push` with set_upstream: true
 

@@ -437,16 +437,9 @@ func (s *Server) getSyncConfig(ctx context.Context) *github.SyncConfig {
 		return nil
 	}
 
-	// Get app config for app ID
-	appConfig, err := s.db.GetGitHubAppConfig()
-	if err != nil || appConfig == nil {
-		return nil
-	}
-
 	return &github.SyncConfig{
 		OrgName:        orgName,
 		InstallationID: installID,
-		AppID:          appConfig.AppID,
 	}
 }
 
