@@ -1663,7 +1663,25 @@ function QuestDetailPage() {
   const [preflight, setPreflight] = useState<PreflightCheck | null>(null);
 
   // Track accepted/rejected drafts to avoid re-showing them after loadQuest
+  // Persist declined drafts in localStorage so they don't reappear on refresh
+  const getDeclinedDraftsKey = (questId: string) => `dex-declined-drafts-${questId}`;
   const handledDraftIds = useRef<Set<string>>(new Set());
+
+  // Initialize handledDraftIds from localStorage on mount
+  useEffect(() => {
+    if (id) {
+      const stored = localStorage.getItem(getDeclinedDraftsKey(id));
+      if (stored) {
+        try {
+          const ids = JSON.parse(stored) as string[];
+          ids.forEach(draftId => handledDraftIds.current.add(draftId));
+        } catch {
+          // Ignore parse errors
+        }
+      }
+    }
+  }, [id]);
+
   // Ref for textarea to reset height after sending
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -1946,11 +1964,22 @@ function QuestDetailPage() {
     }
   };
 
-  // Reject draft (just remove from UI)
+  // Reject draft (remove from UI and persist to localStorage)
   const handleRejectDraft = (draftId: string) => {
-    // Mark draft as handled so it won't reappear after loadQuest
+    // Mark draft as handled so it won't reappear after loadQuest or page refresh
     handledDraftIds.current.add(draftId);
     setDrafts((prev) => prev.filter((d) => d.draft_id !== draftId));
+
+    // Persist to localStorage so decline survives page refresh
+    if (id) {
+      const key = getDeclinedDraftsKey(id);
+      const stored = localStorage.getItem(key);
+      const ids = stored ? (JSON.parse(stored) as string[]) : [];
+      if (!ids.includes(draftId)) {
+        ids.push(draftId);
+        localStorage.setItem(key, JSON.stringify(ids));
+      }
+    }
   };
 
   // Format timestamp
