@@ -74,7 +74,7 @@ type Handler struct {
 func NewHandler(database *db.DB, client *toolbelt.AnthropicClient, hub *websocket.Hub) *Handler {
 	// Build read-only tools for Quest exploration
 	toolSet := tools.ReadOnlyTools()
-	readOnlyTools := make([]toolbelt.AnthropicTool, 0, len(toolSet.All()))
+	readOnlyTools := make([]toolbelt.AnthropicTool, 0, len(toolSet.All())+len(QuestTools()))
 	for _, t := range toolSet.All() {
 		readOnlyTools = append(readOnlyTools, toolbelt.AnthropicTool{
 			Name:        t.Name,
@@ -82,6 +82,8 @@ func NewHandler(database *db.DB, client *toolbelt.AnthropicClient, hub *websocke
 			InputSchema: t.InputSchema,
 		})
 	}
+	// Add quest-specific tools for objective management
+	readOnlyTools = append(readOnlyTools, QuestTools()...)
 
 	return &Handler{
 		db:            database,
@@ -254,9 +256,14 @@ func (h *Handler) ProcessMessage(ctx context.Context, questID, content string) (
 					})
 				}
 
-				// Execute the tool
+				// Execute the tool - use quest handler for quest-specific tools
 				start := time.Now()
-				result := executor.Execute(ctx, block.Name, block.Input)
+				var result tools.Result
+				if IsQuestTool(block.Name) {
+					result = h.executeQuestTool(ctx, questID, block.Name, block.Input)
+				} else {
+					result = executor.Execute(ctx, block.Name, block.Input)
+				}
 				durationMs := time.Since(start).Milliseconds()
 
 				// Record tool call
@@ -741,4 +748,189 @@ func (h *Handler) buildCrossQuestContext(projectID, currentQuestID string) strin
 	}
 
 	return context.String()
+}
+
+// executeQuestTool executes quest-specific tools that need database access
+func (h *Handler) executeQuestTool(ctx context.Context, questID, toolName string, input map[string]any) tools.Result {
+	switch toolName {
+	case "list_objectives":
+		return h.executeListObjectives(questID)
+	case "get_objective_details":
+		objectiveID, _ := input["objective_id"].(string)
+		return h.executeGetObjectiveDetails(objectiveID)
+	case "cancel_objective":
+		objectiveID, _ := input["objective_id"].(string)
+		reason, _ := input["reason"].(string)
+		return h.executeCancelObjective(questID, objectiveID, reason)
+	default:
+		return tools.Result{Output: fmt.Sprintf("Unknown quest tool: %s", toolName), IsError: true}
+	}
+}
+
+// executeListObjectives lists all objectives for a quest
+func (h *Handler) executeListObjectives(questID string) tools.Result {
+	tasks, err := h.db.GetTasksByQuestID(questID)
+	if err != nil {
+		return tools.Result{Output: fmt.Sprintf("Failed to get objectives: %v", err), IsError: true}
+	}
+
+	if len(tasks) == 0 {
+		return tools.Result{Output: "No objectives have been created for this quest yet."}
+	}
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("Found %d objectives:\n\n", len(tasks)))
+
+	for _, task := range tasks {
+		sb.WriteString(fmt.Sprintf("## %s\n", task.Title))
+		sb.WriteString(fmt.Sprintf("- **ID:** %s\n", task.ID))
+		sb.WriteString(fmt.Sprintf("- **Status:** %s\n", task.Status))
+		sb.WriteString(fmt.Sprintf("- **Hat:** %s\n", task.Hat))
+
+		// Get checklist progress
+		if checklist, err := h.db.GetChecklistByTaskID(task.ID); err == nil && checklist != nil {
+			if items, err := h.db.GetChecklistItems(checklist.ID); err == nil && len(items) > 0 {
+				completed := 0
+				for _, item := range items {
+					if item.Status == "done" {
+						completed++
+					}
+				}
+				sb.WriteString(fmt.Sprintf("- **Progress:** %d/%d checklist items completed\n", completed, len(items)))
+			}
+		}
+
+		sb.WriteString("\n")
+	}
+
+	return tools.Result{Output: sb.String()}
+}
+
+// executeGetObjectiveDetails gets detailed info about a specific objective
+func (h *Handler) executeGetObjectiveDetails(objectiveID string) tools.Result {
+	if objectiveID == "" {
+		return tools.Result{Output: "objective_id is required", IsError: true}
+	}
+
+	task, err := h.db.GetTaskByID(objectiveID)
+	if err != nil {
+		return tools.Result{Output: fmt.Sprintf("Failed to get objective: %v", err), IsError: true}
+	}
+	if task == nil {
+		return tools.Result{Output: fmt.Sprintf("Objective not found: %s", objectiveID), IsError: true}
+	}
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("# %s\n\n", task.Title))
+	sb.WriteString(fmt.Sprintf("**ID:** %s\n", task.ID))
+	sb.WriteString(fmt.Sprintf("**Status:** %s\n", task.Status))
+	sb.WriteString(fmt.Sprintf("**Hat:** %s\n", task.Hat))
+	sb.WriteString(fmt.Sprintf("**Created:** %s\n", task.CreatedAt.Format("2006-01-02 15:04:05")))
+
+	if task.Description.Valid && task.Description.String != "" {
+		sb.WriteString(fmt.Sprintf("\n## Description\n%s\n", task.Description.String))
+	}
+
+	// Get checklist items
+	if checklist, err := h.db.GetChecklistByTaskID(task.ID); err == nil && checklist != nil {
+		if items, err := h.db.GetChecklistItems(checklist.ID); err == nil && len(items) > 0 {
+			sb.WriteString("\n## Checklist Progress\n")
+			for _, item := range items {
+				status := "[ ]"
+				if item.Status == "done" {
+					status = "[x]"
+				} else if item.Status == "failed" {
+					status = "[!]"
+				} else if item.Status == "skipped" {
+					status = "[-]"
+				}
+				sb.WriteString(fmt.Sprintf("- %s %s (status: %s)\n", status, item.Description, item.Status))
+			}
+		}
+	}
+
+	// Get session history
+	sessions, err := h.db.ListSessionsByTask(objectiveID)
+	if err == nil && len(sessions) > 0 {
+		sb.WriteString(fmt.Sprintf("\n## Session History (%d sessions)\n", len(sessions)))
+		for i, sess := range sessions {
+			if i >= 5 {
+				sb.WriteString(fmt.Sprintf("... and %d more sessions\n", len(sessions)-5))
+				break
+			}
+			sb.WriteString(fmt.Sprintf("- Session %s: status=%s, iterations=%d",
+				sess.ID[:8], sess.Status, sess.IterationCount))
+			if sess.Outcome.Valid && sess.Outcome.String != "" {
+				sb.WriteString(fmt.Sprintf(", outcome=%s", sess.Outcome.String))
+			}
+			sb.WriteString("\n")
+		}
+	}
+
+	// Status-specific information
+	switch task.Status {
+	case db.TaskStatusPaused:
+		sb.WriteString("\n## Status Notes\n")
+		sb.WriteString("This objective is **paused**. It may have encountered an error or exceeded its budget.\n")
+		sb.WriteString("You can either:\n")
+		sb.WriteString("1. Ask the user to resume it if the issue might be transient\n")
+		sb.WriteString("2. Cancel it and create a new objective with a different approach\n")
+	case db.TaskStatusCancelled:
+		sb.WriteString("\n## Status Notes\n")
+		sb.WriteString("This objective was **cancelled**. Consider creating a replacement objective if the work is still needed.\n")
+	case db.TaskStatusCompleted:
+		sb.WriteString("\n## Status Notes\n")
+		sb.WriteString("This objective is **completed**.\n")
+	}
+
+	return tools.Result{Output: sb.String()}
+}
+
+// executeCancelObjective cancels an objective
+func (h *Handler) executeCancelObjective(questID, objectiveID, reason string) tools.Result {
+	if objectiveID == "" {
+		return tools.Result{Output: "objective_id is required", IsError: true}
+	}
+	if reason == "" {
+		return tools.Result{Output: "reason is required", IsError: true}
+	}
+
+	// Verify the task belongs to this quest
+	task, err := h.db.GetTaskByID(objectiveID)
+	if err != nil {
+		return tools.Result{Output: fmt.Sprintf("Failed to get objective: %v", err), IsError: true}
+	}
+	if task == nil {
+		return tools.Result{Output: fmt.Sprintf("Objective not found: %s", objectiveID), IsError: true}
+	}
+	if task.QuestID.Valid && task.QuestID.String != questID {
+		return tools.Result{Output: "Objective does not belong to this quest", IsError: true}
+	}
+
+	// Check if already cancelled or completed
+	if task.Status == db.TaskStatusCancelled {
+		return tools.Result{Output: "Objective is already cancelled"}
+	}
+	if task.Status == db.TaskStatusCompleted {
+		return tools.Result{Output: "Cannot cancel a completed objective", IsError: true}
+	}
+
+	// Cancel the task
+	if err := h.db.UpdateTaskStatus(objectiveID, db.TaskStatusCancelled); err != nil {
+		return tools.Result{Output: fmt.Sprintf("Failed to cancel objective: %v", err), IsError: true}
+	}
+
+	// Broadcast cancellation
+	if h.hub != nil {
+		h.hub.Broadcast(websocket.Message{
+			Type: "task.cancelled",
+			Payload: map[string]any{
+				"task_id":  objectiveID,
+				"quest_id": questID,
+				"reason":   reason,
+			},
+		})
+	}
+
+	return tools.Result{Output: fmt.Sprintf("Objective '%s' has been cancelled. Reason: %s\n\nYou can now propose a new objective to replace it if needed.", task.Title, reason)}
 }
