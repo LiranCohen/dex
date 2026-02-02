@@ -4,6 +4,8 @@ package session
 import (
 	"context"
 	"fmt"
+	"os/exec"
+	"strings"
 
 	"github.com/lirancohen/dex/internal/git"
 	"github.com/lirancohen/dex/internal/toolbelt"
@@ -49,6 +51,8 @@ func (e *ToolExecutor) Execute(ctx context.Context, toolName string, input map[s
 		return e.executeGitCommit(input)
 	case "git_push":
 		return e.executeGitPush(input)
+	case "git_remote_add":
+		return e.executeGitRemoteAdd(input)
 	// Tools that need GitHub client
 	case "github_create_repo":
 		return e.executeGitHubCreateRepo(ctx, input)
@@ -160,6 +164,14 @@ func (e *ToolExecutor) executeGitPush(input map[string]any) ToolResult {
 	}
 	opts.Branch = branch
 
+	// If we have a GitHub client, set up authenticated remote URL before pushing
+	if e.githubClient != nil && e.githubClient.Token() != "" {
+		if err := e.setupAuthenticatedRemote(); err != nil {
+			// Log but don't fail - maybe auth isn't needed (e.g., SSH)
+			fmt.Printf("Warning: failed to set up authenticated remote: %v\n", err)
+		}
+	}
+
 	if err := e.gitOps.Push(e.WorkDir(), opts); err != nil {
 		return ToolResult{
 			Output:  fmt.Sprintf("git push failed: %v", err),
@@ -171,6 +183,90 @@ func (e *ToolExecutor) executeGitPush(input map[string]any) ToolResult {
 		Output:  fmt.Sprintf("Pushed branch %s to origin", branch),
 		IsError: false,
 	}
+}
+
+func (e *ToolExecutor) executeGitRemoteAdd(input map[string]any) ToolResult {
+	url, ok := input["url"].(string)
+	if !ok || url == "" {
+		return ToolResult{Output: "url is required", IsError: true}
+	}
+
+	name := "origin"
+	if n, ok := input["name"].(string); ok && n != "" {
+		name = n
+	}
+
+	// Convert to authenticated URL if we have a GitHub client
+	if e.githubClient != nil && e.githubClient.Token() != "" {
+		url = e.githubClient.AuthURL(url)
+	}
+
+	cmd := exec.Command("git", "remote", "add", name, url)
+	cmd.Dir = e.WorkDir()
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		if strings.Contains(string(output), "already exists") {
+			updateCmd := exec.Command("git", "remote", "set-url", name, url)
+			updateCmd.Dir = e.WorkDir()
+			updateOutput, updateErr := updateCmd.CombinedOutput()
+			if updateErr != nil {
+				return ToolResult{
+					Output:  fmt.Sprintf("git remote set-url failed: %s: %v", string(updateOutput), updateErr),
+					IsError: true,
+				}
+			}
+			return ToolResult{
+				Output:  fmt.Sprintf("Updated remote '%s'", name),
+				IsError: false,
+			}
+		}
+		return ToolResult{
+			Output:  fmt.Sprintf("git remote add failed: %s: %v", string(output), err),
+			IsError: true,
+		}
+	}
+
+	return ToolResult{
+		Output:  fmt.Sprintf("Added remote '%s'", name),
+		IsError: false,
+	}
+}
+
+// setupAuthenticatedRemote converts the origin remote URL to use token authentication
+func (e *ToolExecutor) setupAuthenticatedRemote() error {
+	if e.githubClient == nil {
+		return fmt.Errorf("no GitHub client configured")
+	}
+
+	// Get current remote URL
+	cmd := exec.Command("git", "remote", "get-url", "origin")
+	cmd.Dir = e.WorkDir()
+	output, err := cmd.Output()
+	if err != nil {
+		return fmt.Errorf("failed to get remote URL: %w", err)
+	}
+
+	currentURL := strings.TrimSpace(string(output))
+	if currentURL == "" {
+		return fmt.Errorf("no origin remote configured")
+	}
+
+	// Convert to authenticated URL
+	authURL := e.githubClient.AuthURL(currentURL)
+	if authURL == currentURL {
+		// No change needed (might be SSH or already authenticated)
+		return nil
+	}
+
+	// Set the authenticated URL
+	cmd = exec.Command("git", "remote", "set-url", "origin", authURL)
+	cmd.Dir = e.WorkDir()
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to set remote URL: %s: %w", string(output), err)
+	}
+
+	return nil
 }
 
 func (e *ToolExecutor) executeGitHubCreateRepo(ctx context.Context, input map[string]any) ToolResult {
