@@ -87,37 +87,57 @@ func main() {
 			fmt.Printf("Toolbelt loaded: %d/%d services configured\n", configured, len(status))
 		}
 	} else {
-		// Try loading from secrets.json (created during setup)
-		secretsPath := filepath.Join(dataDir, "secrets.json")
-		if _, err := os.Stat(secretsPath); err == nil {
-			fmt.Printf("Loading toolbelt from secrets: %s\n", secretsPath)
-			var err error
-			tb, err = toolbelt.NewFromSecrets(secretsPath)
+		// Try loading from database first (primary storage after onboarding)
+		secrets, err := database.GetAllSecrets()
+		if err == nil && len(secrets) > 0 {
+			fmt.Printf("Loading toolbelt from database (%d secrets)\n", len(secrets))
+			config := &toolbelt.Config{}
+			if token := secrets[db.SecretKeyGitHubToken]; token != "" {
+				config.GitHub = &toolbelt.GitHubConfig{Token: token}
+			}
+			if key := secrets[db.SecretKeyAnthropicKey]; key != "" {
+				config.Anthropic = &toolbelt.AnthropicConfig{APIKey: key}
+			}
+			tb, err = toolbelt.New(config)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: Failed to load secrets: %v\n", err)
+				fmt.Fprintf(os.Stderr, "Warning: Failed to create toolbelt from database secrets: %v\n", err)
+			}
+		}
+
+		// Fall back to secrets.json if database had no secrets (legacy/migration path)
+		if tb == nil {
+			secretsPath := filepath.Join(dataDir, "secrets.json")
+			if _, err := os.Stat(secretsPath); err == nil {
+				fmt.Printf("Loading toolbelt from secrets file: %s\n", secretsPath)
+				tb, err = toolbelt.NewFromSecrets(secretsPath)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "Warning: Failed to load secrets file: %v\n", err)
+				}
 			} else {
-				status := tb.Status()
-				configured := 0
-				for _, s := range status {
-					if s.HasToken {
-						configured++
-					}
-				}
-				fmt.Printf("Toolbelt loaded from secrets: %d/%d services configured\n", configured, len(status))
-				// Log specific client status for debugging
-				if tb.Anthropic != nil {
-					fmt.Println("  - Anthropic client: INITIALIZED")
-				} else {
-					fmt.Println("  - Anthropic client: NOT configured")
-				}
-				if tb.GitHub != nil {
-					fmt.Println("  - GitHub client: INITIALIZED")
-				} else {
-					fmt.Println("  - GitHub client: NOT configured")
+				fmt.Println("No secrets configured yet (database empty, no secrets.json)")
+			}
+		}
+
+		// Log what we loaded
+		if tb != nil {
+			status := tb.Status()
+			configured := 0
+			for _, s := range status {
+				if s.HasToken {
+					configured++
 				}
 			}
-		} else {
-			fmt.Printf("No secrets.json found at %s\n", secretsPath)
+			fmt.Printf("Toolbelt loaded: %d/%d services configured\n", configured, len(status))
+			if tb.Anthropic != nil {
+				fmt.Println("  - Anthropic client: INITIALIZED")
+			} else {
+				fmt.Println("  - Anthropic client: NOT configured")
+			}
+			if tb.GitHub != nil {
+				fmt.Println("  - GitHub client: INITIALIZED")
+			} else {
+				fmt.Println("  - GitHub client: NOT configured")
+			}
 		}
 	}
 
