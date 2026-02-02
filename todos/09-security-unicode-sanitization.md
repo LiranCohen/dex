@@ -381,9 +381,9 @@ dex security scan .
 - [x] Unicode tags (U+E0000-U+E007F) removed
 - [x] Bidirectional control characters removed
 - [x] Zero-width characters removed
-- [ ] Sanitization at task creation (API layer)
-- [ ] Sanitization at hints loading (not yet implemented)
-- [ ] Sanitization at memory storage (not yet implemented)
+- [x] Sanitization at task creation (API layer) - `server.go:handleCreateTask`, `handleCreateObjective`, `handleCreateObjectivesBatch`
+- [x] Sanitization at hints loading - `hints/loader.go:Load()` calls `security.SanitizeForPrompt`
+- [x] Sanitization at memory storage (API layer) - `memory_handlers.go:handleCreateMemory`, `handleUpdateMemory`
 - [x] Sanitization at file reading (`internal/tools/executor.go`)
 - [x] Sanitization at checkpoint restoration (`internal/session/ralph.go`)
 - [ ] Logging of sanitization events

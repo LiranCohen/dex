@@ -29,6 +29,8 @@ type ToolExecutor struct {
 	repo         string
 	// Callback when a GitHub repo is created - allows updating project DB record
 	onRepoCreated func(owner, repo string)
+	// Callback when quality gate runs - allows posting issue comments
+	onQualityGateResult func(result *GateResult)
 	// Quality gate for task completion validation
 	qualityGate *QualityGate
 	// Activity recorder for logging quality gate attempts
@@ -59,6 +61,12 @@ func (e *ToolExecutor) SetQualityGate(qg *QualityGate) {
 // SetActivityRecorder sets the activity recorder for quality gate logging
 func (e *ToolExecutor) SetActivityRecorder(activity *ActivityRecorder) {
 	e.activity = activity
+}
+
+// SetOnQualityGateResult sets the callback for quality gate results
+// This allows posting issue comments when quality gates are run
+func (e *ToolExecutor) SetOnQualityGateResult(callback func(result *GateResult)) {
+	e.onQualityGateResult = callback
 }
 
 // Execute runs a tool with the given input and returns the result
@@ -541,6 +549,11 @@ func (e *ToolExecutor) executeTaskComplete(ctx context.Context, input map[string
 	}
 
 	result := e.qualityGate.Validate(ctx, opts)
+
+	// Invoke callback to allow posting issue comments
+	if e.onQualityGateResult != nil {
+		e.onQualityGateResult(result)
+	}
 
 	return ToolResult{
 		Output:  result.Feedback,

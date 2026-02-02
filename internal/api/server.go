@@ -25,6 +25,7 @@ import (
 	"github.com/lirancohen/dex/internal/orchestrator"
 	"github.com/lirancohen/dex/internal/planning"
 	"github.com/lirancohen/dex/internal/quest"
+	"github.com/lirancohen/dex/internal/security"
 	"github.com/lirancohen/dex/internal/session"
 	"github.com/lirancohen/dex/internal/task"
 	"github.com/lirancohen/dex/internal/toolbelt"
@@ -627,14 +628,18 @@ func (s *Server) handleCreateTask(c echo.Context) error {
 		projectID = project.ID
 	}
 
-	t, err := s.taskService.Create(projectID, req.Title, req.Type, req.Priority)
+	// Sanitize user input to prevent unicode-based prompt injection
+	sanitizedTitle := security.SanitizeForPrompt(req.Title)
+	sanitizedDescription := security.SanitizeForPrompt(req.Description)
+
+	t, err := s.taskService.Create(projectID, sanitizedTitle, req.Type, req.Priority)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 
 	// Update description if provided
-	if req.Description != "" {
-		updates := task.TaskUpdates{Description: &req.Description}
+	if sanitizedDescription != "" {
+		updates := task.TaskUpdates{Description: &sanitizedDescription}
 		t, err = s.taskService.Update(t.ID, updates)
 		if err != nil {
 			return echo.NewHTTPError(http.StatusInternalServerError, "failed to set description")
@@ -644,9 +649,9 @@ func (s *Server) handleCreateTask(c echo.Context) error {
 	// Start planning phase if planner is available and skip_planning is not set
 	if s.planner != nil && !skipPlanning {
 		// Get the prompt for planning (use description if available, otherwise title)
-		planningPrompt := req.Description
+		planningPrompt := sanitizedDescription
 		if planningPrompt == "" {
-			planningPrompt = req.Title
+			planningPrompt = sanitizedTitle
 		}
 
 		// Transition task to planning status
@@ -2964,11 +2969,15 @@ func (s *Server) handleCreateObjective(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "title is required")
 	}
 
+	// Sanitize user input to prevent unicode-based prompt injection
+	sanitizedTitle := security.SanitizeForPrompt(req.Title)
+	sanitizedDescription := security.SanitizeForPrompt(req.Description)
+
 	// Create draft from request
 	draft := quest.ObjectiveDraft{
 		DraftID:     req.DraftID,
-		Title:       req.Title,
-		Description: req.Description,
+		Title:       sanitizedTitle,
+		Description: sanitizedDescription,
 		Hat:         req.Hat,
 		Checklist: quest.Checklist{
 			MustHave: req.MustHave,
@@ -3008,7 +3017,7 @@ func (s *Server) handleCreateObjective(c echo.Context) error {
 	go s.syncObjectiveToGitHubIssue(createdTask.ID)
 
 	// Add a message to the quest history indicating the objective was accepted
-	acceptMessage := fmt.Sprintf("✓ Accepted objective: **%s**", req.Title)
+	acceptMessage := fmt.Sprintf("✓ Accepted objective: **%s**", sanitizedTitle)
 	if msg, err := s.db.CreateQuestMessage(questID, "user", acceptMessage); err != nil {
 		fmt.Printf("warning: failed to add accept message to quest: %v\n", err)
 	} else if s.hub != nil {
@@ -3095,11 +3104,15 @@ func (s *Server) handleCreateObjectivesBatch(c echo.Context) error {
 			return echo.NewHTTPError(http.StatusBadRequest, "title is required for all drafts")
 		}
 
+		// Sanitize user input to prevent unicode-based prompt injection
+		sanitizedTitle := security.SanitizeForPrompt(draft.Title)
+		sanitizedDescription := security.SanitizeForPrompt(draft.Description)
+
 		// Build the draft object
 		questDraft := quest.ObjectiveDraft{
 			DraftID:             draft.DraftID,
-			Title:               draft.Title,
-			Description:         draft.Description,
+			Title:               sanitizedTitle,
+			Description:         sanitizedDescription,
 			Hat:                 draft.Hat,
 			Checklist:           quest.Checklist{MustHave: draft.MustHave, Optional: draft.Optional},
 			AutoStart:           draft.AutoStart,
@@ -3110,7 +3123,7 @@ func (s *Server) handleCreateObjectivesBatch(c echo.Context) error {
 		// Create the task (initially as ready - we'll update to blocked later if needed)
 		task, err := s.questHandler.CreateObjectiveFromDraft(c.Request().Context(), questID, questDraft, draft.SelectedOptional)
 		if err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("failed to create objective '%s': %v", draft.Title, err))
+			return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("failed to create objective '%s': %v", sanitizedTitle, err))
 		}
 
 		draftToTaskID[draft.DraftID] = task.ID

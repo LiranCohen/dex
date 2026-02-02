@@ -168,6 +168,69 @@ func (r *RalphLoop) postIssueComment(ctx context.Context, comment string) {
 	}
 }
 
+// postQualityGateComment posts a comment about quality gate results to the linked GitHub issue
+func (r *RalphLoop) postQualityGateComment(ctx context.Context, result *GateResult) {
+	if r.issueCommenter == nil || result == nil {
+		return
+	}
+
+	// Convert GateResult to github.QualityGateResult
+	qgResult := &github.QualityGateResult{
+		Passed: result.Passed,
+	}
+
+	if result.Tests != nil {
+		qgResult.Tests = &github.CheckResultSummary{
+			Passed:  result.Tests.Passed,
+			Skipped: result.Tests.Skipped,
+		}
+		// Extract failure details if any
+		if !result.Tests.Passed && !result.Tests.Skipped && result.Tests.Output != "" {
+			qgResult.Tests.Details = extractTestFailureDetails(result.Tests.Output)
+		}
+	}
+
+	if result.Lint != nil {
+		qgResult.Lint = &github.CheckResultSummary{
+			Passed:  result.Lint.Passed,
+			Skipped: result.Lint.Skipped,
+		}
+	}
+
+	if result.Build != nil {
+		qgResult.Build = &github.CheckResultSummary{
+			Passed:  result.Build.Passed,
+			Skipped: result.Build.Skipped,
+		}
+	}
+
+	commentData := r.buildCommentData(ctx)
+	commentData.QualityResult = qgResult
+
+	comment := github.BuildQualityGateComment(commentData)
+	r.postIssueComment(ctx, comment)
+}
+
+// extractTestFailureDetails extracts individual test failure messages from test output
+func extractTestFailureDetails(output string) []string {
+	var details []string
+	lines := strings.Split(output, "\n")
+	for _, line := range lines {
+		// Look for FAIL or --- FAIL lines in Go test output
+		if strings.Contains(line, "--- FAIL:") || strings.HasPrefix(line, "FAIL") {
+			line = strings.TrimSpace(line)
+			if line != "" && line != "FAIL" {
+				details = append(details, line)
+			}
+		}
+	}
+	// Limit to first 5 failures
+	if len(details) > 5 {
+		details = details[:5]
+	}
+	return details
+}
+
 // SetModel sets the AI model to use for this loop and captures the rates
 // model should be "sonnet" or "opus"
 func (r *RalphLoop) SetModel(model string) {
@@ -230,6 +293,13 @@ func (r *RalphLoop) Run(ctx context.Context) error {
 
 	// Initialize issue commenter for GitHub issue sync
 	task, _ := r.db.GetTaskByID(r.session.TaskID)
+
+	// Set up quality gate result callback for issue comments (after task is loaded)
+	if r.executor != nil {
+		r.executor.SetOnQualityGateResult(func(result *GateResult) {
+			r.postQualityGateComment(ctx, result)
+		})
+	}
 	if task != nil {
 		r.initIssueCommenter(task)
 	}

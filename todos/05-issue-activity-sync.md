@@ -451,7 +451,7 @@ The CommentBuilder can share code with HandoffSummary generation - both need:
 - [x] Rate limiting prevents comment spam (min 3s interval)
 - [x] Comment posted when work starts
 - [x] Comment posted on significant hat transitions (debounced)
-- [ ] Comment posted on quality gate pass/fail
+- [x] Comment posted on quality gate pass/fail - `executor.go:onQualityGateResult` callback, `ralph.go:postQualityGateComment`
 - [x] Comment posted when task completes (with PR link)
 - [x] Comments are concise and well-formatted
 - [x] Failures to post don't break the session

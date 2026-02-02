@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/lirancohen/dex/internal/db"
+	"github.com/lirancohen/dex/internal/security"
 )
 
 // MemoryRequest is the request body for creating/updating memories
@@ -128,12 +129,16 @@ func (s *Server) handleCreateMemory(c echo.Context) error {
 		})
 	}
 
+	// Sanitize user input to prevent unicode-based prompt injection
+	sanitizedTitle := security.SanitizeForPrompt(req.Title)
+	sanitizedContent := security.SanitizeForPrompt(req.Content)
+
 	memory := &db.Memory{
 		ID:         uuid.New().String(),
 		ProjectID:  projectID,
 		Type:       db.MemoryType(req.Type),
-		Title:      req.Title,
-		Content:    req.Content,
+		Title:      sanitizedTitle,
+		Content:    sanitizedContent,
 		Tags:       req.Tags,
 		FileRefs:   req.FileRefs,
 		Confidence: db.InitialConfidenceManual,
@@ -193,12 +198,12 @@ func (s *Server) handleUpdateMemory(c echo.Context) error {
 		})
 	}
 
-	// Update fields if provided
+	// Update fields if provided (sanitize user input)
 	if req.Title != "" {
-		memory.Title = req.Title
+		memory.Title = security.SanitizeForPrompt(req.Title)
 	}
 	if req.Content != "" {
-		memory.Content = req.Content
+		memory.Content = security.SanitizeForPrompt(req.Content)
 	}
 	if req.Type != "" && db.IsValidMemoryType(req.Type) {
 		memory.Type = db.MemoryType(req.Type)
