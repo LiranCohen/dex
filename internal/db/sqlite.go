@@ -62,6 +62,8 @@ func (db *DB) Migrate() error {
 		migrationQuestMessages,
 		migrationQuestTemplates,
 		migrationGitHubApp,
+		migrationOnboardingProgress,
+		migrationSecrets,
 	}
 
 	for i, migration := range migrations {
@@ -386,4 +388,29 @@ CREATE TABLE IF NOT EXISTS github_installations (
 );
 
 CREATE INDEX IF NOT EXISTS idx_github_installations_login ON github_installations(login);
+`
+
+const migrationOnboardingProgress = `
+-- Onboarding progress tracking (singleton - only one row)
+CREATE TABLE IF NOT EXISTS onboarding_progress (
+	id INTEGER PRIMARY KEY CHECK (id = 1),
+	current_step TEXT NOT NULL DEFAULT 'welcome',
+	passkey_completed_at DATETIME,
+	github_org_name TEXT,
+	github_app_completed_at DATETIME,
+	github_install_completed_at DATETIME,
+	anthropic_completed_at DATETIME,
+	completed_at DATETIME,
+	created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+	updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+`
+
+const migrationSecrets = `
+-- Secrets storage (replaces file-based secrets.json)
+CREATE TABLE IF NOT EXISTS secrets (
+	key TEXT PRIMARY KEY,
+	value TEXT NOT NULL,
+	created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
 `

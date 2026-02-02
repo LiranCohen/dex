@@ -3,7 +3,7 @@ import { Routes, Route, Navigate, useNavigate, useParams, Link } from 'react-rou
 import { useAuthStore } from './stores/auth';
 import { api, fetchApprovals, approveApproval, rejectApproval, fetchQuests, createQuest, fetchQuest, fetchQuestTasks, sendQuestMessage, completeQuest, reopenQuest, deleteQuest, createObjective, updateQuestModel, fetchPreflightCheck } from './lib/api';
 import { useWebSocket } from './hooks/useWebSocket';
-import { Onboarding } from './components/Onboarding';
+import { OnboardingFlow } from './components/onboarding';
 import { ActivityFeed } from './components/ActivityFeed';
 import { PlanningPanel } from './components/PlanningPanel';
 import { ObjectiveDraftCard } from './components/ObjectiveDraftCard';
@@ -2553,7 +2553,7 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   }
 
   if (showOnboarding) {
-    return <Onboarding onComplete={handleOnboardingComplete} />;
+    return <OnboardingFlow onComplete={handleOnboardingComplete} />;
   }
 
   return <>{children}</>;

@@ -16,6 +16,7 @@ import (
 	"github.com/labstack/echo/v4"
 	echomw "github.com/labstack/echo/v4/middleware"
 	"github.com/lirancohen/dex/internal/api/middleware"
+	"github.com/lirancohen/dex/internal/api/setup"
 	"github.com/lirancohen/dex/internal/api/websocket"
 	"github.com/lirancohen/dex/internal/auth"
 	"github.com/lirancohen/dex/internal/db"
@@ -46,6 +47,7 @@ type Server struct {
 	planner        *planning.Planner
 	questHandler   *quest.Handler
 	githubApp      *github.AppManager
+	setupHandler   *setup.Handler
 	hub            *websocket.Hub
 	addr           string
 	certFile       string
@@ -151,6 +153,36 @@ func NewServer(database *db.DB, cfg Config) *Server {
 		fmt.Printf("GitHub App not initialized at startup: %v\n", err)
 	}
 
+	// Initialize setup handler
+	s.setupHandler = setup.NewHandler(setup.HandlerConfig{
+		DB:         database,
+		GetDataDir: s.getDataDir,
+		GetToolbelt: func() *toolbelt.Toolbelt {
+			s.toolbeltMu.RLock()
+			defer s.toolbeltMu.RUnlock()
+			return s.toolbelt
+		},
+		ReloadToolbelt: s.ReloadToolbelt,
+		GetGitHubClient: func(ctx context.Context, login string) (*toolbelt.GitHubClient, error) {
+			return s.GetToolbeltGitHubClient(ctx, login)
+		},
+		HasGitHubApp:  s.db.HasGitHubApp,
+		InitGitHubApp: s.initGitHubApp,
+		GetGitService: func() setup.GitService {
+			return s.gitService
+		},
+		UpdateDefaultProject: func(workspacePath string) error {
+			project, err := s.db.GetOrCreateDefaultProject()
+			if err != nil {
+				return err
+			}
+			if project.RepoPath == "." {
+				return s.db.UpdateProject(project.ID, "Dex Workspace", workspacePath, "main")
+			}
+			return nil
+		},
+	})
+
 	// Register routes
 	s.registerRoutes()
 
@@ -185,11 +217,23 @@ func (s *Server) registerRoutes() {
 	v1.POST("/auth/passkey/login/finish", s.handlePasskeyLoginFinish)
 
 	// Setup endpoints (for onboarding flow - public during initial setup)
-	v1.GET("/setup/status", s.handleSetupStatus)
-	v1.POST("/setup/github-token", s.handleSetupGitHubToken)
-	v1.POST("/setup/anthropic-key", s.handleSetupAnthropicKey)
-	v1.POST("/setup/complete", s.handleSetupComplete)
-	v1.POST("/setup/workspace", s.handleWorkspaceSetup)
+	v1.GET("/setup/status", s.setupHandler.HandleStatus)
+	v1.POST("/setup/github-token", s.setupHandler.HandleSetGitHubToken) // Legacy
+	v1.POST("/setup/anthropic-key", s.setupHandler.HandleSetAnthropicKey)
+	v1.POST("/setup/complete", s.setupHandler.HandleComplete)
+	v1.POST("/setup/workspace", s.setupHandler.HandleWorkspaceSetup)
+
+	// New onboarding step endpoints
+	v1.POST("/setup/steps/welcome", s.setupHandler.HandleAdvanceWelcome)
+	v1.POST("/setup/steps/passkey", s.setupHandler.HandleCompletePasskey)
+	v1.POST("/setup/steps/github-org", s.setupHandler.HandleSetGitHubOrg)
+	v1.POST("/setup/steps/github-app", s.setupHandler.HandleCompleteGitHubApp)
+	v1.POST("/setup/steps/github-install", s.setupHandler.HandleCompleteGitHubInstall)
+	v1.POST("/setup/steps/anthropic", s.setupHandler.HandleSetAnthropicKey)
+
+	// Validation endpoints
+	v1.POST("/setup/validate/github-org", s.setupHandler.HandleValidateGitHubOrg)
+	v1.POST("/setup/validate/anthropic-key", s.setupHandler.HandleValidateAnthropicKey)
 
 	// GitHub App endpoints (callbacks must be public for GitHub redirects)
 	v1.GET("/setup/github/app/status", s.handleGitHubAppStatus)
@@ -1741,22 +1785,50 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	return s.echo.Shutdown(ctx)
 }
 
+// getDataDir returns the data directory path
+func (s *Server) getDataDir() string {
+	if dir := os.Getenv("DEX_DATA_DIR"); dir != "" {
+		return dir
+	}
+	return "/opt/dex"
+}
+
 // GetHub returns the WebSocket hub for broadcasting events
 func (s *Server) GetHub() *websocket.Hub {
 	return s.hub
 }
 
-// ReloadToolbelt reloads the toolbelt from secrets.json and updates the session manager
+// ReloadToolbelt reloads the toolbelt from database secrets and updates the session manager
 // This is called after setup completes when API keys are first entered
 func (s *Server) ReloadToolbelt() error {
+	// First try to migrate any existing secrets from file to database
 	dataDir := s.getDataDir()
-	secretsPath := fmt.Sprintf("%s/secrets.json", dataDir)
+	if count, err := s.db.MigrateSecretsFromFile(dataDir); err != nil {
+		fmt.Printf("ReloadToolbelt: failed to migrate secrets from file: %v\n", err)
+	} else if count > 0 {
+		fmt.Printf("ReloadToolbelt: migrated %d secrets from file to database\n", count)
+	}
 
-	fmt.Printf("ReloadToolbelt: loading from %s\n", secretsPath)
-
-	tb, err := toolbelt.NewFromSecrets(secretsPath)
+	// Load secrets from database
+	secrets, err := s.db.GetAllSecrets()
 	if err != nil {
-		return fmt.Errorf("failed to load toolbelt from secrets: %w", err)
+		return fmt.Errorf("failed to load secrets from database: %w", err)
+	}
+
+	fmt.Printf("ReloadToolbelt: loading from database (%d secrets)\n", len(secrets))
+
+	// Build toolbelt config from secrets
+	config := &toolbelt.Config{}
+	if token := secrets[db.SecretKeyGitHubToken]; token != "" {
+		config.GitHub = &toolbelt.GitHubConfig{Token: token}
+	}
+	if key := secrets[db.SecretKeyAnthropicKey]; key != "" {
+		config.Anthropic = &toolbelt.AnthropicConfig{APIKey: key}
+	}
+
+	tb, err := toolbelt.New(config)
+	if err != nil {
+		return fmt.Errorf("failed to create toolbelt: %w", err)
 	}
 
 	s.toolbeltMu.Lock()

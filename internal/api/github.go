@@ -9,8 +9,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
-	"path/filepath"
 	"time"
 
 	gogithub "github.com/google/go-github/v68/github"
@@ -187,18 +185,11 @@ func (s *Server) handleGitHubAppStatus(c echo.Context) error {
 		}
 	}
 
-	// Check for legacy token
-	dataDir := s.getDataDir()
-	secretsFile := filepath.Join(dataDir, "secrets.json")
-	if data, err := os.ReadFile(secretsFile); err == nil {
-		var secrets map[string]string
-		if json.Unmarshal(data, &secrets) == nil {
-			if secrets["github_token"] != "" {
-				status.LegacyTokenSet = true
-				if status.AuthMethod == "none" {
-					status.AuthMethod = "token"
-				}
-			}
+	// Check for legacy token in database
+	if s.db.HasSecret(db.SecretKeyGitHubToken) {
+		status.LegacyTokenSet = true
+		if status.AuthMethod == "none" {
+			status.AuthMethod = "token"
 		}
 	}
 
