@@ -17,6 +17,11 @@ interface SetupStatus {
   github_app_set: boolean;
   anthropic_key_set: boolean;
   setup_complete: boolean;
+  workspace_ready: boolean;
+  workspace_path?: string;
+  workspace_github_ready: boolean;
+  workspace_github_url?: string;
+  workspace_error?: string;
 }
 
 // WebAuthn helper to convert base64url to ArrayBuffer
@@ -396,6 +401,8 @@ function DashboardPage() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [setupStatus, setSetupStatus] = useState<SetupStatus | null>(null);
+  const [workspaceRetrying, setWorkspaceRetrying] = useState(false);
 
   const logout = useAuthStore((state) => state.logout);
   const navigate = useNavigate();
@@ -408,13 +415,15 @@ function DashboardPage() {
       setError(null);
 
       try {
-        const [status, tasksData] = await Promise.all([
+        const [status, tasksData, setup] = await Promise.all([
           api.get<SystemStatus>('/system/status'),
           api.get<TasksResponse>('/tasks'),
+          api.get<SetupStatus>('/setup/status'),
         ]);
 
         setSystemStatus(status);
         setTasks(tasksData.tasks || []);
+        setSetupStatus(setup);
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to fetch data';
         setError(message);
@@ -425,6 +434,32 @@ function DashboardPage() {
 
     fetchData();
   }, []);
+
+  // Retry workspace setup
+  const handleRetryWorkspace = async () => {
+    setWorkspaceRetrying(true);
+    try {
+      const result = await api.post<{
+        workspace_ready: boolean;
+        workspace_github_ready: boolean;
+        workspace_github_url?: string;
+        workspace_error?: string;
+      }>('/setup/workspace', {});
+
+      // Refresh setup status
+      const setup = await api.get<SetupStatus>('/setup/status');
+      setSetupStatus(setup);
+
+      if (!result.workspace_github_ready && result.workspace_error) {
+        setError(result.workspace_error);
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to setup workspace';
+      setError(message);
+    } finally {
+      setWorkspaceRetrying(false);
+    }
+  };
 
   // Handle WebSocket events for real-time updates
   const handleWebSocketEvent = useCallback((event: WebSocketEvent) => {
@@ -498,6 +533,42 @@ function DashboardPage() {
         {error && (
           <div className="bg-red-900/50 border border-red-500 rounded-lg p-3 mb-4">
             <p className="text-red-400 text-sm">{error}</p>
+          </div>
+        )}
+
+        {/* Workspace Warning */}
+        {setupStatus && setupStatus.setup_complete && !setupStatus.workspace_github_ready && (
+          <div className="bg-yellow-900/50 border border-yellow-600 rounded-lg p-4 mb-4">
+            <div className="flex items-start gap-3">
+              <svg className="w-5 h-5 text-yellow-500 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+              <div className="flex-1">
+                <h3 className="text-yellow-400 font-medium">Workspace Not Connected to GitHub</h3>
+                <p className="text-yellow-300/80 text-sm mt-1">
+                  Your local workspace exists but isn't backed up to GitHub.
+                  {setupStatus.workspace_error && (
+                    <span className="block mt-1 text-yellow-400/70">
+                      Error: {setupStatus.workspace_error}
+                    </span>
+                  )}
+                </p>
+                <button
+                  onClick={handleRetryWorkspace}
+                  disabled={workspaceRetrying}
+                  className="mt-3 bg-yellow-600 hover:bg-yellow-700 disabled:bg-yellow-800 disabled:cursor-not-allowed text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors inline-flex items-center gap-2"
+                >
+                  {workspaceRetrying ? (
+                    <>
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
+                      Setting up...
+                    </>
+                  ) : (
+                    'Retry GitHub Setup'
+                  )}
+                </button>
+              </div>
+            </div>
           </div>
         )}
 

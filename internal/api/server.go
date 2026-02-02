@@ -189,6 +189,7 @@ func (s *Server) registerRoutes() {
 	v1.POST("/setup/github-token", s.handleSetupGitHubToken)
 	v1.POST("/setup/anthropic-key", s.handleSetupAnthropicKey)
 	v1.POST("/setup/complete", s.handleSetupComplete)
+	v1.POST("/setup/workspace", s.handleWorkspaceSetup)
 
 	// GitHub App endpoints (callbacks must be public for GitHub redirects)
 	v1.GET("/setup/github/app/status", s.handleGitHubAppStatus)

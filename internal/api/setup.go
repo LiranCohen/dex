@@ -28,8 +28,15 @@ type SetupStatus struct {
 	SetupComplete     bool   `json:"setup_complete"`
 	AccessMethod      string `json:"access_method,omitempty"` // "tailscale" or "cloudflare"
 	PermanentURL      string `json:"permanent_url,omitempty"`
-	WorkspaceReady    bool   `json:"workspace_ready"`
-	WorkspacePath     string `json:"workspace_path,omitempty"`
+
+	// Workspace status (local git repo)
+	WorkspaceReady bool   `json:"workspace_ready"`
+	WorkspacePath  string `json:"workspace_path,omitempty"`
+
+	// GitHub workspace status (remote repo)
+	WorkspaceGitHubReady bool   `json:"workspace_github_ready"`
+	WorkspaceGitHubURL   string `json:"workspace_github_url,omitempty"`
+	WorkspaceError       string `json:"workspace_error,omitempty"`
 }
 
 // SetupConfig holds the setup configuration file paths
@@ -114,6 +121,17 @@ func (s *Server) handleSetupStatus(c echo.Context) error {
 	if _, err := os.Stat(filepath.Join(workspacePath, ".git")); err == nil {
 		status.WorkspaceReady = true
 		status.WorkspacePath = workspacePath
+
+		// Check if GitHub remote is configured
+		cmd := exec.Command("git", "remote", "get-url", "origin")
+		cmd.Dir = workspacePath
+		if output, err := cmd.Output(); err == nil {
+			remoteURL := strings.TrimSpace(string(output))
+			if remoteURL != "" {
+				status.WorkspaceGitHubReady = true
+				status.WorkspaceGitHubURL = remoteURL
+			}
+		}
 	}
 
 	return c.JSON(http.StatusOK, status)
@@ -456,4 +474,82 @@ func validateAnthropicKey(ctx context.Context, key string) error {
 	}
 
 	return nil
+}
+
+// handleWorkspaceSetup creates or repairs the dex-workspace repository
+func (s *Server) handleWorkspaceSetup(c echo.Context) error {
+	dataDir := s.getDataDir()
+	workspacePath := filepath.Join(dataDir, "repos", "dex-workspace")
+
+	// Ensure local repo exists
+	if _, err := os.Stat(filepath.Join(workspacePath, ".git")); os.IsNotExist(err) {
+		// Create repos directory
+		reposDir := filepath.Join(dataDir, "repos")
+		if err := os.MkdirAll(reposDir, 0755); err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("failed to create repos directory: %v", err))
+		}
+
+		// Initialize workspace repo
+		if err := initWorkspaceRepo(workspacePath); err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("failed to create local workspace: %v", err))
+		}
+	}
+
+	// Try to set up GitHub remote
+	var githubClient *toolbelt.GitHubClient
+	var githubError string
+
+	// Check for GitHub App first
+	hasGitHubApp := s.db.HasGitHubApp()
+	if hasGitHubApp {
+		if err := s.ensureGitHubAppInitialized(); err != nil {
+			githubError = fmt.Sprintf("GitHub App initialization failed: %v", err)
+		} else {
+			client, err := s.GetToolbeltGitHubClient(c.Request().Context(), "")
+			if err != nil {
+				githubError = fmt.Sprintf("failed to get GitHub client: %v", err)
+			} else {
+				githubClient = client
+			}
+		}
+	} else {
+		// Fall back to legacy PAT
+		s.toolbeltMu.RLock()
+		if s.toolbelt != nil && s.toolbelt.GitHub != nil {
+			githubClient = s.toolbelt.GitHub
+		}
+		s.toolbeltMu.RUnlock()
+
+		if githubClient == nil {
+			githubError = "no GitHub authentication configured"
+		}
+	}
+
+	// Create GitHub workspace if we have a client
+	var githubURL string
+	if githubClient != nil {
+		ws := workspace.NewService(githubClient, workspacePath)
+		if err := ws.EnsureRemoteExists(c.Request().Context()); err != nil {
+			githubError = fmt.Sprintf("failed to create GitHub workspace: %v", err)
+		} else {
+			githubURL = ws.GetRemoteURL()
+		}
+	}
+
+	// Return status
+	result := map[string]any{
+		"workspace_path":         workspacePath,
+		"workspace_ready":        true,
+		"workspace_github_ready": githubURL != "",
+	}
+
+	if githubURL != "" {
+		result["workspace_github_url"] = githubURL
+	}
+
+	if githubError != "" {
+		result["workspace_error"] = githubError
+	}
+
+	return c.JSON(http.StatusOK, result)
 }
