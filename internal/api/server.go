@@ -290,6 +290,7 @@ func (s *Server) registerRoutes() {
 
 	// Create handlers
 	authHandler := authhandlers.New(s.deps)
+	passkeyHandler := authhandlers.NewPasskeyHandler(s.deps)
 	toolbeltHandler := toolbelthandlers.New(s.deps)
 	tasksHandler := tasks.New(s.deps)
 	projectsHandler := projects.New(s.deps)
@@ -315,6 +316,7 @@ func (s *Server) registerRoutes() {
 	// Register public routes
 	toolbeltHandler.RegisterPublicRoutes(v1)
 	authHandler.RegisterRoutes(v1)
+	passkeyHandler.RegisterRoutes(v1)
 	githubHandler.RegisterRoutes(v1)
 
 	// Setup endpoints (for onboarding flow - public during initial setup)

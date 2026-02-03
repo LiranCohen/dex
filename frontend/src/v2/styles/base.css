@@ -1,28 +1,25 @@
 /* Base Styles - Dex v2 */
+/* NOTE: All base styles are scoped to .v2-root to avoid affecting v1 */
 
 @import './tokens.css';
 
-/* Reset */
-*, *::before, *::after {
+/* Reset - scoped to v2 only */
+.v2-root *, .v2-root *::before, .v2-root *::after {
   box-sizing: border-box;
   margin: 0;
   padding: 0;
 }
 
-/* Base */
-html {
-  font-size: 16px;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-}
-
-body {
+/* Base - scoped to v2 */
+.v2-root {
   font-family: var(--font-sans);
   font-size: var(--text-base);
   font-weight: var(--font-normal);
   line-height: 1.5;
   color: var(--text-primary);
   background-color: var(--bg-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 /* Subtle scanline overlay */
@@ -44,54 +41,54 @@ body {
   z-index: 9999;
 }
 
-/* Typography */
-h1, h2, h3, h4, h5, h6 {
+/* Typography - scoped to v2 */
+.v2-root h1, .v2-root h2, .v2-root h3, .v2-root h4, .v2-root h5, .v2-root h6 {
   font-weight: var(--font-medium);
   line-height: 1.2;
 }
 
-/* Monospace elements */
-code, pre, .mono {
+/* Monospace elements - scoped to v2 */
+.v2-root code, .v2-root pre, .v2-root .mono {
   font-family: var(--font-mono);
 }
 
-/* Links */
-a {
+/* Links - scoped to v2 */
+.v2-root a {
   color: var(--text-primary);
   text-decoration: none;
 }
 
-a:hover {
+.v2-root a:hover {
   color: var(--accent-primary);
 }
 
-/* Focus styles */
-:focus-visible {
+/* Focus styles - scoped to v2 */
+.v2-root :focus-visible {
   outline: 1px solid var(--accent-primary);
   outline-offset: 2px;
 }
 
-/* Selection */
-::selection {
+/* Selection - scoped to v2 */
+.v2-root ::selection {
   background-color: var(--accent-muted);
   color: var(--text-primary);
 }
 
-/* Scrollbar */
-::-webkit-scrollbar {
+/* Scrollbar - scoped to v2 */
+.v2-root ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 
-::-webkit-scrollbar-track {
+.v2-root ::-webkit-scrollbar-track {
   background: var(--bg-primary);
 }
 
-::-webkit-scrollbar-thumb {
+.v2-root ::-webkit-scrollbar-thumb {
   background: var(--border-emphasis);
 }
 
-::-webkit-scrollbar-thumb:hover {
+.v2-root ::-webkit-scrollbar-thumb:hover {
   background: var(--text-tertiary);
 }
 
