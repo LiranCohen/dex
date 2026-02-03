@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Link } from 'react-router-dom';
-import { Header, KeyboardShortcuts, SkeletonList, useToast } from '../components';
+import { Header, KeyboardShortcuts, SkeletonList, Button, useToast } from '../components';
 import { fetchApprovals, approveApproval, rejectApproval } from '../../lib/api';
 import { useWebSocket } from '../../hooks/useWebSocket';
 import { useKeyboardNavigation } from '../hooks/useKeyboardNavigation';
@@ -198,22 +198,22 @@ export function Inbox() {
                   <div className="v2-inbox-card__footer">
                     <span className="v2-timestamp">{formatTime(approval.created_at)}</span>
                     <div className="v2-inbox-card__actions">
-                      <button
-                        type="button"
-                        className="v2-btn v2-btn--ghost"
+                      <Button
+                        variant="ghost"
                         onClick={() => handleReject(approval.id)}
+                        loading={isProcessing}
                         disabled={isProcessing}
                       >
                         Reject
-                      </button>
-                      <button
-                        type="button"
-                        className="v2-btn v2-btn--primary"
+                      </Button>
+                      <Button
+                        variant="primary"
                         onClick={() => handleApprove(approval.id)}
+                        loading={isProcessing}
                         disabled={isProcessing}
                       >
                         Approve
-                      </button>
+                      </Button>
                     </div>
                   </div>
                 </div>

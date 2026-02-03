@@ -1,6 +1,7 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { Header, StatusBar, SearchInput, SkeletonList, useToast } from '../components';
+import type { SearchInputRef } from '../components/SearchInput';
 import { api, fetchApprovals } from '../../lib/api';
 import { useWebSocket } from '../../hooks/useWebSocket';
 import type { Task, Approval, WebSocketEvent } from '../../lib/types';
@@ -46,8 +47,24 @@ export function AllObjectives() {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<FilterStatus>('all');
   const [search, setSearch] = useState('');
+  const searchInputRef = useRef<SearchInputRef>(null);
   const { subscribe } = useWebSocket();
   const { showToast } = useToast();
+
+  // "/" key to focus search
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+        return;
+      }
+      if (e.key === '/') {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   const loadData = useCallback(async () => {
     try {
@@ -141,6 +158,7 @@ export function AllObjectives() {
           <div className="v2-all-objectives-header__top">
             <h1 className="v2-page-title">All Objectives</h1>
             <SearchInput
+              ref={searchInputRef}
               value={search}
               onChange={setSearch}
               placeholder="Search objectives..."

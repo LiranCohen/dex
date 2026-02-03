@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, type ChangeEvent, type KeyboardEvent } from 'react';
+import { useState, useRef, useEffect, forwardRef, useImperativeHandle, type ChangeEvent, type KeyboardEvent } from 'react';
 
 interface SearchInputProps {
   value: string;
@@ -9,16 +9,30 @@ interface SearchInputProps {
   className?: string;
 }
 
-export function SearchInput({
-  value,
-  onChange,
-  placeholder = 'Search...',
-  autoFocus = false,
-  onEscape,
-  className = '',
-}: SearchInputProps) {
+export interface SearchInputRef {
+  focus: () => void;
+  blur: () => void;
+}
+
+export const SearchInput = forwardRef<SearchInputRef, SearchInputProps>(function SearchInput(
+  {
+    value,
+    onChange,
+    placeholder = 'Search...',
+    autoFocus = false,
+    onEscape,
+    className = '',
+  },
+  ref
+) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [isFocused, setIsFocused] = useState(false);
+
+  // Expose focus/blur methods via ref
+  useImperativeHandle(ref, () => ({
+    focus: () => inputRef.current?.focus(),
+    blur: () => inputRef.current?.blur(),
+  }), []);
 
   useEffect(() => {
     if (autoFocus) {
@@ -73,4 +87,4 @@ export function SearchInput({
       )}
     </div>
   );
-}
+});

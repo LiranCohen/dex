@@ -1,31 +1,19 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { useParams, Link } from 'react-router-dom';
-import { Header, StatusBar, Message, ToolActivity, ProposedObjective, QuestionPrompt, ChatInput, ScrollIndicator, KeyboardShortcuts, SkeletonMessage, useToast } from '../components';
+import { useState, useEffect, useCallback } from 'react';
+import { useParams } from 'react-router-dom';
+import {
+  Header,
+  ChatInput,
+  KeyboardShortcuts,
+  SkeletonMessage,
+  useToast,
+  QuestObjectivesList,
+  MessageList,
+} from '../components';
 import { fetchQuest, fetchQuestTasks, sendQuestMessage, createObjective, fetchApprovals, cancelQuestSession } from '../../lib/api';
 import { useWebSocket } from '../../hooks/useWebSocket';
 import { useKeyboardNavigation } from '../hooks/useKeyboardNavigation';
 import type { Quest, QuestMessage, Task, Approval, WebSocketEvent, ObjectiveDraft } from '../../lib/types';
 import { parseObjectiveDrafts, parseQuestions, type QuestQuestion } from '../../components/QuestChat';
-import ReactMarkdown from 'react-markdown';
-
-function formatTime(dateStr: string): string {
-  const date = new Date(dateStr);
-  return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
-}
-
-function getTaskStatus(status: string): 'active' | 'pending' | 'complete' | 'error' {
-  switch (status) {
-    case 'running':
-      return 'active';
-    case 'completed':
-      return 'complete';
-    case 'failed':
-    case 'cancelled':
-      return 'error';
-    default:
-      return 'pending';
-  }
-}
 
 export function QuestDetail() {
   const { id } = useParams<{ id: string }>();
@@ -39,12 +27,9 @@ export function QuestDetail() {
   const [activeTools, setActiveTools] = useState<Map<string, { tool: string; status: 'running' | 'complete' | 'error' }>>(new Map());
   const [pendingDrafts, setPendingDrafts] = useState<Map<string, ObjectiveDraft>>(new Map());
   const [pendingQuestions, setPendingQuestions] = useState<QuestQuestion[]>([]);
-  const [showScrollIndicator, setShowScrollIndicator] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [commandHistory, setCommandHistory] = useState<string[]>([]);
   const [failedMessages, setFailedMessages] = useState<Set<string>>(new Set());
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const messagesContainerRef = useRef<HTMLDivElement>(null);
   const { subscribe, connected: isConnected } = useWebSocket();
   const { showToast } = useToast();
 
@@ -53,25 +38,6 @@ export function QuestDetail() {
     onHelp: () => setShowShortcuts(true),
     enabled: true,
   });
-
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    setShowScrollIndicator(false);
-  };
-
-  const checkIfAtBottom = useCallback(() => {
-    const container = messagesContainerRef.current;
-    if (!container) return true;
-    const threshold = 100;
-    return container.scrollHeight - container.scrollTop - container.clientHeight < threshold;
-  }, []);
-
-  const handleScroll = useCallback(() => {
-    const isAtBottom = checkIfAtBottom();
-    if (isAtBottom) {
-      setShowScrollIndicator(false);
-    }
-  }, [checkIfAtBottom]);
 
   const handleStop = async () => {
     if (!id) return;
@@ -133,15 +99,6 @@ export function QuestDetail() {
     loadData();
   }, [loadData]);
 
-  useEffect(() => {
-    // Auto-scroll if at bottom, otherwise show indicator
-    if (checkIfAtBottom()) {
-      scrollToBottom();
-    } else if (messages.length > 0) {
-      setShowScrollIndicator(true);
-    }
-  }, [messages, streamingContent, checkIfAtBottom]);
-
   // WebSocket events
   useEffect(() => {
     const unsubscribe = subscribe((event: WebSocketEvent) => {
@@ -189,14 +146,21 @@ export function QuestDetail() {
               next.set(toolName, { tool: toolName, status: isError ? 'error' : 'complete' });
               return next;
             });
-            // Clear after a moment
-            setTimeout(() => {
+            // Clear completed/errored tools after showing result briefly
+            // But only after assistant message arrives (detected by 'sending' becoming false)
+            const checkAndClear = () => {
               setActiveTools((prev) => {
+                // Only clear if not currently generating (message has arrived)
                 const next = new Map(prev);
-                next.delete(toolName);
+                const tool = next.get(toolName);
+                if (tool && tool.status !== 'running') {
+                  next.delete(toolName);
+                }
                 return next;
               });
-            }, 2000);
+            };
+            // Clear after 3 seconds, or when new message arrives (whichever first)
+            setTimeout(checkAndClear, 3000);
           }
           break;
 
@@ -323,134 +287,24 @@ export function QuestDetail() {
           <h1 className="v2-page-title">
             {quest.title || 'Untitled Quest'}
           </h1>
-
-          {/* Objectives list */}
-          {tasks.length > 0 && (
-            <div className="v2-objectives-list">
-              <div className="v2-label">Objectives</div>
-              <div className="v2-objectives-list__items">
-                {tasks.map((task) => (
-                  <Link
-                    key={task.ID}
-                    to={`/v2/objectives/${task.ID}`}
-                    className="v2-objective-link"
-                  >
-                    <StatusBar status={getTaskStatus(task.Status)} pulse={task.Status === 'running'} />
-                    <span className="v2-objective-link__title">{task.Title}</span>
-                    <span className="v2-label">{task.Status}</span>
-                  </Link>
-                ))}
-              </div>
-            </div>
-          )}
+          <QuestObjectivesList tasks={tasks} />
         </div>
 
         {/* Conversation */}
-        <div
-          ref={messagesContainerRef}
-          onScroll={handleScroll}
-          className="v2-quest-messages"
-        >
-          {messages.length === 0 && !sending ? (
-            <div className="v2-quest-empty">
-              <p>Start by describing what you want to accomplish.</p>
-            </div>
-          ) : (
-            <div className="v2-quest-messages__list">
-              {messages.map((msg) => {
-                const isFailed = failedMessages.has(msg.id);
-                return (
-                  <Message
-                    key={msg.id}
-                    sender={msg.role === 'user' ? 'user' : 'assistant'}
-                    timestamp={formatTime(msg.created_at)}
-                    status={isFailed ? 'error' : undefined}
-                    onRetry={isFailed ? () => handleRetry(msg) : undefined}
-                    onCopy={msg.role === 'assistant' ? () => handleCopyMessage(msg.content) : undefined}
-                  >
-                    <ReactMarkdown>{msg.content}</ReactMarkdown>
-                  </Message>
-                );
-              })}
-
-              {/* Active tools */}
-              {activeTools.size > 0 && (
-                <>
-                  {Array.from(activeTools.values()).map((tool) => (
-                    <ToolActivity
-                      key={tool.tool}
-                      status={tool.status}
-                      tool={tool.tool}
-                      description={`${tool.status === 'running' ? 'Running' : tool.status === 'complete' ? 'Completed' : 'Failed'} ${tool.tool}`}
-                    />
-                  ))}
-                </>
-              )}
-
-              {/* Streaming response */}
-              {sending && streamingContent && (
-                <Message sender="assistant">
-                  <ReactMarkdown>{streamingContent}</ReactMarkdown>
-                  <span className="v2-cursor" />
-                </Message>
-              )}
-
-              {/* Pending drafts */}
-              {pendingDrafts.size > 0 && Array.from(pendingDrafts.entries()).map(([key, draft]) => {
-                const mustHaveItems = (draft.checklist?.must_have || []).map((item, i) => ({
-                  id: `must-${i}`,
-                  text: item,
-                  isOptional: false,
-                }));
-                const optionalItems = (draft.checklist?.optional || []).map((item, i) => ({
-                  id: `opt-${i}`,
-                  text: item,
-                  isOptional: true,
-                }));
-                return (
-                  <ProposedObjective
-                    key={key}
-                    title={draft.title}
-                    description={draft.description}
-                    checklist={[...mustHaveItems, ...optionalItems]}
-                    onAccept={() => handleAcceptDraft(key, draft)}
-                    onReject={() => handleRejectDraft(key)}
-                  />
-                );
-              })}
-
-              {/* Pending questions */}
-              {pendingQuestions.length > 0 && pendingQuestions.map((q, i) => (
-                <QuestionPrompt
-                  key={i}
-                  question={q.question}
-                  options={(q.options || []).map((opt, j) => ({
-                    id: `${j}`,
-                    title: opt,
-                    description: '',
-                  }))}
-                  onSelect={(optId) => {
-                    const answer = q.options?.[parseInt(optId)] || '';
-                    handleAnswerQuestion(answer);
-                  }}
-                  disabled={sending}
-                />
-              ))}
-
-              {/* Thinking indicator */}
-              {sending && !streamingContent && (
-                <Message sender="assistant">
-                  <span className="v2-cursor" />
-                </Message>
-              )}
-
-              <div ref={messagesEndRef} />
-            </div>
-          )}
-
-          {/* Scroll indicator */}
-          <ScrollIndicator visible={showScrollIndicator} onClick={scrollToBottom} />
-        </div>
+        <MessageList
+          messages={messages}
+          failedMessages={failedMessages}
+          activeTools={activeTools}
+          streamingContent={streamingContent}
+          sending={sending}
+          pendingDrafts={pendingDrafts}
+          pendingQuestions={pendingQuestions}
+          onRetry={handleRetry}
+          onCopy={handleCopyMessage}
+          onAcceptDraft={handleAcceptDraft}
+          onRejectDraft={handleRejectDraft}
+          onAnswerQuestion={handleAnswerQuestion}
+        />
 
         {/* Input */}
         <ChatInput

@@ -2148,7 +2148,34 @@
   color: var(--text-primary);
 }
 
-/* Empty centered */
+/* Empty states (standardized) */
+.v2-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: var(--space-16) var(--space-4);
+  min-height: 200px;
+}
+
+.v2-empty-state__message {
+  font-size: var(--text-lg);
+  color: var(--text-tertiary);
+  margin-bottom: var(--space-2);
+}
+
+.v2-empty-state__hint {
+  font-size: var(--text-sm);
+  color: var(--text-tertiary);
+  margin-bottom: var(--space-4);
+}
+
+.v2-empty-state__action {
+  margin-top: var(--space-4);
+}
+
+/* Legacy empty centered (for backwards compatibility) */
 .v2-empty-centered {
   text-align: center;
   padding: var(--space-16) 0;
