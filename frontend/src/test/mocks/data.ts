@@ -54,6 +54,8 @@ export const mockTask: Task = {
   PRNumber: null,
   TokenBudget: 100000,
   TokenUsed: 25000,
+  InputTokens: 20000,
+  OutputTokens: 5000,
   TimeBudgetMin: 60,
   TimeUsedMin: 15,
   DollarBudget: 10.00,
