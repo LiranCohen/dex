@@ -7,6 +7,41 @@ import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 interface MarkdownContentProps {
   content: string;
   isStreaming?: boolean;
+  searchQuery?: string;
+}
+
+// Highlight search matches in text
+function highlightText(text: string, query: string): React.ReactNode {
+  if (!query.trim()) return text;
+
+  const parts = text.split(new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi'));
+  return parts.map((part, i) =>
+    part.toLowerCase() === query.toLowerCase() ? (
+      <mark key={i} className="v2-search-highlight">{part}</mark>
+    ) : (
+      part
+    )
+  );
+}
+
+// Recursively process children to highlight text
+function highlightChildren(children: React.ReactNode, query: string): React.ReactNode {
+  if (!query.trim()) return children;
+
+  if (typeof children === 'string') {
+    return highlightText(children, query);
+  }
+
+  if (Array.isArray(children)) {
+    return children.map((child, i) => {
+      if (typeof child === 'string') {
+        return <span key={i}>{highlightText(child, query)}</span>;
+      }
+      return child;
+    });
+  }
+
+  return children;
 }
 
 interface CodeBlockProps {
@@ -84,7 +119,8 @@ function InlineCode({ children }: { children: React.ReactNode }) {
 // Internal markdown renderer with v2 styling
 const MarkdownRenderer = memo(function MarkdownRenderer({
   content,
-  isStreaming = false
+  isStreaming = false,
+  searchQuery = ''
 }: MarkdownContentProps) {
   return (
     <ReactMarkdown
@@ -118,7 +154,7 @@ const MarkdownRenderer = memo(function MarkdownRenderer({
               className="v2-md-link"
               {...props}
             >
-              {children}
+              {highlightChildren(children, searchQuery)}
             </a>
           );
         },
@@ -127,20 +163,20 @@ const MarkdownRenderer = memo(function MarkdownRenderer({
         p({ children, ...props }) {
           return (
             <p className="v2-md-p" {...props}>
-              {children}
+              {highlightChildren(children, searchQuery)}
             </p>
           );
         },
 
         // Headings
         h1({ children, ...props }) {
-          return <h1 className="v2-md-h1" {...props}>{children}</h1>;
+          return <h1 className="v2-md-h1" {...props}>{highlightChildren(children, searchQuery)}</h1>;
         },
         h2({ children, ...props }) {
-          return <h2 className="v2-md-h2" {...props}>{children}</h2>;
+          return <h2 className="v2-md-h2" {...props}>{highlightChildren(children, searchQuery)}</h2>;
         },
         h3({ children, ...props }) {
-          return <h3 className="v2-md-h3" {...props}>{children}</h3>;
+          return <h3 className="v2-md-h3" {...props}>{highlightChildren(children, searchQuery)}</h3>;
         },
 
         // Lists
@@ -151,7 +187,7 @@ const MarkdownRenderer = memo(function MarkdownRenderer({
           return <ol className="v2-md-ol" {...props}>{children}</ol>;
         },
         li({ children, ...props }) {
-          return <li className="v2-md-li" {...props}>{children}</li>;
+          return <li className="v2-md-li" {...props}>{highlightChildren(children, searchQuery)}</li>;
         },
 
         // Blockquotes
@@ -177,10 +213,10 @@ const MarkdownRenderer = memo(function MarkdownRenderer({
           return <thead className="v2-md-thead" {...props}>{children}</thead>;
         },
         th({ children, ...props }) {
-          return <th className="v2-md-th" {...props}>{children}</th>;
+          return <th className="v2-md-th" {...props}>{highlightChildren(children, searchQuery)}</th>;
         },
         td({ children, ...props }) {
-          return <td className="v2-md-td" {...props}>{children}</td>;
+          return <td className="v2-md-td" {...props}>{highlightChildren(children, searchQuery)}</td>;
         },
 
         // Horizontal rules
@@ -190,10 +226,10 @@ const MarkdownRenderer = memo(function MarkdownRenderer({
 
         // Strong and emphasis
         strong({ children, ...props }) {
-          return <strong className="v2-md-strong" {...props}>{children}</strong>;
+          return <strong className="v2-md-strong" {...props}>{highlightChildren(children, searchQuery)}</strong>;
         },
         em({ children, ...props }) {
-          return <em className="v2-md-em" {...props}>{children}</em>;
+          return <em className="v2-md-em" {...props}>{highlightChildren(children, searchQuery)}</em>;
         },
       }}
     >
@@ -203,10 +239,14 @@ const MarkdownRenderer = memo(function MarkdownRenderer({
 });
 
 // Main export
-export const MarkdownContent = memo(function MarkdownContent(props: MarkdownContentProps) {
+export const MarkdownContent = memo(function MarkdownContent({
+  content,
+  isStreaming = false,
+  searchQuery = ''
+}: MarkdownContentProps) {
   return (
     <div className="v2-markdown">
-      <MarkdownRenderer {...props} />
+      <MarkdownRenderer content={content} isStreaming={isStreaming} searchQuery={searchQuery} />
     </div>
   );
 });

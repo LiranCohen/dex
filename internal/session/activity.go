@@ -287,11 +287,13 @@ type ChecklistUpdateData struct {
 
 // RecordChecklistUpdate records a checklist item status change
 func (r *ActivityRecorder) RecordChecklistUpdate(iteration int, itemID, status, notes string) error {
-	// Try to get item description from DB
+	// Try to get item details from DB
 	var description string
+	var checklistID string
 	if r.db != nil {
 		if item, err := r.db.GetChecklistItem(itemID); err == nil && item != nil {
 			description = item.Description
+			checklistID = item.ChecklistID
 		}
 	}
 
@@ -322,13 +324,18 @@ func (r *ActivityRecorder) RecordChecklistUpdate(iteration int, itemID, status, 
 	r.broadcastActivity(activity)
 
 	// Also broadcast a specific checklist event for real-time UI updates
+	// Using 'checklist.updated' event type with nested 'item' object to match frontend expectations
 	if r.broadcast != nil {
-		r.broadcast("checklist.item_updated", map[string]any{
-			"task_id":     r.taskID,
-			"item_id":     itemID,
-			"description": description,
-			"status":      status,
-			"notes":       notes,
+		r.broadcast("checklist.updated", map[string]any{
+			"task_id":      r.taskID,
+			"checklist_id": checklistID,
+			"item": map[string]any{
+				"id":                 itemID,
+				"checklist_id":       checklistID,
+				"description":        description,
+				"status":             status,
+				"verification_notes": notes,
+			},
 		})
 	}
 

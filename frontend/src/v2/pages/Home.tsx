@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Header, StatusBar, KeyboardShortcuts, SkeletonList, useToast } from '../components';
+import { Header, StatusBar, KeyboardShortcuts, LoadingState, useToast } from '../components';
 import { fetchQuests, createQuest, fetchApprovals } from '../../lib/api';
 import { useWebSocket } from '../../hooks/useWebSocket';
 import { useKeyboardNavigation } from '../hooks/useKeyboardNavigation';
@@ -103,7 +103,7 @@ export function Home() {
       <div className="v2-root">
         <Header inboxCount={0} />
         <main className="v2-content">
-          <SkeletonList count={3} />
+          <LoadingState message="Loading your quests..." size="large" />
         </main>
       </div>
     );

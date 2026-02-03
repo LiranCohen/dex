@@ -57,3 +57,21 @@ export function SkeletonMessage() {
     </div>
   );
 }
+
+interface LoadingStateProps {
+  message?: string;
+  size?: 'small' | 'medium' | 'large';
+}
+
+export function LoadingState({ message = 'Loading...', size = 'medium' }: LoadingStateProps) {
+  return (
+    <div className={`v2-loading-state v2-loading-state--${size}`} role="status" aria-live="polite">
+      <div className="v2-loading-state__spinner" aria-hidden="true">
+        <span className="v2-loading-state__dot" style={{ animationDelay: '0ms' }} />
+        <span className="v2-loading-state__dot" style={{ animationDelay: '150ms' }} />
+        <span className="v2-loading-state__dot" style={{ animationDelay: '300ms' }} />
+      </div>
+      <span className="v2-loading-state__message">{message}</span>
+    </div>
+  );
+}

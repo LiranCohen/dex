@@ -102,18 +102,33 @@ export function parseObjectiveDrafts(content: string): ObjectiveDraft[] {
 // Helper to parse questions from message content
 export function parseQuestions(content: string): QuestQuestion[] {
   const questions: QuestQuestion[] = [];
-  const regex = /QUESTION:\s*(\{[^}]*\})/g;
-  let match;
+  const marker = 'QUESTION:';
+  let remaining = content;
 
-  while ((match = regex.exec(content)) !== null) {
+  while (true) {
+    const idx = remaining.indexOf(marker);
+    if (idx === -1) {
+      break;
+    }
+
+    // Extract JSON portion using balanced brace matching
+    const jsonStart = idx + marker.length;
+    const result = extractJSONObject(remaining.substring(jsonStart));
+    if (!result) {
+      remaining = remaining.substring(jsonStart);
+      continue;
+    }
+
     try {
-      const q = JSON.parse(match[1]);
+      const q = JSON.parse(result.json);
       if (q.question) {
         questions.push(q);
       }
     } catch {
       // Skip malformed JSON
     }
+
+    remaining = remaining.substring(jsonStart + result.endIndex);
   }
 
   return questions;
@@ -156,6 +171,91 @@ function stripObjectiveDrafts(content: string): string {
   return result;
 }
 
+// stripSignalWithMarker removes all signals with the given marker using balanced brace matching
+function stripSignalWithMarker(content: string, marker: string): string {
+  let result = '';
+  let remaining = content;
+
+  while (true) {
+    const idx = remaining.indexOf(marker);
+    if (idx === -1) {
+      result += remaining;
+      break;
+    }
+
+    // Add content before the marker
+    result += remaining.substring(0, idx);
+
+    // Extract JSON portion using balanced brace matching
+    const jsonStart = idx + marker.length;
+    const extracted = extractJSONObject(remaining.substring(jsonStart));
+    if (!extracted) {
+      // No valid JSON found, keep the marker text and continue
+      result += marker;
+      remaining = remaining.substring(jsonStart);
+      continue;
+    }
+
+    // Skip the entire signal (marker + JSON) and any trailing whitespace
+    let endPos = jsonStart + extracted.endIndex;
+    while (endPos < remaining.length && (remaining[endPos] === ' ' || remaining[endPos] === '\t' || remaining[endPos] === '\n' || remaining[endPos] === '\r')) {
+      endPos++;
+    }
+    remaining = remaining.substring(endPos);
+  }
+
+  return result;
+}
+
+// formatQuestionsInContent formats QUESTION signals as readable text using balanced brace matching
+function formatQuestionsInContent(content: string): string {
+  let result = '';
+  let remaining = content;
+  const marker = 'QUESTION:';
+
+  while (true) {
+    const idx = remaining.indexOf(marker);
+    if (idx === -1) {
+      result += remaining;
+      break;
+    }
+
+    // Add content before the marker
+    result += remaining.substring(0, idx);
+
+    // Extract JSON portion using balanced brace matching
+    const jsonStart = idx + marker.length;
+    const extracted = extractJSONObject(remaining.substring(jsonStart));
+    if (!extracted) {
+      // No valid JSON found, keep the marker text and continue
+      result += marker;
+      remaining = remaining.substring(jsonStart);
+      continue;
+    }
+
+    // Try to parse and format the question
+    try {
+      const q = JSON.parse(extracted.json);
+      let questionText = `\n**${q.question}**`;
+      if (q.options && q.options.length > 0) {
+        questionText += '\n' + q.options.map((opt: string) => `• ${opt}`).join('\n');
+      }
+      result += questionText;
+    } catch {
+      // Skip malformed JSON
+    }
+
+    // Move past the signal
+    let endPos = jsonStart + extracted.endIndex;
+    while (endPos < remaining.length && (remaining[endPos] === ' ' || remaining[endPos] === '\t' || remaining[endPos] === '\n' || remaining[endPos] === '\r')) {
+      endPos++;
+    }
+    remaining = remaining.substring(endPos);
+  }
+
+  return result;
+}
+
 // Helper to format signals for display
 // Questions are formatted inline for history, drafts are shown in sidebar
 export function formatMessageContent(content: string): string {
@@ -163,21 +263,11 @@ export function formatMessageContent(content: string): string {
   let formatted = stripObjectiveDrafts(content);
 
   // Format QUESTION signals as readable text for message history
-  formatted = formatted.replace(/QUESTION:\s*(\{[^}]*\})/g, (_match, jsonStr) => {
-    try {
-      const q = JSON.parse(jsonStr);
-      let questionText = `\n**${q.question}**`;
-      if (q.options && q.options.length > 0) {
-        questionText += '\n' + q.options.map((opt: string) => `• ${opt}`).join('\n');
-      }
-      return questionText;
-    } catch {
-      return '';
-    }
-  });
+  formatted = formatQuestionsInContent(formatted);
 
-  // Remove QUEST_READY signals
-  formatted = formatted.replace(/QUEST_READY:\s*\{[^}]*\}/g, '');
+  // Remove QUEST_READY signals using balanced brace matching
+  formatted = stripSignalWithMarker(formatted, 'QUEST_READY:');
+
   // Clean up extra whitespace
   return formatted.trim();
 }
@@ -187,11 +277,11 @@ export function stripSignals(content: string): string {
   // Remove OBJECTIVE_DRAFT signals using balanced brace matching
   let stripped = stripObjectiveDrafts(content);
 
-  // Remove QUESTION signals (JSON blocks)
-  stripped = stripped.replace(/QUESTION:\s*\{[^}]*\}\s*/g, '');
+  // Remove QUESTION signals using balanced brace matching
+  stripped = stripSignalWithMarker(stripped, 'QUESTION:');
 
-  // Remove QUEST_READY signals
-  stripped = stripped.replace(/QUEST_READY:\s*\{[^}]*\}/g, '');
+  // Remove QUEST_READY signals using balanced brace matching
+  stripped = stripSignalWithMarker(stripped, 'QUEST_READY:');
 
   // Clean up excessive whitespace
   stripped = stripped.replace(/\n{3,}/g, '\n\n').trim();

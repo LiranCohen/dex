@@ -118,17 +118,25 @@ export function QuestObjectivesList({ tasks }: QuestObjectivesListProps) {
       {/* Expanded list */}
       {isExpanded && (
         <div className="v2-objectives-summary__list">
-          {tasks.map((task) => (
-            <Link
-              key={task.ID}
-              to={`/v2/objectives/${task.ID}`}
-              className="v2-objectives-summary__item"
-            >
-              <StatusBar status={getTaskStatus(task.Status)} pulse={task.Status === 'running'} />
-              <span className="v2-objectives-summary__title">{task.Title}</span>
-              <span className="v2-label">{task.Status}</span>
-            </Link>
-          ))}
+          {tasks.map((task) => {
+            const isBlocked = task.IsBlocked || task.Status === 'blocked';
+            return (
+              <Link
+                key={task.ID}
+                to={`/v2/objectives/${task.ID}`}
+                className={`v2-objectives-summary__item ${isBlocked ? 'v2-objectives-summary__item--blocked' : ''}`}
+              >
+                <StatusBar status={getTaskStatus(task.Status)} pulse={task.Status === 'running'} />
+                <span className="v2-objectives-summary__title">{task.Title}</span>
+                {isBlocked && (
+                  <span className="v2-objectives-summary__blocked-icon" title="Waiting for dependencies">
+                    ⛓
+                  </span>
+                )}
+                <span className="v2-label">{task.Status}</span>
+              </Link>
+            );
+          })}
         </div>
       )}
     </div>

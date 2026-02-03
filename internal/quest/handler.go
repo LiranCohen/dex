@@ -287,6 +287,7 @@ func (h *Handler) ProcessMessage(ctx context.Context, questID, content string) (
 						Type: "quest.tool_call",
 						Payload: map[string]any{
 							"quest_id":  questID,
+							"call_id":   block.ID,
 							"tool_name": block.Name,
 							"status":    "running",
 						},
@@ -319,6 +320,7 @@ func (h *Handler) ProcessMessage(ctx context.Context, questID, content string) (
 						Type: "quest.tool_result",
 						Payload: map[string]any{
 							"quest_id":    questID,
+							"call_id":     block.ID,
 							"tool_name":   block.Name,
 							"output":      truncateForBroadcast(result.Output, 1000),
 							"is_error":    result.IsError,

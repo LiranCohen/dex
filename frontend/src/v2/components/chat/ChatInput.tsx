@@ -7,6 +7,7 @@ interface ChatInputProps {
   disabled?: boolean;
   isGenerating?: boolean;
   isConnected?: boolean;
+  isReconnecting?: boolean;
   placeholder?: string;
   commandHistory?: string[];
 }
@@ -17,6 +18,7 @@ export function ChatInput({
   disabled = false,
   isGenerating = false,
   isConnected = true,
+  isReconnecting = false,
   placeholder = 'Type a message...',
   commandHistory = [],
 }: ChatInputProps) {
@@ -91,20 +93,51 @@ export function ChatInput({
 
   // Determine placeholder text
   const getPlaceholder = () => {
-    if (!isConnected) return 'Reconnecting...';
+    if (isReconnecting) return 'Reconnecting...';
+    if (!isConnected) return 'Connection lost...';
     if (isGenerating) return '...';
     return placeholder;
   };
 
-  const canSend = value.trim() && !disabled && !isGenerating && isConnected;
+  // Determine hint text
+  const getHintText = () => {
+    if (isReconnecting) {
+      return 'Attempting to reconnect · You can still type your message';
+    }
+    if (!isConnected) {
+      return 'Connection lost · Type your message and it will send when reconnected';
+    }
+    return 'Enter to send · Shift+Enter for newline · ↑ for history';
+  };
+
+  // Connection status for icon display
+  const getConnectionStatus = () => {
+    if (isReconnecting) return 'reconnecting';
+    if (!isConnected) return 'disconnected';
+    return 'connected';
+  };
+
+  // Allow sending if connected, or queue message if disconnected (user can type)
+  const canSend = value.trim() && !disabled && !isGenerating;
   const showStop = isGenerating && onStop;
+  const connectionStatus = getConnectionStatus();
 
   return (
     <div className="v2-chat-input-wrapper">
       <div
         ref={containerRef}
-        className={`v2-chat-input ${!isConnected ? 'v2-chat-input--disconnected' : ''}`}
+        className={`v2-chat-input ${connectionStatus !== 'connected' ? `v2-chat-input--${connectionStatus}` : ''}`}
       >
+        {/* Connection status indicator */}
+        {connectionStatus !== 'connected' && (
+          <span
+            className={`v2-chat-input__status v2-chat-input__status--${connectionStatus}`}
+            aria-live="polite"
+            aria-label={connectionStatus === 'reconnecting' ? 'Reconnecting to server' : 'Disconnected from server'}
+          >
+            {connectionStatus === 'reconnecting' ? '⟳' : '⚡'}
+          </span>
+        )}
         <span className="v2-chat-input__cursor">▌</span>
         <TextareaAutosize
           ref={textareaRef}
@@ -116,7 +149,9 @@ export function ChatInput({
           }}
           onKeyDown={handleKeyDown}
           placeholder={getPlaceholder()}
-          disabled={disabled || !isConnected}
+          disabled={disabled}
+          aria-disabled={disabled}
+          aria-describedby="chat-input-hint"
           minRows={1}
           maxRows={6}
         />
@@ -143,8 +178,12 @@ export function ChatInput({
           </button>
         )}
       </div>
-      <div className="v2-chat-input__hint">
-        Enter to send · Shift+Enter for newline · ↑ for history
+      <div
+        id="chat-input-hint"
+        className={`v2-chat-input__hint ${connectionStatus !== 'connected' ? `v2-chat-input__hint--${connectionStatus}` : ''}`}
+        aria-live={connectionStatus !== 'connected' ? 'polite' : undefined}
+      >
+        {getHintText()}
       </div>
     </div>
   );

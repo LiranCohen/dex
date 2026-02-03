@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Link } from 'react-router-dom';
-import { Header, StatusBar, SearchInput, SkeletonList, useToast } from '../components';
+import { Header, StatusBar, SearchInput, LoadingState, useToast } from '../components';
 import type { SearchInputRef } from '../components/SearchInput';
 import { api, fetchApprovals } from '../../lib/api';
 import { useWebSocket } from '../../hooks/useWebSocket';
@@ -48,8 +48,17 @@ export function AllObjectives() {
   const [filter, setFilter] = useState<FilterStatus>('all');
   const [search, setSearch] = useState('');
   const searchInputRef = useRef<SearchInputRef>(null);
+  const isMountedRef = useRef(true);
   const { subscribe } = useWebSocket();
   const { showToast } = useToast();
+
+  // Track mount state
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   // "/" key to focus search
   useEffect(() => {
@@ -89,13 +98,22 @@ export function AllObjectives() {
   // WebSocket updates
   useEffect(() => {
     const unsubscribe = subscribe((event: WebSocketEvent) => {
+      // Skip if unmounted
+      if (!isMountedRef.current) return;
+
       if (event.type.startsWith('task.')) {
         loadData();
       }
       if (event.type.startsWith('approval.')) {
-        fetchApprovals().then((data) => {
-          setApprovalCount((data.approvals || []).filter((a: Approval) => a.status === 'pending').length);
-        });
+        fetchApprovals()
+          .then((data) => {
+            // Check again after async operation
+            if (!isMountedRef.current) return;
+            setApprovalCount((data.approvals || []).filter((a: Approval) => a.status === 'pending').length);
+          })
+          .catch((err) => {
+            console.error('Failed to fetch approvals:', err);
+          });
       }
     });
     return unsubscribe;
@@ -143,7 +161,7 @@ export function AllObjectives() {
       <div className="v2-root">
         <Header backLink={{ to: '/v2', label: 'Back' }} inboxCount={0} />
         <main className="v2-content">
-          <SkeletonList count={5} />
+          <LoadingState message="Loading objectives..." size="large" />
         </main>
       </div>
     );
