@@ -13,14 +13,16 @@ describe('Message', () => {
     expect(screen.getByText('Hello, world!')).toBeInTheDocument();
   });
 
-  it('displays "You" for user messages', () => {
+  it('displays handle for user messages', () => {
     render(<Message sender="user">Test message</Message>);
-    expect(screen.getByText('You')).toBeInTheDocument();
+    // IRC-style handle: <you>
+    expect(screen.getByText('<you>')).toBeInTheDocument();
   });
 
-  it('displays "Dex" for assistant messages', () => {
+  it('displays handle for assistant messages', () => {
     render(<Message sender="assistant">Test message</Message>);
-    expect(screen.getByText('Dex')).toBeInTheDocument();
+    // IRC-style handle: <dex>
+    expect(screen.getByText('<dex>')).toBeInTheDocument();
   });
 
   it('displays timestamp when provided', () => {

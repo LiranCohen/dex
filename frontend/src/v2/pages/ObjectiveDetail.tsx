@@ -9,19 +9,27 @@ import {
   Checklist,
   ActivityLog,
   ObjectiveActions,
-  type ChecklistItem,
-  type Activity,
 } from '../components';
-import { api, fetchApprovals } from '../../lib/api';
+import { api, fetchApprovals, fetchChecklist, fetchTaskActivity } from '../../lib/api';
 import { useWebSocket } from '../../hooks/useWebSocket';
 import { getTaskStatus } from '../utils/formatters';
-import type { Task, Approval, WebSocketEvent } from '../../lib/types';
+import type {
+  Task,
+  Approval,
+  WebSocketEvent,
+  ChecklistItem,
+  ChecklistSummary,
+  Activity,
+  ActivityResponse,
+} from '../../lib/types';
 
 export function ObjectiveDetail() {
   const { id } = useParams<{ id: string }>();
   const [task, setTask] = useState<Task | null>(null);
   const [checklist, setChecklist] = useState<ChecklistItem[]>([]);
+  const [checklistSummary, setChecklistSummary] = useState<ChecklistSummary | undefined>(undefined);
   const [activity, setActivity] = useState<Activity[]>([]);
+  const [activitySummary, setActivitySummary] = useState<ActivityResponse['summary'] | undefined>(undefined);
   const [approvalCount, setApprovalCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
@@ -34,13 +42,15 @@ export function ObjectiveDetail() {
     try {
       const [taskData, checklistData, activityData, approvalsData] = await Promise.all([
         api.get<Task>(`/tasks/${id}`),
-        api.get<{ items: ChecklistItem[] }>(`/tasks/${id}/checklist`).catch(() => ({ items: [] })),
-        api.get<{ activities: Activity[] }>(`/tasks/${id}/activity`).catch(() => ({ activities: [] })),
+        fetchChecklist(id).catch(() => ({ checklist: null, items: [], summary: { total: 0, done: 0, failed: 0, all_done: false } })),
+        fetchTaskActivity(id).catch(() => ({ activity: [], summary: { total_iterations: 0, total_tokens: 0 } })),
         fetchApprovals(),
       ]);
       setTask(taskData);
       setChecklist(checklistData.items || []);
-      setActivity(activityData.activities || []);
+      setChecklistSummary(checklistData.summary);
+      setActivity(activityData.activity || []);
+      setActivitySummary(activityData.summary);
       setApprovalCount((approvalsData.approvals || []).filter((a: Approval) => a.status === 'pending').length);
     } catch (err) {
       console.error('Failed to load objective:', err);
@@ -210,13 +220,17 @@ export function ObjectiveDetail() {
         {/* Checklist */}
         <div className="v2-objective-section">
           <div className="v2-label v2-objective-section__title">Checklist</div>
-          <Checklist items={checklist} />
+          <Checklist items={checklist} summary={checklistSummary} />
         </div>
 
         {/* Activity */}
         <div className="v2-objective-section">
           <div className="v2-label v2-objective-section__title">Activity</div>
-          <ActivityLog items={activity} />
+          <ActivityLog
+            items={activity}
+            summary={activitySummary}
+            isRunning={task.Status === 'running'}
+          />
         </div>
       </main>
 

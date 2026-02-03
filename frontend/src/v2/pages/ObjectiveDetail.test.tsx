@@ -95,7 +95,9 @@ describe('ObjectiveDetail', () => {
         expect(screen.getByText('Create login endpoint')).toBeInTheDocument();
       });
 
+      // Check that done items have the complete icon (✓)
       const doneItem = screen.getByText('Create login endpoint').closest('.v2-checklist-item');
+      expect(doneItem).toBeInTheDocument();
       expect(doneItem?.querySelector('.v2-checklist-item__icon--complete')).toBeInTheDocument();
     });
 
@@ -103,15 +105,17 @@ describe('ObjectiveDetail', () => {
       render(<ObjectiveDetail />);
 
       await waitFor(() => {
-        const pendingItem = screen.getByText('Implement auth middleware').closest('.v2-checklist-item');
-        expect(pendingItem?.querySelector('.v2-checklist-item__icon--pending')).toBeInTheDocument();
+        expect(screen.getByText('Implement auth middleware')).toBeInTheDocument();
       });
+
+      const pendingItem = screen.getByText('Implement auth middleware').closest('.v2-checklist-item');
+      expect(pendingItem?.querySelector('.v2-checklist-item__icon--pending')).toBeInTheDocument();
     });
 
     it('shows empty state when no checklist', async () => {
       server.use(
         http.get('/api/v1/tasks/:id/checklist', () => {
-          return HttpResponse.json({ items: [] });
+          return HttpResponse.json({ checklist: null, items: [], summary: { total: 0, done: 0, failed: 0, all_done: false } });
         })
       );
 
@@ -136,7 +140,7 @@ describe('ObjectiveDetail', () => {
     it('shows empty state when no activity', async () => {
       server.use(
         http.get('/api/v1/tasks/:id/activity', () => {
-          return HttpResponse.json({ activities: [] });
+          return HttpResponse.json({ activity: [], summary: { total_iterations: 0, total_tokens: 0 } });
         })
       );
 

@@ -15,6 +15,17 @@ interface ActiveTool {
   status: 'running' | 'complete' | 'error';
 }
 
+export interface AnsweredQuestion {
+  question: QuestQuestion;
+  answerId: string;
+  answer: string;
+}
+
+export interface AcceptedDraft {
+  draft: ObjectiveDraft;
+  taskId?: string;
+}
+
 interface MessageListProps {
   messages: QuestMessage[];
   failedMessages: Set<string>;
@@ -23,13 +34,25 @@ interface MessageListProps {
   sending: boolean;
   pendingDrafts: Map<string, ObjectiveDraft>;
   pendingQuestions: QuestQuestion[];
-  answeredQuestionId: string | null;
+  answeredQuestions: AnsweredQuestion[];
+  acceptedDrafts: Map<string, AcceptedDraft>;
   onRetry: (msg: QuestMessage) => void;
   onCopy: (content: string) => void;
   onAcceptDraft: (key: string, draft: ObjectiveDraft) => void;
   onRejectDraft: (key: string) => void;
   onAnswerQuestion: (answer: string, optionId: string) => void;
   onAcceptAll?: () => void;
+}
+
+// Check if streaming content contains objective or question signals
+function hasStreamingSignal(content: string): 'objective' | 'question' | null {
+  if (content.includes('<objective_draft>') || content.includes('title":')) {
+    return 'objective';
+  }
+  if (content.includes('<question>') || content.includes('"question":')) {
+    return 'question';
+  }
+  return null;
 }
 
 export function MessageList({
@@ -40,7 +63,8 @@ export function MessageList({
   sending,
   pendingDrafts,
   pendingQuestions,
-  answeredQuestionId,
+  answeredQuestions,
+  acceptedDrafts,
   onRetry,
   onCopy,
   onAcceptDraft,
@@ -150,11 +174,69 @@ export function MessageList({
         )}
 
         {/* Streaming response */}
-        {sending && streamingContent && (
-          <Message sender="assistant" isStreaming>
-            <MarkdownContent content={stripSignals(streamingContent)} isStreaming />
-          </Message>
-        )}
+        {sending && streamingContent && (() => {
+          const signalType = hasStreamingSignal(streamingContent);
+          const strippedContent = stripSignals(streamingContent);
+
+          // Show placeholder for objectives/questions being streamed
+          if (signalType === 'objective') {
+            return (
+              <div className="v2-streaming-placeholder">
+                <div className="v2-streaming-placeholder__icon">📋</div>
+                <div className="v2-streaming-placeholder__text">
+                  <span className="v2-label v2-label--warm">Preparing objective...</span>
+                  <div className="v2-thinking__dots">
+                    <span className="v2-thinking__dot" style={{ animationDelay: '0ms' }} />
+                    <span className="v2-thinking__dot" style={{ animationDelay: '150ms' }} />
+                    <span className="v2-thinking__dot" style={{ animationDelay: '300ms' }} />
+                  </div>
+                </div>
+              </div>
+            );
+          }
+
+          if (signalType === 'question') {
+            return (
+              <div className="v2-streaming-placeholder">
+                <div className="v2-streaming-placeholder__icon">❓</div>
+                <div className="v2-streaming-placeholder__text">
+                  <span className="v2-label v2-label--accent">Preparing question...</span>
+                  <div className="v2-thinking__dots">
+                    <span className="v2-thinking__dot" style={{ animationDelay: '0ms' }} />
+                    <span className="v2-thinking__dot" style={{ animationDelay: '150ms' }} />
+                    <span className="v2-thinking__dot" style={{ animationDelay: '300ms' }} />
+                  </div>
+                </div>
+              </div>
+            );
+          }
+
+          // Regular streaming content
+          if (strippedContent.trim()) {
+            return (
+              <Message sender="assistant" isStreaming>
+                <MarkdownContent content={strippedContent} isStreaming />
+              </Message>
+            );
+          }
+
+          return null;
+        })()}
+
+        {/* Accepted drafts - show as confirmed */}
+        {acceptedDrafts.size > 0 && Array.from(acceptedDrafts.entries()).map(([key, { draft, taskId }]) => (
+          <div key={key} className="v2-accepted-objective">
+            <div className="v2-accepted-objective__header">
+              <span className="v2-label" style={{ color: 'var(--status-complete)' }}>✓ Objective Created</span>
+            </div>
+            <div className="v2-accepted-objective__title">{draft.title}</div>
+            {taskId && (
+              <a href={`/v2/objectives/${taskId}`} className="v2-link v2-accepted-objective__link">
+                View objective →
+              </a>
+            )}
+          </div>
+        ))}
 
         {/* Pending drafts */}
         {pendingDrafts.size > 0 && (
@@ -196,10 +278,26 @@ export function MessageList({
           </>
         )}
 
+        {/* Answered questions - show with answer highlighted */}
+        {answeredQuestions.map((aq, i) => (
+          <QuestionPrompt
+            key={`answered-${i}`}
+            question={aq.question.question}
+            options={(aq.question.options || []).map((opt, j) => ({
+              id: `${j}`,
+              title: opt,
+              description: '',
+            }))}
+            onSelect={() => {}}
+            disabled={true}
+            answeredId={aq.answerId}
+          />
+        ))}
+
         {/* Pending questions */}
         {pendingQuestions.length > 0 && pendingQuestions.map((q, i) => (
           <QuestionPrompt
-            key={i}
+            key={`pending-${i}`}
             question={q.question}
             options={(q.options || []).map((opt, j) => ({
               id: `${j}`,
@@ -211,7 +309,6 @@ export function MessageList({
               onAnswerQuestion(answer, optId);
             }}
             disabled={sending}
-            answeredId={answeredQuestionId || undefined}
           />
         ))}
 

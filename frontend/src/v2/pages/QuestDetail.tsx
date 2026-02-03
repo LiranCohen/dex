@@ -8,6 +8,8 @@ import {
   useToast,
   QuestObjectivesList,
   MessageList,
+  type AnsweredQuestion,
+  type AcceptedDraft,
 } from '../components';
 import { fetchQuest, fetchQuestTasks, sendQuestMessage, createObjective, createObjectivesBatch, fetchApprovals, cancelQuestSession, isApiError } from '../../lib/api';
 import { useWebSocket } from '../../hooks/useWebSocket';
@@ -27,7 +29,8 @@ export function QuestDetail() {
   const [activeTools, setActiveTools] = useState<Map<string, { tool: string; status: 'running' | 'complete' | 'error' }>>(new Map());
   const [pendingDrafts, setPendingDrafts] = useState<Map<string, ObjectiveDraft>>(new Map());
   const [pendingQuestions, setPendingQuestions] = useState<QuestQuestion[]>([]);
-  const [answeredQuestionId, setAnsweredQuestionId] = useState<string | null>(null);
+  const [answeredQuestions, setAnsweredQuestions] = useState<AnsweredQuestion[]>([]);
+  const [acceptedDrafts, setAcceptedDrafts] = useState<Map<string, AcceptedDraft>>(new Map());
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [commandHistory, setCommandHistory] = useState<string[]>([]);
   const [failedMessages, setFailedMessages] = useState<Set<string>>(new Set());
@@ -117,9 +120,8 @@ export function QuestDetail() {
               setMessages((prev) => [...prev, msg]);
               setSending(false);
 
-              // Clear previous questions when new message arrives
+              // Clear pending questions (answered ones are kept)
               setPendingQuestions([]);
-              setAnsweredQuestionId(null);
 
               // Parse drafts and questions from new message
               const drafts = parseObjectiveDrafts(msg.content);
@@ -258,12 +260,20 @@ export function QuestDetail() {
     try {
       // Accept all optional items by default
       const selectedOptional = (draft.checklist.optional || []).map((_, i) => i);
-      await createObjective(id, draft, selectedOptional);
+      const result = await createObjective(id, draft, selectedOptional);
+
+      // Move from pending to accepted
       setPendingDrafts((prev) => {
         const next = new Map(prev);
         next.delete(draftKey);
         return next;
       });
+      setAcceptedDrafts((prev) => {
+        const next = new Map(prev);
+        next.set(draftKey, { draft, taskId: result.task?.ID });
+        return next;
+      });
+
       showToast('Objective created', 'success');
       loadData();
     } catch (err) {
@@ -276,13 +286,24 @@ export function QuestDetail() {
     if (!id || pendingDrafts.size === 0) return;
     try {
       // Convert all pending drafts to batch format
-      const draftsArray = Array.from(pendingDrafts.values()).map((draft) => ({
+      const draftsEntries = Array.from(pendingDrafts.entries());
+      const draftsArray = draftsEntries.map(([, draft]) => ({
         draft,
         selectedOptional: (draft.checklist.optional || []).map((_, i) => i),
       }));
 
       await createObjectivesBatch(id, draftsArray);
+
+      // Move all from pending to accepted
+      setAcceptedDrafts((prev) => {
+        const next = new Map(prev);
+        draftsEntries.forEach(([key, draft]) => {
+          next.set(key, { draft });
+        });
+        return next;
+      });
       setPendingDrafts(new Map());
+
       showToast(`Created ${draftsArray.length} objectives`, 'success');
       loadData();
     } catch (err) {
@@ -300,8 +321,12 @@ export function QuestDetail() {
   };
 
   const handleAnswerQuestion = async (answer: string, optionId: string) => {
-    // Keep the question visible but mark as answered
-    setAnsweredQuestionId(optionId);
+    // Move question to answered list
+    if (pendingQuestions.length > 0) {
+      const question = pendingQuestions[0];
+      setAnsweredQuestions((prev) => [...prev, { question, answerId: optionId, answer }]);
+      setPendingQuestions((prev) => prev.slice(1));
+    }
     await handleSend(answer);
   };
 
@@ -374,7 +399,8 @@ export function QuestDetail() {
           sending={sending}
           pendingDrafts={pendingDrafts}
           pendingQuestions={pendingQuestions}
-          answeredQuestionId={answeredQuestionId}
+          answeredQuestions={answeredQuestions}
+          acceptedDrafts={acceptedDrafts}
           onRetry={handleRetry}
           onCopy={handleCopyMessage}
           onAcceptDraft={handleAcceptDraft}

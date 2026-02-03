@@ -78,13 +78,14 @@ export const handlers = [
   }),
 
   http.get(`${API_BASE}/tasks/:taskId/checklist`, () => {
-    // Transform mock data to match ObjectiveDetail's expected format
     return HttpResponse.json({
+      checklist: { id: 'checklist-1', task_id: 'task-1', created_at: '2024-01-01T00:00:00Z' },
       items: [
-        { id: 'item-1', task_id: 'task-1', description: 'Create login endpoint', is_completed: true, is_optional: false },
-        { id: 'item-2', task_id: 'task-1', description: 'Add JWT token generation', is_completed: false, is_optional: false },
-        { id: 'item-3', task_id: 'task-1', description: 'Implement auth middleware', is_completed: false, is_optional: false },
+        { id: 'item-1', checklist_id: 'checklist-1', description: 'Create login endpoint', status: 'done', sort_order: 0 },
+        { id: 'item-2', checklist_id: 'checklist-1', description: 'Add JWT token generation', status: 'in_progress', sort_order: 1 },
+        { id: 'item-3', checklist_id: 'checklist-1', description: 'Implement auth middleware', status: 'pending', sort_order: 2 },
       ],
+      summary: { total: 3, done: 1, failed: 0, all_done: false },
     });
   }),
 
@@ -110,10 +111,11 @@ export const handlers = [
 
   http.get(`${API_BASE}/tasks/:taskId/activity`, () => {
     return HttpResponse.json({
-      activities: [
-        { id: 'activity-1', type: 'started', content: 'Task started', created_at: '2024-01-01T01:00:00Z' },
-        { id: 'activity-2', type: 'tool_call', content: 'Read file main.ts', created_at: '2024-01-01T01:01:00Z' },
+      activity: [
+        { id: 'activity-1', session_id: 'session-1', iteration: 0, event_type: 'user_message', content: 'Task started', created_at: '2024-01-01T01:00:00Z' },
+        { id: 'activity-2', session_id: 'session-1', iteration: 1, event_type: 'tool_call', content: 'Read file main.ts', created_at: '2024-01-01T01:01:00Z' },
       ],
+      summary: { total_iterations: 1, total_tokens: 1000 },
     });
   }),
 

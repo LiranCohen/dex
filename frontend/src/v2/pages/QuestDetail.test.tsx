@@ -167,19 +167,21 @@ describe('QuestDetail', () => {
       });
     });
 
-    it('shows "You" for user messages', async () => {
+    it('shows handle for user messages', async () => {
       render(<QuestDetail />);
 
       await waitFor(() => {
-        expect(screen.getByText('You')).toBeInTheDocument();
+        // IRC-style handle: <you>
+        expect(screen.getByText('<you>')).toBeInTheDocument();
       });
     });
 
-    it('shows "Dex" for assistant messages', async () => {
+    it('shows handle for assistant messages', async () => {
       render(<QuestDetail />);
 
       await waitFor(() => {
-        expect(screen.getByText('Dex')).toBeInTheDocument();
+        // IRC-style handle: <dex>
+        expect(screen.getByText('<dex>')).toBeInTheDocument();
       });
     });
 
