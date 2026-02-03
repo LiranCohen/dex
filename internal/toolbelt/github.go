@@ -105,7 +105,7 @@ func (g *GitHubClient) CreateRepo(ctx context.Context, opts CreateRepoOptions) (
 		Name:        github.Ptr(opts.Name),
 		Description: github.Ptr(opts.Description),
 		Private:     github.Ptr(opts.Private),
-		AutoInit:    github.Ptr(true),
+		AutoInit:    github.Ptr(false), // Don't auto-init - Dex pushes its own content
 	}
 
 	org := opts.Org
