@@ -42,7 +42,7 @@ export function ObjectiveDetail() {
     try {
       const [taskData, checklistData, activityData, approvalsData] = await Promise.all([
         api.get<Task>(`/tasks/${id}`),
-        fetchChecklist(id).catch(() => ({ checklist: null, items: [], summary: { total: 0, done: 0, failed: 0, all_done: false } })),
+        fetchChecklist(id).catch(() => ({ checklist: null, items: [], summary: { total: 0, done: 0, failed: 0, pending: 0, all_done: false } })),
         fetchTaskActivity(id).catch(() => ({ activity: [], summary: { total_iterations: 0, total_tokens: 0 } })),
         fetchApprovals(),
       ]);
