@@ -45,44 +45,13 @@ func NewStateMachine(database *db.DB) *StateMachine {
 	}
 }
 
-// NewStateMachineWithEvents creates a state machine with an event channel
-func NewStateMachineWithEvents(database *db.DB, eventChan chan TransitionEvent) *StateMachine {
-	return &StateMachine{
-		db:        database,
-		eventChan: eventChan,
-	}
-}
-
-// EventChannel returns the event channel for subscribing to transitions
-func (sm *StateMachine) EventChannel() <-chan TransitionEvent {
-	return sm.eventChan
-}
-
-// CanTransition checks if a transition from the current status to the target status is valid
-func (sm *StateMachine) CanTransition(from, to string) bool {
+// canTransition checks if a transition from the current status to the target status is valid
+func (sm *StateMachine) canTransition(from, to string) bool {
 	validTargets, exists := validTransitions[from]
 	if !exists {
 		return false
 	}
 	return slices.Contains(validTargets, to)
-}
-
-// ValidTransitionsFrom returns all valid target statuses from the given status
-func (sm *StateMachine) ValidTransitionsFrom(from string) []string {
-	targets, exists := validTransitions[from]
-	if !exists {
-		return nil
-	}
-	// Return a copy to prevent modification
-	result := make([]string, len(targets))
-	copy(result, targets)
-	return result
-}
-
-// IsTerminalState returns true if the status is a terminal state (no valid transitions)
-func (sm *StateMachine) IsTerminalState(status string) bool {
-	targets, exists := validTransitions[status]
-	return exists && len(targets) == 0
 }
 
 // Transition validates and executes a status change for a task
@@ -105,7 +74,7 @@ func (sm *StateMachine) Transition(taskID, targetStatus string) error {
 	currentStatus := task.Status
 
 	// Validate transition is allowed
-	if !sm.CanTransition(currentStatus, targetStatus) {
+	if !sm.canTransition(currentStatus, targetStatus) {
 		return &InvalidTransitionError{
 			TaskID:       taskID,
 			FromStatus:   currentStatus,

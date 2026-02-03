@@ -58,7 +58,6 @@ type MemorySource string
 const (
 	SourceAutomatic MemorySource = "automatic" // Extracted automatically
 	SourceExplicit  MemorySource = "explicit"  // Agent signaled MEMORY:
-	SourceImported  MemorySource = "imported"  // Imported from export
 	SourceManual    MemorySource = "manual"    // Added via CLI/API
 )
 
@@ -92,7 +91,6 @@ type Memory struct {
 const (
 	InitialConfidenceExplicit  = 0.6
 	InitialConfidenceAutomatic = 0.5
-	InitialConfidenceImported  = 0.7
 	InitialConfidenceManual    = 0.8
 
 	UsageBoost    = 0.02
@@ -476,47 +474,3 @@ func scanMemories(rows *sql.Rows) ([]Memory, error) {
 	return memories, rows.Err()
 }
 
-// MemoryExport represents the export format for memories
-type MemoryExport struct {
-	Version    int      `json:"version"`
-	Project    string   `json:"project"`
-	ExportedAt string   `json:"exported_at"`
-	Memories   []Memory `json:"memories"`
-}
-
-// ExportMemories exports all memories for a project
-func (db *DB) ExportMemories(projectID string) (*MemoryExport, error) {
-	memories, err := db.ListMemories(projectID, nil, 0)
-	if err != nil {
-		return nil, err
-	}
-
-	return &MemoryExport{
-		Version:    1,
-		Project:    projectID,
-		ExportedAt: time.Now().UTC().Format(time.RFC3339),
-		Memories:   memories,
-	}, nil
-}
-
-// ImportMemories imports memories from an export
-func (db *DB) ImportMemories(projectID string, export *MemoryExport) (int, error) {
-	count := 0
-	for _, m := range export.Memories {
-		m.ProjectID = projectID
-		m.Source = SourceImported
-		if m.Confidence == 0 {
-			m.Confidence = InitialConfidenceImported
-		}
-		if m.CreatedAt.IsZero() {
-			m.CreatedAt = time.Now()
-		}
-
-		if err := db.CreateMemory(&m); err != nil {
-			// Skip duplicates
-			continue
-		}
-		count++
-	}
-	return count, nil
-}

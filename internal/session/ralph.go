@@ -254,22 +254,8 @@ func (r *RalphLoop) SetModel(model string) {
 	}
 }
 
-// Run executes the Ralph loop until completion, error, or budget exceeded
-func (r *RalphLoop) Run(ctx context.Context) error {
-	fmt.Printf("RalphLoop.Run: starting for session %s (hat: %s)\n", r.session.ID, r.session.Hat)
-
-	// Cleanup temp files from large tool responses when session ends
-	defer func() {
-		if err := tools.CleanupTempResponses(); err != nil {
-			fmt.Printf("RalphLoop.Run: warning - failed to cleanup temp responses: %v\n", err)
-		}
-	}()
-
-	if r.client == nil {
-		fmt.Printf("RalphLoop.Run: ERROR - Anthropic client is nil\n")
-		return ErrNoAnthropicClient
-	}
-
+// initializeServices sets up all services needed for the session
+func (r *RalphLoop) initializeServices(ctx context.Context) (*db.Task, error) {
 	// Initialize activity recorder with WebSocket broadcasting
 	r.activity = NewActivityRecorder(r.db, r.session.ID, r.session.TaskID, r.broadcastEvent)
 	r.activity.SetHat(r.session.Hat)
@@ -296,18 +282,275 @@ func (r *RalphLoop) Run(ctx context.Context) error {
 		r.executor.SetQualityGate(r.qualityGate)
 	}
 
-	// Initialize issue commenter for GitHub issue sync
+	// Get task for issue commenter setup
 	task, _ := r.db.GetTaskByID(r.session.TaskID)
 
-	// Set up quality gate result callback for issue comments (after task is loaded)
+	// Set up quality gate result callback for issue comments
 	if r.executor != nil {
 		r.executor.SetOnQualityGateResult(func(result *GateResult) {
 			r.postQualityGateComment(ctx, result)
 		})
 	}
+
 	if task != nil {
 		r.initIssueCommenter(task)
 	}
+
+	return task, nil
+}
+
+// setupInitialConversation builds the initial message for the conversation
+func (r *RalphLoop) setupInitialConversation() {
+	initialMessage := "Begin working on the task. Follow your hat instructions and report progress."
+
+	// Check for checklist first
+	if checklist, err := r.db.GetChecklistByTaskID(r.session.TaskID); err == nil && checklist != nil {
+		if items, err := r.db.GetChecklistItems(checklist.ID); err == nil && len(items) > 0 {
+			initialMessage = r.buildChecklistPrompt(items)
+			fmt.Printf("RalphLoop.Run: using checklist context (%d items)\n", len(items))
+		}
+	} else if planningSession, err := r.db.GetPlanningSessionByTaskID(r.session.TaskID); err == nil && planningSession != nil {
+		if planningSession.RefinedPrompt.Valid && planningSession.RefinedPrompt.String != "" {
+			initialMessage = fmt.Sprintf("## Task Instructions (from planning phase)\n\n%s\n\n---\n\nBegin working on this task. Follow your hat instructions and report progress.", planningSession.RefinedPrompt.String)
+			fmt.Printf("RalphLoop.Run: using refined prompt from planning phase\n")
+		}
+	}
+
+	r.messages = append(r.messages, toolbelt.AnthropicMessage{
+		Role:    "user",
+		Content: initialMessage,
+	})
+
+	// Record initial user message
+	if err := r.activity.RecordUserMessage(0, initialMessage); err != nil {
+		fmt.Printf("RalphLoop.Run: warning - failed to record initial message: %v\n", err)
+	}
+}
+
+// executeToolCalls processes tool use blocks and returns the results
+func (r *RalphLoop) executeToolCalls(ctx context.Context, toolBlocks []toolbelt.AnthropicContentBlock) []toolbelt.ContentBlock {
+	var results []toolbelt.ContentBlock
+
+	for i, block := range toolBlocks {
+		fmt.Printf("RalphLoop.Run: executing tool %s\n", block.Name)
+		r.activity.Debug(r.session.IterationCount, fmt.Sprintf("Executing tool %d/%d: %s", i+1, len(toolBlocks), block.Name))
+
+		// Record tool call
+		if err := r.activity.RecordToolCall(r.session.IterationCount, block.Name, block.Input); err != nil {
+			fmt.Printf("RalphLoop.Run: warning - failed to record tool call: %v\n", err)
+		}
+
+		// Check for tool repetition before execution
+		paramsJSON, _ := json.Marshal(block.Input)
+		if allowed, reason := r.health.CheckToolCall(block.Name, string(paramsJSON)); !allowed {
+			r.activity.Debug(r.session.IterationCount, fmt.Sprintf("Tool %s blocked: %s", block.Name, reason))
+			results = append(results, toolbelt.ContentBlock{
+				Type:      "tool_result",
+				ToolUseID: block.ID,
+				Content:   fmt.Sprintf("Tool call blocked: %s. Please try a different approach or use different parameters.", reason),
+				IsError:   true,
+			})
+			continue
+		}
+
+		// Execute the tool
+		toolStart := time.Now()
+		var result ToolResult
+		if r.executor != nil {
+			result = r.executor.Execute(ctx, block.Name, block.Input)
+		} else {
+			result = ToolResult{
+				Output:  "Tool executor not initialized",
+				IsError: true,
+			}
+			r.activity.DebugError(r.session.IterationCount, "Tool executor not initialized", nil)
+		}
+		toolDuration := time.Since(toolStart).Milliseconds()
+
+		// Record tool result
+		if err := r.activity.RecordToolResult(r.session.IterationCount, block.Name, result); err != nil {
+			fmt.Printf("RalphLoop.Run: warning - failed to record tool result: %v\n", err)
+		}
+
+		// Update health tracking
+		if result.IsError {
+			r.activity.DebugError(r.session.IterationCount, fmt.Sprintf("Tool %s failed after %dms", block.Name, toolDuration), map[string]any{"output": truncateOutput(result.Output, 500)})
+			r.health.RecordFailure(block.Name)
+
+			if block.Name == "task_complete" && strings.Contains(result.Output, "QUALITY_BLOCKED") {
+				r.health.RecordQualityBlock()
+			}
+		} else {
+			r.activity.DebugWithDuration(r.session.IterationCount, fmt.Sprintf("Tool %s completed (%d bytes output)", block.Name, len(result.Output)), toolDuration)
+			r.health.RecordSuccess()
+
+			if block.Name == "task_complete" && strings.Contains(result.Output, "QUALITY_PASSED") {
+				r.health.RecordQualityPass()
+			}
+		}
+
+		fmt.Printf("RalphLoop.Run: tool %s result (error=%v): %s\n", block.Name, result.IsError, truncateOutput(result.Output, 200))
+
+		results = append(results, toolbelt.ContentBlock{
+			Type:      "tool_result",
+			ToolUseID: block.ID,
+			Content:   result.Output,
+			IsError:   result.IsError,
+		})
+	}
+
+	return results
+}
+
+// handleNonToolResponse processes signals in a text response (no tool use)
+func (r *RalphLoop) handleNonToolResponse(responseText string) {
+	// Process checklist signals
+	r.processChecklistSignals(responseText)
+
+	// Process scratchpad signal
+	if scratchpad, found := parseScratchpadSignal(responseText); found {
+		r.session.Scratchpad = security.SanitizeForPrompt(scratchpad)
+		r.activity.Debug(r.session.IterationCount, fmt.Sprintf("Updated scratchpad (%d chars)", len(r.session.Scratchpad)))
+	}
+
+	// Process memory signals
+	r.processMemorySignals(responseText)
+}
+
+// handleCompletionSignal processes task completion and returns (shouldEnd, continueLoop)
+func (r *RalphLoop) handleCompletionSignal(ctx context.Context, responseText string) (shouldEnd bool, continueLoop bool) {
+	// Verify checklist completion
+	allComplete, issues := r.verifyChecklist()
+
+	// If there are issues, check if they're acknowledged
+	if !allComplete {
+		hasAcknowledgment := strings.Contains(responseText, SignalAcknowledgeFailures)
+
+		if !hasAcknowledgment {
+			// Send back for resolution - require explicit acknowledgment
+			issuesList := r.formatChecklistIssues(issues)
+			r.messages = append(r.messages, toolbelt.AnthropicMessage{
+				Role: "user",
+				Content: fmt.Sprintf(`Some checklist items are not complete:
+%s
+
+Please either:
+1. Complete the remaining items and signal EVENT:task.complete again
+2. Mark items as failed with CHECKLIST_FAILED:<id>:<reason>
+3. If failures are known and accepted, output ACKNOWLEDGE_FAILURES along with EVENT:task.complete
+4. If blocked, use EVENT:task.blocked:{"reason":"description"}`, issuesList),
+			})
+			fmt.Printf("RalphLoop.Run: task completion blocked - %d unacknowledged checklist issues\n", len(issues))
+			return false, true // Continue loop
+		}
+	}
+
+	// Determine outcome
+	outcome := "completed"
+	if !allComplete {
+		outcome = "completed_with_acknowledged_issues"
+		fmt.Printf("RalphLoop.Run: task completed with %d acknowledged checklist issues\n", len(issues))
+	}
+
+	// Record completion signal
+	if err := r.activity.RecordCompletion(r.session.IterationCount, TopicTaskComplete); err != nil {
+		fmt.Printf("RalphLoop.Run: warning - failed to record completion: %v\n", err)
+	}
+
+	// Post completion comment to GitHub issue
+	if r.issueCommenter != nil {
+		commentData := r.buildCommentData(ctx)
+		summary := r.getCompletionSummary()
+		comment := github.BuildCompletedComment(commentData, summary)
+		r.postIssueComment(ctx, comment)
+	}
+
+	r.broadcastEvent(websocket.EventSessionCompleted, map[string]any{
+		"session_id":   r.session.ID,
+		"outcome":      outcome,
+		"iterations":   r.session.IterationCount,
+		"has_issues":   !allComplete,
+		"issues_count": len(issues),
+	})
+
+	return true, false // End session
+}
+
+// handleEventTransition processes event-based hat transitions
+// Returns true if the session should terminate
+func (r *RalphLoop) handleEventTransition(ctx context.Context, event *Event) bool {
+	if r.eventRouter == nil {
+		return false
+	}
+
+	result := r.eventRouter.RouteAndPersist(event, r.session.Hat)
+
+	if result.Error != nil {
+		fmt.Printf("RalphLoop.Run: event routing error: %v\n", result.Error)
+		r.activity.Debug(r.session.IterationCount, fmt.Sprintf("Event routing error: %v", result.Error))
+		return false
+	}
+
+	if result.IsTerminal {
+		r.activity.Debug(r.session.IterationCount, fmt.Sprintf("Terminal event: %s", event.Topic))
+		r.broadcastEvent(websocket.EventSessionCompleted, map[string]any{
+			"session_id": r.session.ID,
+			"outcome":    "event_complete",
+			"event":      event.Topic,
+		})
+		return true
+	}
+
+	if result.NextHat != "" {
+		oldHat := r.session.Hat
+		nextHat := result.NextHat
+
+		if err := r.activity.RecordHatTransition(r.session.IterationCount, oldHat, nextHat); err != nil {
+			fmt.Printf("RalphLoop.Run: warning - failed to record hat transition: %v\n", err)
+		}
+
+		// Post hat transition comment to GitHub issue (with debouncing)
+		if r.issueCommenter != nil && r.issueCommenter.ShouldPostHatTransition(r.session.IterationCount) {
+			commentData := r.buildCommentData(ctx)
+			commentData.Hat = nextHat
+			commentData.PreviousHat = oldHat
+			comment := github.BuildHatTransitionComment(commentData)
+			r.postIssueComment(ctx, comment)
+		}
+
+		// Store transition for manager to handle
+		r.session.Hat = nextHat
+		r.activity.SetHat(nextHat)
+		r.broadcastEvent(websocket.EventSessionCompleted, map[string]any{
+			"session_id": r.session.ID,
+			"outcome":    "hat_transition",
+			"next_hat":   nextHat,
+			"event":      event.Topic,
+		})
+		return true
+	}
+
+	return false
+}
+
+// Run executes the Ralph loop until completion, error, or budget exceeded
+func (r *RalphLoop) Run(ctx context.Context) error {
+	fmt.Printf("RalphLoop.Run: starting for session %s (hat: %s)\n", r.session.ID, r.session.Hat)
+
+	// Cleanup temp files from large tool responses when session ends
+	defer func() {
+		if err := tools.CleanupTempResponses(); err != nil {
+			fmt.Printf("RalphLoop.Run: warning - failed to cleanup temp responses: %v\n", err)
+		}
+	}()
+
+	if r.client == nil {
+		fmt.Printf("RalphLoop.Run: ERROR - Anthropic client is nil\n")
+		return ErrNoAnthropicClient
+	}
+
+	// Initialize all services
+	task, _ := r.initializeServices(ctx)
 
 	// Save checkpoint when function exits (success or failure) to preserve state for resume
 	defer func() {
@@ -351,31 +594,8 @@ func (r *RalphLoop) Run(ctx context.Context) error {
 	}
 
 	// Initialize conversation with context message (only if not restored from checkpoint)
-	// If messages already has content, we restored from checkpoint and should continue from there
 	if len(r.messages) == 0 {
-		initialMessage := "Begin working on the task. Follow your hat instructions and report progress."
-
-		// Check for checklist first
-		if checklist, err := r.db.GetChecklistByTaskID(r.session.TaskID); err == nil && checklist != nil {
-			if items, err := r.db.GetChecklistItems(checklist.ID); err == nil && len(items) > 0 {
-				initialMessage = r.buildChecklistPrompt(items)
-				fmt.Printf("RalphLoop.Run: using checklist context (%d items)\n", len(items))
-			}
-		} else if planningSession, err := r.db.GetPlanningSessionByTaskID(r.session.TaskID); err == nil && planningSession != nil {
-			if planningSession.RefinedPrompt.Valid && planningSession.RefinedPrompt.String != "" {
-				initialMessage = fmt.Sprintf("## Task Instructions (from planning phase)\n\n%s\n\n---\n\nBegin working on this task. Follow your hat instructions and report progress.", planningSession.RefinedPrompt.String)
-				fmt.Printf("RalphLoop.Run: using refined prompt from planning phase\n")
-			}
-		}
-		r.messages = append(r.messages, toolbelt.AnthropicMessage{
-			Role:    "user",
-			Content: initialMessage,
-		})
-
-		// Record initial user message
-		if err := r.activity.RecordUserMessage(0, initialMessage); err != nil {
-			fmt.Printf("RalphLoop.Run: warning - failed to record initial message: %v\n", err)
-		}
+		r.setupInitialConversation()
 	} else {
 		fmt.Printf("RalphLoop.Run: restored from checkpoint with %d messages, skipping initial prompt\n", len(r.messages))
 	}
@@ -475,104 +695,29 @@ func (r *RalphLoop) Run(ctx context.Context) error {
 			r.activity.Debug(r.session.IterationCount, fmt.Sprintf("Processing %d tool calls", len(toolBlocks)))
 
 			// Add assistant message with tool_use blocks
-			// Use NormalizedContent to ensure Input fields are never nil (API requirement)
 			r.messages = append(r.messages, toolbelt.AnthropicMessage{
 				Role:    "assistant",
 				Content: response.NormalizedContent(),
 			})
 
 			// Record assistant response
-			responseText := response.Text()
 			if err := r.activity.RecordAssistantResponse(
 				r.session.IterationCount,
-				responseText,
+				response.Text(),
 				response.Usage.InputTokens,
 				response.Usage.OutputTokens,
 			); err != nil {
 				fmt.Printf("RalphLoop.Run: warning - failed to record assistant response: %v\n", err)
 			}
 
-			// Execute tools and collect results
-			var results []toolbelt.ContentBlock
-			for i, block := range toolBlocks {
-				fmt.Printf("RalphLoop.Run: executing tool %s\n", block.Name)
-				r.activity.Debug(r.session.IterationCount, fmt.Sprintf("Executing tool %d/%d: %s", i+1, len(toolBlocks), block.Name))
-
-				// Record tool call
-				if err := r.activity.RecordToolCall(r.session.IterationCount, block.Name, block.Input); err != nil {
-					fmt.Printf("RalphLoop.Run: warning - failed to record tool call: %v\n", err)
-				}
-
-				// Check for tool repetition before execution
-				paramsJSON, _ := json.Marshal(block.Input)
-				if allowed, reason := r.health.CheckToolCall(block.Name, string(paramsJSON)); !allowed {
-					r.activity.Debug(r.session.IterationCount, fmt.Sprintf("Tool %s blocked: %s", block.Name, reason))
-
-					results = append(results, toolbelt.ContentBlock{
-						Type:      "tool_result",
-						ToolUseID: block.ID,
-						Content:   fmt.Sprintf("Tool call blocked: %s. Please try a different approach or use different parameters.", reason),
-						IsError:   true,
-					})
-					continue // Skip execution, move to next tool
-				}
-
-				// Execute the tool
-				toolStart := time.Now()
-				var result ToolResult
-				if r.executor != nil {
-					result = r.executor.Execute(ctx, block.Name, block.Input)
-				} else {
-					result = ToolResult{
-						Output:  "Tool executor not initialized",
-						IsError: true,
-					}
-					r.activity.DebugError(r.session.IterationCount, "Tool executor not initialized", nil)
-				}
-				toolDuration := time.Since(toolStart).Milliseconds()
-
-				// Record tool result
-				if err := r.activity.RecordToolResult(r.session.IterationCount, block.Name, result); err != nil {
-					fmt.Printf("RalphLoop.Run: warning - failed to record tool result: %v\n", err)
-				}
-
-				if result.IsError {
-					r.activity.DebugError(r.session.IterationCount, fmt.Sprintf("Tool %s failed after %dms", block.Name, toolDuration), map[string]any{"output": truncateOutput(result.Output, 500)})
-					r.health.RecordFailure(block.Name)
-
-					// Track quality gate blocks specifically
-					if block.Name == "task_complete" && strings.Contains(result.Output, "QUALITY_BLOCKED") {
-						r.health.RecordQualityBlock()
-					}
-				} else {
-					r.activity.DebugWithDuration(r.session.IterationCount, fmt.Sprintf("Tool %s completed (%d bytes output)", block.Name, len(result.Output)), toolDuration)
-					r.health.RecordSuccess()
-
-					// Track quality gate passes
-					if block.Name == "task_complete" && strings.Contains(result.Output, "QUALITY_PASSED") {
-						r.health.RecordQualityPass()
-					}
-				}
-
-				fmt.Printf("RalphLoop.Run: tool %s result (error=%v): %s\n", block.Name, result.IsError, truncateOutput(result.Output, 200))
-
-				results = append(results, toolbelt.ContentBlock{
-					Type:      "tool_result",
-					ToolUseID: block.ID,
-					Content:   result.Output,
-					IsError:   result.IsError,
-				})
-			}
-
-			// Add tool results as user message
+			// Execute tools and add results
+			results := r.executeToolCalls(ctx, toolBlocks)
 			r.messages = append(r.messages, toolbelt.AnthropicMessage{
 				Role:    "user",
 				Content: results,
 			})
 
 			r.activity.Debug(r.session.IterationCount, "All tools complete, continuing to next iteration")
-
-			// Continue loop without adding continuation prompt
 			continue
 		}
 
@@ -603,124 +748,24 @@ func (r *RalphLoop) Run(ctx context.Context) error {
 			fmt.Printf("RalphLoop.Run: warning - failed to record assistant response: %v\n", err)
 		}
 
-		// 7.5. Process checklist signals
-		r.processChecklistSignals(responseText)
-
-		// 7.6. Process scratchpad signal
-		if scratchpad, found := parseScratchpadSignal(responseText); found {
-			r.session.Scratchpad = security.SanitizeForPrompt(scratchpad)
-			r.activity.Debug(r.session.IterationCount, fmt.Sprintf("Updated scratchpad (%d chars)", len(r.session.Scratchpad)))
-		}
-
-		// 7.7. Process memory signals
-		r.processMemorySignals(responseText)
+		// 7.5. Process signals (checklist, scratchpad, memory)
+		r.handleNonToolResponse(responseText)
 
 		// 8. Check for task completion
 		if r.detectCompletion(responseText) {
-			// Verify checklist completion
-			allComplete, issues := r.verifyChecklist()
-
-			// If there are issues, check if they're acknowledged
-			if !allComplete {
-				hasAcknowledgment := strings.Contains(responseText, SignalAcknowledgeFailures)
-
-				if !hasAcknowledgment {
-					// Send back for resolution - require explicit acknowledgment
-					issuesList := r.formatChecklistIssues(issues)
-					r.messages = append(r.messages, toolbelt.AnthropicMessage{
-						Role: "user",
-						Content: fmt.Sprintf(`Some checklist items are not complete:
-%s
-
-Please either:
-1. Complete the remaining items and signal EVENT:task.complete again
-2. Mark items as failed with CHECKLIST_FAILED:<id>:<reason>
-3. If failures are known and accepted, output ACKNOWLEDGE_FAILURES along with EVENT:task.complete
-4. If blocked, use EVENT:task.blocked:{"reason":"description"}`, issuesList),
-					})
-					fmt.Printf("RalphLoop.Run: task completion blocked - %d unacknowledged checklist issues\n", len(issues))
-					continue // Continue loop, don't complete
-				}
+			shouldEnd, continueLoop := r.handleCompletionSignal(ctx, responseText)
+			if continueLoop {
+				continue
 			}
-
-			// Determine outcome
-			outcome := "completed"
-			if !allComplete {
-				outcome = "completed_with_acknowledged_issues"
-				fmt.Printf("RalphLoop.Run: task completed with %d acknowledged checklist issues\n", len(issues))
+			if shouldEnd {
+				return nil
 			}
-
-			// Record completion signal
-			if err := r.activity.RecordCompletion(r.session.IterationCount, TopicTaskComplete); err != nil {
-				fmt.Printf("RalphLoop.Run: warning - failed to record completion: %v\n", err)
-			}
-
-			// Post completion comment to GitHub issue
-			if r.issueCommenter != nil {
-				commentData := r.buildCommentData(ctx)
-				summary := r.getCompletionSummary()
-				comment := github.BuildCompletedComment(commentData, summary)
-				r.postIssueComment(ctx, comment)
-			}
-
-			r.broadcastEvent(websocket.EventSessionCompleted, map[string]any{
-				"session_id":   r.session.ID,
-				"outcome":      outcome,
-				"iterations":   r.session.IterationCount,
-				"has_issues":   !allComplete,
-				"issues_count": len(issues),
-			})
-			return nil
 		}
 
 		// 9. Check for event-based transition
 		if event := r.detectEvent(responseText); event != nil {
-			// Route the event through the event router
-			if r.eventRouter != nil {
-				result := r.eventRouter.RouteAndPersist(event, r.session.Hat)
-
-				if result.Error != nil {
-					// Log routing error but continue
-					fmt.Printf("RalphLoop.Run: event routing error: %v\n", result.Error)
-					r.activity.Debug(r.session.IterationCount, fmt.Sprintf("Event routing error: %v", result.Error))
-				} else if result.IsTerminal {
-					// Terminal event (task.complete) - end the session
-					r.activity.Debug(r.session.IterationCount, fmt.Sprintf("Terminal event: %s", event.Topic))
-					r.broadcastEvent(websocket.EventSessionCompleted, map[string]any{
-						"session_id": r.session.ID,
-						"outcome":    "event_complete",
-						"event":      event.Topic,
-					})
-					return nil
-				} else if result.NextHat != "" {
-					// Hat transition via event
-					oldHat := r.session.Hat
-					nextHat := result.NextHat
-
-					if err := r.activity.RecordHatTransition(r.session.IterationCount, oldHat, nextHat); err != nil {
-						fmt.Printf("RalphLoop.Run: warning - failed to record hat transition: %v\n", err)
-					}
-
-					// Post hat transition comment to GitHub issue (with debouncing)
-					if r.issueCommenter != nil && r.issueCommenter.ShouldPostHatTransition(r.session.IterationCount) {
-						commentData := r.buildCommentData(ctx)
-						commentData.Hat = nextHat
-						commentData.PreviousHat = oldHat
-						comment := github.BuildHatTransitionComment(commentData)
-						r.postIssueComment(ctx, comment)
-					}
-
-					// Store transition for manager to handle
-					r.session.Hat = nextHat
-					r.activity.SetHat(nextHat)
-					r.broadcastEvent(websocket.EventSessionCompleted, map[string]any{
-						"session_id": r.session.ID,
-						"outcome":    "hat_transition",
-						"next_hat":   nextHat,
-						"event":      event.Topic,
-					})
-					return nil
-				}
+			if r.handleEventTransition(ctx, event) {
+				return nil
 			}
 		}
 

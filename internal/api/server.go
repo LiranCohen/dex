@@ -1867,11 +1867,6 @@ func (s *Server) getDataDir() string {
 	return "/opt/dex"
 }
 
-// GetHub returns the WebSocket hub for broadcasting events
-func (s *Server) GetHub() *websocket.Hub {
-	return s.hub
-}
-
 // ReloadToolbelt reloads the toolbelt from database secrets and updates the session manager
 // This is called after setup completes when API keys are first entered
 func (s *Server) ReloadToolbelt() error {
