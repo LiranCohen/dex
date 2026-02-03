@@ -4,6 +4,7 @@ export interface Task {
   ID: string;
   ProjectID: string;
   QuestID: string | null;
+  QuestTitle?: string;
   GitHubIssueNumber: number | null;
   Title: string;
   Description: string | null;

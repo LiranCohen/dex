@@ -1,0 +1,74 @@
+/* Design Tokens - Dex v2 */
+
+:root {
+  /* Background */
+  --bg-primary: #1a1a1a;
+  --bg-secondary: #242424;
+  --bg-tertiary: #2e2e2e;
+
+  /* Text */
+  --text-primary: #e8e4df;
+  --text-secondary: #9a9590;
+  --text-tertiary: #7a7570; /* Adjusted for WCAG AA contrast (4.5:1) */
+
+  /* Accent */
+  --accent-primary: #d4a574;
+  --accent-muted: #8b7355;
+
+  /* Status */
+  --status-active: #7dad7a;
+  --status-pending: #c9b896;
+  --status-complete: #6b8f71;
+  --status-error: #c47c6c;
+
+  /* Borders */
+  --border-subtle: #333333;
+  --border-emphasis: #444444;
+
+  /* Typography */
+  --font-sans: 'Inter', 'SF Pro Display', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'SF Mono', 'Menlo', monospace;
+
+  /* Font sizes */
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-base: 1rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.5rem;
+  --text-2xl: 2rem;
+
+  /* Font weights */
+  --font-normal: 400;
+  --font-medium: 500;
+  --font-semibold: 600;
+
+  /* Line heights */
+  --leading-tight: 1.2;
+  --leading-snug: 1.375;
+  --leading-normal: 1.5;
+  --leading-relaxed: 1.625;
+
+  /* Letter spacing */
+  --tracking-tight: -0.025em;
+  --tracking-normal: 0;
+  --tracking-wide: 0.05em;
+  --tracking-wider: 0.1em;
+
+  /* Spacing */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --space-12: 3rem;
+  --space-16: 4rem;
+
+  /* Transitions */
+  --transition-fast: 100ms ease;
+  --transition-base: 150ms ease;
+  --transition-slow: 300ms ease;
+
+  /* Cursor blink */
+  --cursor-blink-duration: 1s;
+}
