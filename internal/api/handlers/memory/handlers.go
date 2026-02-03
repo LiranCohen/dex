@@ -1,4 +1,5 @@
-package api
+// Package memory provides HTTP handlers for memory operations.
+package memory
 
 import (
 	"database/sql"
@@ -8,11 +9,41 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
+	"github.com/lirancohen/dex/internal/api/core"
 	"github.com/lirancohen/dex/internal/db"
 	"github.com/lirancohen/dex/internal/security"
 )
 
-// MemoryRequest is the request body for creating/updating memories
+// Handler handles memory-related HTTP requests.
+type Handler struct {
+	deps *core.Deps
+}
+
+// New creates a new memory handler.
+func New(deps *core.Deps) *Handler {
+	return &Handler{deps: deps}
+}
+
+// RegisterRoutes registers all memory routes on the given group.
+// All routes require authentication.
+//   - GET /projects/:id/memories
+//   - POST /projects/:id/memories
+//   - GET /projects/:id/memories/search
+//   - POST /projects/:id/memories/cleanup
+//   - GET /memories/:id
+//   - PUT /memories/:id
+//   - DELETE /memories/:id
+func (h *Handler) RegisterRoutes(g *echo.Group) {
+	g.GET("/projects/:id/memories", h.HandleList)
+	g.POST("/projects/:id/memories", h.HandleCreate)
+	g.GET("/projects/:id/memories/search", h.HandleSearch)
+	g.POST("/projects/:id/memories/cleanup", h.HandleCleanup)
+	g.GET("/memories/:id", h.HandleGet)
+	g.PUT("/memories/:id", h.HandleUpdate)
+	g.DELETE("/memories/:id", h.HandleDelete)
+}
+
+// MemoryRequest is the request body for creating/updating memories.
 type MemoryRequest struct {
 	Type     string   `json:"type"`
 	Title    string   `json:"title"`
@@ -21,7 +52,7 @@ type MemoryRequest struct {
 	FileRefs []string `json:"file_refs,omitempty"`
 }
 
-// MemoryResponse is the response format for memories
+// MemoryResponse is the response format for memories.
 type MemoryResponse struct {
 	ID                 string   `json:"id"`
 	ProjectID          string   `json:"project_id"`
@@ -40,8 +71,8 @@ type MemoryResponse struct {
 	UseCount           int      `json:"use_count"`
 }
 
-// memoryToResponse converts a db.Memory to MemoryResponse
-func memoryToResponse(m *db.Memory) MemoryResponse {
+// toResponse converts a db.Memory to MemoryResponse.
+func toResponse(m *db.Memory) MemoryResponse {
 	resp := MemoryResponse{
 		ID:           m.ID,
 		ProjectID:    m.ProjectID,
@@ -70,8 +101,9 @@ func memoryToResponse(m *db.Memory) MemoryResponse {
 	return resp
 }
 
-// handleListMemories returns all memories for a project
-func (s *Server) handleListMemories(c echo.Context) error {
+// HandleList returns all memories for a project.
+// GET /api/v1/projects/:id/memories?type=pattern&min_confidence=0.5
+func (h *Handler) HandleList(c echo.Context) error {
 	projectID := c.Param("id")
 
 	// Parse optional filters
@@ -90,7 +122,7 @@ func (s *Server) handleListMemories(c echo.Context) error {
 		}
 	}
 
-	memories, err := s.db.ListMemories(projectID, memType, minConfidence)
+	memories, err := h.deps.DB.ListMemories(projectID, memType, minConfidence)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{
 			"error": "Failed to list memories",
@@ -99,14 +131,15 @@ func (s *Server) handleListMemories(c echo.Context) error {
 
 	responses := make([]MemoryResponse, len(memories))
 	for i, m := range memories {
-		responses[i] = memoryToResponse(&m)
+		responses[i] = toResponse(&m)
 	}
 
 	return c.JSON(http.StatusOK, responses)
 }
 
-// handleCreateMemory creates a new memory for a project
-func (s *Server) handleCreateMemory(c echo.Context) error {
+// HandleCreate creates a new memory for a project.
+// POST /api/v1/projects/:id/memories
+func (h *Handler) HandleCreate(c echo.Context) error {
 	projectID := c.Param("id")
 
 	var req MemoryRequest
@@ -146,20 +179,21 @@ func (s *Server) handleCreateMemory(c echo.Context) error {
 		CreatedAt:  time.Now(),
 	}
 
-	if err := s.db.CreateMemory(memory); err != nil {
+	if err := h.deps.DB.CreateMemory(memory); err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{
 			"error": "Failed to create memory",
 		})
 	}
 
-	return c.JSON(http.StatusCreated, memoryToResponse(memory))
+	return c.JSON(http.StatusCreated, toResponse(memory))
 }
 
-// handleGetMemory returns a single memory by ID
-func (s *Server) handleGetMemory(c echo.Context) error {
+// HandleGet returns a single memory by ID.
+// GET /api/v1/memories/:id
+func (h *Handler) HandleGet(c echo.Context) error {
 	memoryID := c.Param("id")
 
-	memory, err := s.db.GetMemory(memoryID)
+	memory, err := h.deps.DB.GetMemory(memoryID)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return c.JSON(http.StatusNotFound, map[string]string{
@@ -171,15 +205,16 @@ func (s *Server) handleGetMemory(c echo.Context) error {
 		})
 	}
 
-	return c.JSON(http.StatusOK, memoryToResponse(memory))
+	return c.JSON(http.StatusOK, toResponse(memory))
 }
 
-// handleUpdateMemory updates an existing memory
-func (s *Server) handleUpdateMemory(c echo.Context) error {
+// HandleUpdate updates an existing memory.
+// PUT /api/v1/memories/:id
+func (h *Handler) HandleUpdate(c echo.Context) error {
 	memoryID := c.Param("id")
 
 	// Get existing memory
-	memory, err := s.db.GetMemory(memoryID)
+	memory, err := h.deps.DB.GetMemory(memoryID)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return c.JSON(http.StatusNotFound, map[string]string{
@@ -215,20 +250,21 @@ func (s *Server) handleUpdateMemory(c echo.Context) error {
 		memory.FileRefs = req.FileRefs
 	}
 
-	if err := s.db.UpdateMemory(memory); err != nil {
+	if err := h.deps.DB.UpdateMemory(memory); err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{
 			"error": "Failed to update memory",
 		})
 	}
 
-	return c.JSON(http.StatusOK, memoryToResponse(memory))
+	return c.JSON(http.StatusOK, toResponse(memory))
 }
 
-// handleDeleteMemory deletes a memory
-func (s *Server) handleDeleteMemory(c echo.Context) error {
+// HandleDelete deletes a memory.
+// DELETE /api/v1/memories/:id
+func (h *Handler) HandleDelete(c echo.Context) error {
 	memoryID := c.Param("id")
 
-	if err := s.db.DeleteMemory(memoryID); err != nil {
+	if err := h.deps.DB.DeleteMemory(memoryID); err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{
 			"error": "Failed to delete memory",
 		})
@@ -237,8 +273,9 @@ func (s *Server) handleDeleteMemory(c echo.Context) error {
 	return c.NoContent(http.StatusNoContent)
 }
 
-// handleSearchMemories searches memories by query
-func (s *Server) handleSearchMemories(c echo.Context) error {
+// HandleSearch searches memories by query.
+// GET /api/v1/projects/:id/memories/search?q=query&after_date=...&before_date=...&limit=50
+func (h *Handler) HandleSearch(c echo.Context) error {
 	projectID := c.Param("id")
 	query := c.QueryParam("q")
 
@@ -277,7 +314,7 @@ func (s *Server) handleSearchMemories(c echo.Context) error {
 		}
 	}
 
-	memories, err := s.db.SearchMemories(projectID, params)
+	memories, err := h.deps.DB.SearchMemories(projectID, params)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{
 			"error": "Failed to search memories",
@@ -286,15 +323,16 @@ func (s *Server) handleSearchMemories(c echo.Context) error {
 
 	responses := make([]MemoryResponse, len(memories))
 	for i, m := range memories {
-		responses[i] = memoryToResponse(&m)
+		responses[i] = toResponse(&m)
 	}
 
 	return c.JSON(http.StatusOK, responses)
 }
 
-// handleCleanupMemories runs cleanup on project memories
-func (s *Server) handleCleanupMemories(c echo.Context) error {
-	if err := s.db.CleanupMemories(); err != nil {
+// HandleCleanup runs cleanup on project memories.
+// POST /api/v1/projects/:id/memories/cleanup
+func (h *Handler) HandleCleanup(c echo.Context) error {
+	if err := h.deps.DB.CleanupMemories(); err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{
 			"error": "Failed to cleanup memories",
 		})

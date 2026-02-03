@@ -1,4 +1,4 @@
-package api
+package auth
 
 import (
 	"log"
@@ -9,10 +9,11 @@ import (
 	"github.com/go-webauthn/webauthn/webauthn"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
+	"github.com/lirancohen/dex/internal/api/core"
 	"github.com/lirancohen/dex/internal/auth"
 )
 
-// passkeySessionStore holds temporary WebAuthn session data
+// passkeySessionStore holds temporary WebAuthn session data.
 type passkeySessionStore struct {
 	mu       sync.RWMutex
 	sessions map[string]*webauthn.SessionData // sessionID -> session data
@@ -40,8 +41,33 @@ func (s *passkeySessionStore) Delete(sessionID string) {
 	delete(s.sessions, sessionID)
 }
 
-// getWebAuthnConfig creates a WebAuthn config from the request origin
-func (s *Server) getWebAuthnConfig(c echo.Context) *auth.PasskeyConfig {
+// PasskeyHandler handles passkey/WebAuthn-related HTTP requests.
+type PasskeyHandler struct {
+	deps *core.Deps
+}
+
+// NewPasskeyHandler creates a new passkey handler.
+func NewPasskeyHandler(deps *core.Deps) *PasskeyHandler {
+	return &PasskeyHandler{deps: deps}
+}
+
+// RegisterRoutes registers all passkey routes on the given group.
+// These are all public routes (WebAuthn requires specific flow).
+//   - GET /auth/passkey/status
+//   - POST /auth/passkey/register/begin
+//   - POST /auth/passkey/register/finish
+//   - POST /auth/passkey/login/begin
+//   - POST /auth/passkey/login/finish
+func (h *PasskeyHandler) RegisterRoutes(g *echo.Group) {
+	g.GET("/auth/passkey/status", h.HandleStatus)
+	g.POST("/auth/passkey/register/begin", h.HandleRegisterBegin)
+	g.POST("/auth/passkey/register/finish", h.HandleRegisterFinish)
+	g.POST("/auth/passkey/login/begin", h.HandleLoginBegin)
+	g.POST("/auth/passkey/login/finish", h.HandleLoginFinish)
+}
+
+// getWebAuthnConfig creates a WebAuthn config from the request origin.
+func (h *PasskeyHandler) getWebAuthnConfig(c echo.Context) *auth.PasskeyConfig {
 	// Get origin from request
 	origin := c.Request().Header.Get("Origin")
 	if origin == "" {
@@ -75,9 +101,10 @@ func (s *Server) getWebAuthnConfig(c echo.Context) *auth.PasskeyConfig {
 	}
 }
 
-// handlePasskeyStatus returns whether passkeys are configured
-func (s *Server) handlePasskeyStatus(c echo.Context) error {
-	hasCredentials, err := s.db.HasAnyCredentials()
+// HandleStatus returns whether passkeys are configured.
+// GET /api/v1/auth/passkey/status
+func (h *PasskeyHandler) HandleStatus(c echo.Context) error {
+	hasCredentials, err := h.deps.DB.HasAnyCredentials()
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to check credentials")
 	}
@@ -87,22 +114,22 @@ func (s *Server) handlePasskeyStatus(c echo.Context) error {
 	})
 }
 
-// handlePasskeyRegisterBegin starts passkey registration
-func (s *Server) handlePasskeyRegisterBegin(c echo.Context) error {
+// HandleRegisterBegin starts passkey registration.
+// POST /api/v1/auth/passkey/register/begin
+func (h *PasskeyHandler) HandleRegisterBegin(c echo.Context) error {
 	// Check if this is first-time setup (no users exist)
-	hasUsers, err := s.db.HasAnyUsers()
+	hasUsers, err := h.deps.DB.HasAnyUsers()
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to check users")
 	}
 
 	// For now, only allow registration if no users exist (single-user mode)
-	// In the future, could allow authenticated users to add more passkeys
 	if hasUsers {
 		return echo.NewHTTPError(http.StatusForbidden, "registration not allowed - user already exists")
 	}
 
 	// Create WebAuthn instance
-	cfg := s.getWebAuthnConfig(c)
+	cfg := h.getWebAuthnConfig(c)
 	wa, err := auth.NewWebAuthn(cfg)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to initialize WebAuthn")
@@ -130,8 +157,9 @@ func (s *Server) handlePasskeyRegisterBegin(c echo.Context) error {
 	})
 }
 
-// handlePasskeyRegisterFinish completes passkey registration
-func (s *Server) handlePasskeyRegisterFinish(c echo.Context) error {
+// HandleRegisterFinish completes passkey registration.
+// POST /api/v1/auth/passkey/register/finish?session_id=...&user_id=...
+func (h *PasskeyHandler) HandleRegisterFinish(c echo.Context) error {
 	// Get session_id and user_id from query params (body is reserved for credential)
 	sessionID := c.QueryParam("session_id")
 	userID := c.QueryParam("user_id")
@@ -148,7 +176,7 @@ func (s *Server) handlePasskeyRegisterFinish(c echo.Context) error {
 	defer passkeyStore.Delete(sessionID)
 
 	// Create WebAuthn instance
-	cfg := s.getWebAuthnConfig(c)
+	cfg := h.getWebAuthnConfig(c)
 	wa, err := auth.NewWebAuthn(cfg)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to initialize WebAuthn")
@@ -174,30 +202,29 @@ func (s *Server) handlePasskeyRegisterFinish(c echo.Context) error {
 	}
 
 	// Create user in database with the SAME ID used for WebAuthn registration
-	// This is critical - the userHandle in the credential must match the user ID
-	dbUser, err := s.db.CreateUserWithID(userID, "") // Empty public key for passkey-only user
+	dbUser, err := h.deps.DB.CreateUserWithID(userID, "") // Empty public key for passkey-only user
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create user")
 	}
 
 	// Store credential
-	_, err = s.db.CreateWebAuthnCredential(dbUser.ID, credential)
+	_, err = h.deps.DB.CreateWebAuthnCredential(dbUser.ID, credential)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to store credential")
 	}
 
 	// Generate JWT token
-	if s.tokenConfig == nil {
+	if h.deps.TokenConfig == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "authentication not configured")
 	}
 
-	token, err := auth.GenerateToken(dbUser.ID, s.tokenConfig)
+	token, err := auth.GenerateToken(dbUser.ID, h.deps.TokenConfig)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to generate token")
 	}
 
 	// Update last login
-	s.db.UpdateUserLastLogin(dbUser.ID)
+	h.deps.DB.UpdateUserLastLogin(dbUser.ID)
 
 	return c.JSON(http.StatusOK, map[string]any{
 		"token":   token,
@@ -205,10 +232,11 @@ func (s *Server) handlePasskeyRegisterFinish(c echo.Context) error {
 	})
 }
 
-// handlePasskeyLoginBegin starts passkey authentication
-func (s *Server) handlePasskeyLoginBegin(c echo.Context) error {
+// HandleLoginBegin starts passkey authentication.
+// POST /api/v1/auth/passkey/login/begin
+func (h *PasskeyHandler) HandleLoginBegin(c echo.Context) error {
 	// Get the first user (single-user mode)
-	user, err := s.db.GetFirstUser()
+	user, err := h.deps.DB.GetFirstUser()
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to get user")
 	}
@@ -217,7 +245,7 @@ func (s *Server) handlePasskeyLoginBegin(c echo.Context) error {
 	}
 
 	// Get user's credentials
-	credentials, err := s.db.GetWebAuthnCredentialsByUserID(user.ID)
+	credentials, err := h.deps.DB.GetWebAuthnCredentialsByUserID(user.ID)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to get credentials")
 	}
@@ -226,7 +254,7 @@ func (s *Server) handlePasskeyLoginBegin(c echo.Context) error {
 	}
 
 	// Create WebAuthn instance
-	cfg := s.getWebAuthnConfig(c)
+	cfg := h.getWebAuthnConfig(c)
 	wa, err := auth.NewWebAuthn(cfg)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to initialize WebAuthn")
@@ -252,8 +280,9 @@ func (s *Server) handlePasskeyLoginBegin(c echo.Context) error {
 	})
 }
 
-// handlePasskeyLoginFinish completes passkey authentication
-func (s *Server) handlePasskeyLoginFinish(c echo.Context) error {
+// HandleLoginFinish completes passkey authentication.
+// POST /api/v1/auth/passkey/login/finish?session_id=...&user_id=...
+func (h *PasskeyHandler) HandleLoginFinish(c echo.Context) error {
 	// Get session_id and user_id from query params (body is reserved for credential)
 	sessionID := c.QueryParam("session_id")
 	userID := c.QueryParam("user_id")
@@ -270,19 +299,19 @@ func (s *Server) handlePasskeyLoginFinish(c echo.Context) error {
 	defer passkeyStore.Delete(sessionID)
 
 	// Get user
-	user, err := s.db.GetUserByID(userID)
+	user, err := h.deps.DB.GetUserByID(userID)
 	if err != nil || user == nil {
 		return echo.NewHTTPError(http.StatusNotFound, "user not found")
 	}
 
 	// Get user's credentials
-	credentials, err := s.db.GetWebAuthnCredentialsByUserID(user.ID)
+	credentials, err := h.deps.DB.GetWebAuthnCredentialsByUserID(user.ID)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to get credentials")
 	}
 
 	// Create WebAuthn instance
-	cfg := s.getWebAuthnConfig(c)
+	cfg := h.getWebAuthnConfig(c)
 	wa, err := auth.NewWebAuthn(cfg)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to initialize WebAuthn")
@@ -304,20 +333,20 @@ func (s *Server) handlePasskeyLoginFinish(c echo.Context) error {
 	}
 
 	// Update credential counter (replay protection)
-	s.db.UpdateWebAuthnCredentialCounter(credential.ID, credential.Authenticator.SignCount)
+	h.deps.DB.UpdateWebAuthnCredentialCounter(credential.ID, credential.Authenticator.SignCount)
 
 	// Generate JWT token
-	if s.tokenConfig == nil {
+	if h.deps.TokenConfig == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "authentication not configured")
 	}
 
-	token, err := auth.GenerateToken(user.ID, s.tokenConfig)
+	token, err := auth.GenerateToken(user.ID, h.deps.TokenConfig)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to generate token")
 	}
 
 	// Update last login
-	s.db.UpdateUserLastLogin(user.ID)
+	h.deps.DB.UpdateUserLastLogin(user.ID)
 
 	return c.JSON(http.StatusOK, map[string]any{
 		"token":   token,
