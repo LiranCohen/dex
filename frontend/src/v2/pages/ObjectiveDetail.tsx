@@ -8,6 +8,7 @@ import {
   useToast,
   Checklist,
   ActivityLog,
+  ContextUsageBar,
   ObjectiveActions,
 } from '../components';
 import { api, fetchApprovals, fetchChecklist, fetchTaskActivity } from '../../lib/api';
@@ -31,6 +32,12 @@ export function ObjectiveDetail() {
   const [activity, setActivity] = useState<Activity[]>([]);
   const [activitySummary, setActivitySummary] = useState<ActivityResponse['summary'] | undefined>(undefined);
   const [approvalCount, setApprovalCount] = useState(0);
+  const [contextStatus, setContextStatus] = useState<{
+    used_tokens: number;
+    max_tokens: number;
+    usage_percent: number;
+    status: 'ok' | 'warning' | 'critical';
+  } | undefined>(undefined);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
@@ -77,6 +84,22 @@ export function ObjectiveDetail() {
         } else if (event.type.startsWith('task.') || event.type.startsWith('session.')) {
           loadData();
         }
+      }
+
+      // Capture context status from session.iteration events
+      if (event.type === 'session.iteration' && payload?.context) {
+        const ctx = payload.context as {
+          used_tokens: number;
+          max_tokens: number;
+          usage_percent: number;
+          status: 'ok' | 'warning' | 'critical';
+        };
+        setContextStatus(ctx);
+      }
+
+      // Clear context when session completes
+      if (event.type === 'session.completed') {
+        setContextStatus(undefined);
       }
 
       if (event.type.startsWith('approval.')) {
@@ -201,6 +224,11 @@ export function ObjectiveDetail() {
             onCancel={() => setShowCancelConfirm(true)}
           />
         </div>
+
+        {/* Context usage bar - shown when task is running */}
+        {task.Status === 'running' && contextStatus && (
+          <ContextUsageBar context={contextStatus} />
+        )}
 
         {/* Blocked status indicator (derived from dependencies) */}
         {task.IsBlocked && (

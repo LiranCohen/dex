@@ -293,6 +293,26 @@ func (p *PromptLoader) HasHat(hatName string) bool {
 	return false
 }
 
+// GetSummarizerPrompt returns the summarizer prompt with the conversation injected
+func (p *PromptLoader) GetSummarizerPrompt(conversation string, hasErrors bool) (string, error) {
+	if p.assembler == nil {
+		return "", fmt.Errorf("prompt loader not initialized - call LoadAll first")
+	}
+
+	loomCtx := promptloom.NewContext()
+	loomCtx.SetValue("conversation", conversation)
+	if hasErrors {
+		loomCtx.SetFlag("has_errors", true)
+	}
+
+	prompt, err := p.assembler.Assemble("summarizer", loomCtx)
+	if err != nil {
+		return "", fmt.Errorf("failed to assemble summarizer prompt: %w", err)
+	}
+
+	return prompt, nil
+}
+
 // Reload reloads all prompts from disk
 func (p *PromptLoader) Reload() error {
 	p.registry = promptloom.NewRegistry()

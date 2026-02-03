@@ -2564,6 +2564,85 @@
   animation: pulse-subtle 1.5s ease-in-out infinite;
 }
 
+/* ===== CONTEXT USAGE BAR ===== */
+
+.v2-context-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+}
+
+.v2-context-bar__label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 60px;
+}
+
+.v2-context-bar__title {
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.v2-context-bar__tokens {
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.v2-context-bar__track {
+  flex: 1;
+  height: 6px;
+  background-color: var(--bg-tertiary);
+  border-radius: 3px;
+  overflow: hidden;
+  min-width: 80px;
+}
+
+.v2-context-bar__fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+.v2-context-bar__fill--ok {
+  background-color: var(--status-complete);
+}
+
+.v2-context-bar__fill--warning {
+  background-color: var(--accent-warm);
+}
+
+.v2-context-bar__fill--critical {
+  background-color: var(--status-failed);
+}
+
+.v2-context-bar__percent {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  min-width: 32px;
+  text-align: right;
+}
+
+.v2-context-bar__percent--ok {
+  color: var(--status-complete);
+}
+
+.v2-context-bar__percent--warning {
+  color: var(--accent-warm);
+}
+
+.v2-context-bar__percent--critical {
+  color: var(--status-failed);
+}
+
 /* Empty states */
 .v2-empty-hint {
   color: var(--text-tertiary);

@@ -72,38 +72,48 @@ func (e *ToolExecutor) SetOnQualityGateResult(callback func(result *GateResult))
 // Execute runs a tool with the given input and returns the result
 // Overrides base executor for tools that need git.Operations or GitHub client
 func (e *ToolExecutor) Execute(ctx context.Context, toolName string, input map[string]any) ToolResult {
+	var result ToolResult
+
 	switch toolName {
 	// Tools that need advanced git operations
 	case "git_diff":
-		return e.executeGitDiff(input)
+		result = e.executeGitDiff(input)
 	case "git_commit":
-		return e.executeGitCommit(input)
+		result = e.executeGitCommit(input)
 	case "git_push":
-		return e.executeGitPush(input)
+		result = e.executeGitPush(input)
 	case "git_remote_add":
-		return e.executeGitRemoteAdd(input)
+		result = e.executeGitRemoteAdd(input)
 	// Tools that need GitHub client
 	case "github_create_repo":
-		return e.executeGitHubCreateRepo(ctx, input)
+		result = e.executeGitHubCreateRepo(ctx, input)
 	case "github_create_pr":
-		return e.executeGitHubCreatePR(ctx, input)
+		result = e.executeGitHubCreatePR(ctx, input)
 	// Quality gate tools
 	case "run_tests":
-		return e.executeRunTests(ctx, input)
+		result = e.executeRunTests(ctx, input)
 	case "run_lint":
-		return e.executeRunLint(ctx, input)
+		result = e.executeRunLint(ctx, input)
 	case "run_build":
-		return e.executeRunBuild(ctx, input)
+		result = e.executeRunBuild(ctx, input)
 	case "task_complete":
-		return e.executeTaskComplete(ctx, input)
+		result = e.executeTaskComplete(ctx, input)
 	default:
-		// Use base executor for all other tools
-		result := e.Executor.Execute(ctx, toolName, input)
+		// Use base executor for all other tools (already applies large response processing)
+		baseResult := e.Executor.Execute(ctx, toolName, input)
 		return ToolResult{
-			Output:  result.Output,
-			IsError: result.IsError,
+			Output:  baseResult.Output,
+			IsError: baseResult.IsError,
 		}
 	}
+
+	// Apply large response processing for session executor handled tools
+	// This prevents massive git diffs, test outputs, etc. from bloating context
+	if !result.IsError && len(result.Output) > tools.LargeResponseThreshold {
+		result.Output = tools.ProcessLargeResponse(toolName, result.Output)
+	}
+
+	return result
 }
 
 func (e *ToolExecutor) executeGitDiff(input map[string]any) ToolResult {

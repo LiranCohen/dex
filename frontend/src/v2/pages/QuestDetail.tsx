@@ -79,15 +79,32 @@ export function QuestDetail() {
       setApprovalCount((approvalsData.approvals || []).filter((a: Approval) => a.status === 'pending').length);
 
       // Parse any pending drafts/questions from last assistant message
+      // Only show drafts that haven't already been created as tasks
       const lastAssistantMsg = [...(questData.messages || [])].reverse().find((m: QuestMessage) => m.role === 'assistant');
       if (lastAssistantMsg) {
         const drafts = parseObjectiveDrafts(lastAssistantMsg.content);
         const questions = parseQuestions(lastAssistantMsg.content);
-        if (drafts.length > 0) {
-          const draftsMap = new Map<string, ObjectiveDraft>();
-          drafts.forEach((d, i) => draftsMap.set(`draft-${i}`, d));
-          setPendingDrafts(draftsMap);
-        }
+
+        // Filter out drafts that already exist as tasks (by matching title)
+        const existingTaskTitles = new Set((tasksData || []).map((t: Task) => t.Title?.toLowerCase()));
+        const titleFiltered = drafts.filter((d) => !existingTaskTitles.has(d.title?.toLowerCase()));
+
+        // Also filter against already-accepted drafts (by draft_id)
+        // Use functional update to access the latest acceptedDrafts state
+        setAcceptedDrafts((currentAccepted) => {
+          const newDrafts = titleFiltered.filter((d) => !currentAccepted.has(d.draft_id));
+          if (newDrafts.length > 0) {
+            const draftsMap = new Map<string, ObjectiveDraft>();
+            // Use draft_id as key for stable identification
+            newDrafts.forEach((d) => draftsMap.set(d.draft_id, d));
+            setPendingDrafts(draftsMap);
+          } else {
+            // Clear pending drafts if all have been accepted
+            setPendingDrafts(new Map());
+          }
+          return currentAccepted; // Don't modify acceptedDrafts, just read it
+        });
+
         if (questions.length > 0) {
           setPendingQuestions(questions);
         }
@@ -127,9 +144,21 @@ export function QuestDetail() {
               const drafts = parseObjectiveDrafts(msg.content);
               const questions = parseQuestions(msg.content);
               if (drafts.length > 0) {
-                const draftsMap = new Map<string, ObjectiveDraft>();
-                drafts.forEach((d, i) => draftsMap.set(`draft-${i}`, d));
-                setPendingDrafts(draftsMap);
+                // Filter drafts against accepted drafts using functional update
+                // This ensures we have access to the latest acceptedDrafts state
+                setAcceptedDrafts((currentAccepted) => {
+                  const newDrafts = drafts.filter((d) => !currentAccepted.has(d.draft_id));
+                  if (newDrafts.length > 0) {
+                    const draftsMap = new Map<string, ObjectiveDraft>();
+                    // Use draft_id as key for stable identification
+                    newDrafts.forEach((d) => draftsMap.set(d.draft_id, d));
+                    setPendingDrafts(draftsMap);
+                  } else {
+                    // All drafts already accepted, clear pending
+                    setPendingDrafts(new Map());
+                  }
+                  return currentAccepted; // Don't modify acceptedDrafts, just read it
+                });
               }
               if (questions.length > 0) {
                 setPendingQuestions(questions);
@@ -262,7 +291,7 @@ export function QuestDetail() {
       const selectedOptional = (draft.checklist.optional || []).map((_, i) => i);
       const result = await createObjective(id, draft, selectedOptional);
 
-      // Move from pending to accepted
+      // Move from pending to accepted - use draft_id as key for persistence
       setPendingDrafts((prev) => {
         const next = new Map(prev);
         next.delete(draftKey);
@@ -270,7 +299,7 @@ export function QuestDetail() {
       });
       setAcceptedDrafts((prev) => {
         const next = new Map(prev);
-        next.set(draftKey, { draft, taskId: result.task?.ID });
+        next.set(draft.draft_id, { draft, taskId: result.task?.ID });
         return next;
       });
 
@@ -294,11 +323,11 @@ export function QuestDetail() {
 
       await createObjectivesBatch(id, draftsArray);
 
-      // Move all from pending to accepted
+      // Move all from pending to accepted - use draft_id as key for persistence
       setAcceptedDrafts((prev) => {
         const next = new Map(prev);
-        draftsEntries.forEach(([key, draft]) => {
-          next.set(key, { draft });
+        draftsEntries.forEach(([, draft]) => {
+          next.set(draft.draft_id, { draft });
         });
         return next;
       });

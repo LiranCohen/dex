@@ -12,6 +12,7 @@ export { SearchInput } from './SearchInput';
 export { EmptyState } from './EmptyState';
 export { Checklist } from './Checklist';
 export { ActivityLog } from './ActivityLog';
+export { ContextUsageBar } from './ContextUsageBar';
 export { ObjectiveActions } from './ObjectiveActions';
 export { QuestObjectivesList } from './QuestObjectivesList';
 export * from './chat';

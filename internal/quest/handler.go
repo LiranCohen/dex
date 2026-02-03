@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/lirancohen/dex/internal/api/websocket"
 	"github.com/lirancohen/dex/internal/db"
 	"github.com/lirancohen/dex/internal/session"
@@ -345,7 +346,8 @@ func (h *Handler) ProcessMessage(ctx context.Context, questID, content string) (
 		}
 
 		// No tool use - this is the final response
-		assistantContent := response.Text()
+		// Assign unique IDs to any objective drafts before storing
+		assistantContent := assignUniqueDraftIDs(response.Text())
 		assistantMsg, err := h.db.CreateQuestMessageWithToolCalls(questID, "assistant", assistantContent, allToolCalls)
 		if err != nil {
 			return nil, fmt.Errorf("failed to store assistant response: %w", err)
@@ -524,6 +526,66 @@ func extractJSONObject(s string) (string, int) {
 
 	// Unbalanced braces
 	return "", 0
+}
+
+// assignUniqueDraftIDs replaces draft_id values in OBJECTIVE_DRAFT signals with UUIDs.
+// This ensures each draft has a globally unique ID that persists across conversations.
+func assignUniqueDraftIDs(content string) string {
+	marker := "OBJECTIVE_DRAFT:"
+	result := strings.Builder{}
+	remaining := content
+
+	for {
+		idx := strings.Index(remaining, marker)
+		if idx == -1 {
+			result.WriteString(remaining)
+			break
+		}
+
+		// Add content before the marker
+		result.WriteString(remaining[:idx])
+
+		// Extract JSON portion
+		jsonStart := idx + len(marker)
+		jsonStr, endIdx := extractJSONObject(remaining[jsonStart:])
+		if jsonStr == "" {
+			// No valid JSON found, keep marker and continue
+			result.WriteString(marker)
+			remaining = remaining[jsonStart:]
+			continue
+		}
+
+		// Parse the JSON to modify draft_id
+		var draft map[string]interface{}
+		if err := json.Unmarshal([]byte(jsonStr), &draft); err != nil {
+			// Failed to parse, keep original
+			result.WriteString(marker)
+			result.WriteString(jsonStr)
+			remaining = remaining[jsonStart+endIdx:]
+			continue
+		}
+
+		// Replace draft_id with UUID
+		draft["draft_id"] = uuid.New().String()
+
+		// Marshal back to JSON
+		newJSON, err := json.Marshal(draft)
+		if err != nil {
+			// Failed to marshal, keep original
+			result.WriteString(marker)
+			result.WriteString(jsonStr)
+			remaining = remaining[jsonStart+endIdx:]
+			continue
+		}
+
+		// Write marker + new JSON
+		result.WriteString(marker)
+		result.WriteString(string(newJSON))
+
+		remaining = remaining[jsonStart+endIdx:]
+	}
+
+	return result.String()
 }
 
 // parseQuestions extracts QUESTION signals from a response

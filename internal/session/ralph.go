@@ -263,6 +263,11 @@ func (r *RalphLoop) initializeServices(ctx context.Context) (*db.Task, error) {
 	// Initialize context guard for token management
 	r.contextGuard = NewContextGuard(r.activity)
 
+	// Configure LLM-based summarization for context compaction (uses Haiku by default)
+	if r.client != nil && r.manager != nil && r.manager.promptLoader != nil {
+		r.contextGuard.SetSummarizer(r.client, r.manager.promptLoader, SummaryModelHaiku)
+	}
+
 	// Initialize handoff generator for checkpoint summaries
 	r.handoffGen = NewHandoffGenerator(r.db, r.manager.gitOps)
 
@@ -682,12 +687,18 @@ func (r *RalphLoop) Run(ctx context.Context) error {
 		r.session.IterationCount++
 		r.session.LastActivity = time.Now()
 
-		// Broadcast iteration event
-		r.broadcastEvent(websocket.EventSessionIteration, map[string]any{
+		// Broadcast iteration event with context status
+		iterationPayload := map[string]any{
 			"session_id": r.session.ID,
 			"iteration":  r.session.IterationCount,
 			"tokens":     r.session.TotalTokens(),
-		})
+		}
+		// Add context usage status if contextGuard is available
+		if r.contextGuard != nil {
+			contextStatus := r.contextGuard.GetStatus(r.messages, systemPrompt)
+			iterationPayload["context"] = contextStatus
+		}
+		r.broadcastEvent(websocket.EventSessionIteration, iterationPayload)
 
 		// 5. Handle tool use if requested
 		if response.HasToolUse() {
@@ -778,7 +789,20 @@ func (r *RalphLoop) Run(ctx context.Context) error {
 		}
 
 		// 11. Add continuation prompt for next iteration (hat-specific)
-		continuationMsg := r.getContinuationPrompt()
+		// Use minimal continuation if context is getting large to reduce token bloat
+		var continuationMsg string
+		if r.contextGuard != nil {
+			tokens := EstimateTokens(r.messages, systemPrompt)
+			// If above 35% of context window, use minimal continuation
+			// This matches our compaction target (35%) to minimize overhead
+			if tokens > r.contextGuard.WindowMax()*35/100 {
+				continuationMsg = "Continue."
+			} else {
+				continuationMsg = r.getContinuationPrompt()
+			}
+		} else {
+			continuationMsg = r.getContinuationPrompt()
+		}
 		r.messages = append(r.messages, toolbelt.AnthropicMessage{
 			Role:    "user",
 			Content: continuationMsg,
@@ -1230,13 +1254,34 @@ func (r *RalphLoop) RestoreFromCheckpoint(checkpoint *db.SessionCheckpoint) erro
 		recoveryMsg.WriteString("\nPlease try a different approach. If blocked, use EVENT:task.blocked:{\"reason\":\"description\"}.\n")
 	}
 
-	// Add recovery message if we have any content
+	// Add recovery message if we have any content, but avoid duplicates
 	if recoveryMsg.Len() > 0 {
-		r.messages = append(r.messages, toolbelt.AnthropicMessage{
-			Role:    "user",
-			Content: recoveryMsg.String(),
-		})
-		fmt.Printf("RestoreFromCheckpoint: added recovery/continuation context\n")
+		recoveryContent := recoveryMsg.String()
+
+		// Check if a similar recovery message already exists in recent messages
+		// to avoid stacking multiple recovery contexts on repeated resumes
+		hasExistingRecovery := false
+		for i := len(r.messages) - 1; i >= 0 && i >= len(r.messages)-3; i-- {
+			if msg := r.messages[i]; msg.Role == "user" {
+				if content, ok := msg.Content.(string); ok {
+					if strings.Contains(content, "## Resuming Session") ||
+						strings.Contains(content, "Previous attempt failed:") {
+						hasExistingRecovery = true
+						break
+					}
+				}
+			}
+		}
+
+		if !hasExistingRecovery {
+			r.messages = append(r.messages, toolbelt.AnthropicMessage{
+				Role:    "user",
+				Content: recoveryContent,
+			})
+			fmt.Printf("RestoreFromCheckpoint: added recovery/continuation context\n")
+		} else {
+			fmt.Printf("RestoreFromCheckpoint: skipped duplicate recovery context\n")
+		}
 	}
 
 	return nil
