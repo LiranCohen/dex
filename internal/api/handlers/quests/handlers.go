@@ -443,7 +443,12 @@ func (h *Handler) HandleGetTasks(c echo.Context) error {
 
 	response := make([]core.TaskResponse, 0, len(tasks))
 	for _, t := range tasks {
-		response = append(response, core.ToTaskResponse(t))
+		resp := core.ToTaskResponse(t)
+		// Compute tokens from activity (single source of truth)
+		if inputTokens, outputTokens, err := h.deps.DB.GetTaskTokensFromActivity(t.ID); err == nil {
+			resp.SetTokensFromActivity(inputTokens, outputTokens)
+		}
+		response = append(response, resp)
 	}
 
 	return c.JSON(http.StatusOK, response)

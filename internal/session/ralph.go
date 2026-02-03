@@ -542,6 +542,14 @@ func (r *RalphLoop) handleEventTransition(ctx context.Context, event *Event) boo
 func (r *RalphLoop) Run(ctx context.Context) error {
 	fmt.Printf("RalphLoop.Run: starting for session %s (hat: %s)\n", r.session.ID, r.session.Hat)
 
+	// Capture termination info before returning (for persistence)
+	defer func() {
+		// Set quality gate attempts from health tracker
+		if r.health != nil {
+			r.session.QualityGateAttempts = r.health.QualityGateAttempts
+		}
+	}()
+
 	// Cleanup temp files from large tool responses when session ends
 	defer func() {
 		if err := tools.CleanupTempResponses(); err != nil {
@@ -719,6 +727,13 @@ func (r *RalphLoop) Run(ctx context.Context) error {
 				response.Usage.OutputTokens,
 			); err != nil {
 				fmt.Printf("RalphLoop.Run: warning - failed to record assistant response: %v\n", err)
+			}
+
+			// Process checklist signals even in tool-use responses
+			// The AI often marks items done in the same turn it uses tools
+			responseText := response.Text()
+			if responseText != "" {
+				r.processChecklistSignals(responseText)
 			}
 
 			// Execute tools and add results
@@ -1126,10 +1141,8 @@ func (r *RalphLoop) checkpoint() error {
 		return fmt.Errorf("failed to marshal checkpoint state: %w", err)
 	}
 
-	// Also persist to sessions table for real-time queries
-	if err := r.db.UpdateSessionUsage(r.session.ID, r.session.InputTokens, r.session.OutputTokens); err != nil {
-		fmt.Printf("Warning: failed to update session usage: %v\n", err)
-	}
+	// Token usage is tracked via session_activity (single source of truth)
+	// No need to update sessions table - tokens are computed from activity on read
 
 	_, err = r.db.CreateSessionCheckpoint(r.session.ID, r.session.IterationCount, stateJSON)
 	return err
@@ -1340,6 +1353,13 @@ func (r *RalphLoop) buildChecklistPrompt(items []*db.ChecklistItem) string {
 	}
 
 	sb.WriteString("\n---\n\n")
+	sb.WriteString("## Efficiency Guidelines\n\n")
+	sb.WriteString("Work efficiently to minimize iterations:\n")
+	sb.WriteString("- **Batch tool calls**: Execute multiple independent operations in the same message\n")
+	sb.WriteString("- **Group related items**: If checklist items are related, implement them together\n")
+	sb.WriteString("- **Report multiple completions**: You can output multiple CHECKLIST_DONE signals in one message\n")
+	sb.WriteString("- **Plan first**: Review all items, identify what can be batched, then execute\n\n")
+
 	sb.WriteString("## Reporting Checklist Status\n\n")
 	sb.WriteString("IMPORTANT: Only mark an item as done when it is FULLY and SUCCESSFULLY completed.\n\n")
 	sb.WriteString("- CHECKLIST_DONE:<item_id> - Use ONLY when the item succeeded completely\n")
@@ -1357,6 +1377,9 @@ func (r *RalphLoop) buildChecklistPrompt(items []*db.ChecklistItem) string {
 func (r *RalphLoop) processChecklistSignals(response string) {
 	// Process all CHECKLIST_DONE signals
 	doneSignals := findAllSignals(response, SignalChecklistDone)
+	if len(doneSignals) > 0 {
+		fmt.Printf("RalphLoop: found %d CHECKLIST_DONE signals: %v\n", len(doneSignals), doneSignals)
+	}
 	for _, sig := range doneSignals {
 		itemID := strings.TrimSpace(sig)
 		if itemID != "" {
@@ -1367,13 +1390,18 @@ func (r *RalphLoop) processChecklistSignals(response string) {
 					r.activity.RecordChecklistUpdate(r.session.IterationCount, itemID, db.ChecklistItemStatusDone, "")
 				}
 				fmt.Printf("RalphLoop: marked checklist item %s as done\n", itemID)
-				r.manager.NotifyChecklistUpdated(r.session.TaskID)
+				if r.manager != nil {
+					r.manager.NotifyChecklistUpdated(r.session.TaskID)
+				}
 			}
 		}
 	}
 
 	// Process all CHECKLIST_FAILED signals
 	failedSignals := findAllSignals(response, SignalChecklistFailed)
+	if len(failedSignals) > 0 {
+		fmt.Printf("RalphLoop: found %d CHECKLIST_FAILED signals: %v\n", len(failedSignals), failedSignals)
+	}
 	for _, sig := range failedSignals {
 		// Format: <item_id>:<reason>
 		parts := strings.SplitN(sig, ":", 2)
@@ -1391,7 +1419,9 @@ func (r *RalphLoop) processChecklistSignals(response string) {
 					r.activity.RecordChecklistUpdate(r.session.IterationCount, itemID, db.ChecklistItemStatusFailed, reason)
 				}
 				fmt.Printf("RalphLoop: marked checklist item %s as failed: %s\n", itemID, reason)
-				r.manager.NotifyChecklistUpdated(r.session.TaskID)
+				if r.manager != nil {
+					r.manager.NotifyChecklistUpdated(r.session.TaskID)
+				}
 			}
 		}
 	}

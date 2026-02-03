@@ -61,6 +61,10 @@ func (h *Handler) HandleList(c echo.Context) error {
 		// Get blocking info for each task
 		blockerIDs, _ := h.deps.DB.GetIncompleteBlockerIDs(t.ID)
 		taskResponses[i] = core.ToTaskResponseWithBlocking(t, blockerIDs)
+		// Compute tokens from activity (single source of truth)
+		if inputTokens, outputTokens, err := h.deps.DB.GetTaskTokensFromActivity(t.ID); err == nil {
+			taskResponses[i].SetTokensFromActivity(inputTokens, outputTokens)
+		}
 	}
 
 	return c.JSON(http.StatusOK, map[string]any{
@@ -153,7 +157,13 @@ func (h *Handler) HandleGet(c echo.Context) error {
 	// Get blocking info
 	blockerIDs, _ := h.deps.DB.GetIncompleteBlockerIDs(t.ID)
 
-	return c.JSON(http.StatusOK, core.ToTaskResponseWithBlocking(t, blockerIDs))
+	resp := core.ToTaskResponseWithBlocking(t, blockerIDs)
+	// Compute tokens from activity (single source of truth)
+	if inputTokens, outputTokens, err := h.deps.DB.GetTaskTokensFromActivity(t.ID); err == nil {
+		resp.SetTokensFromActivity(inputTokens, outputTokens)
+	}
+
+	return c.JSON(http.StatusOK, resp)
 }
 
 // HandleUpdate updates a task.

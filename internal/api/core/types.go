@@ -29,6 +29,8 @@ type TaskResponse struct {
 	PRNumber          *int64   `json:"PRNumber"`
 	TokenBudget       *int64   `json:"TokenBudget"`
 	TokenUsed         int64    `json:"TokenUsed"`
+	InputTokens       int64    `json:"InputTokens"`  // Aggregated from sessions
+	OutputTokens      int64    `json:"OutputTokens"` // Aggregated from sessions
 	TimeBudgetMin     *int64   `json:"TimeBudgetMin"`
 	TimeUsedMin       int64    `json:"TimeUsedMin"`
 	DollarBudget      *float64 `json:"DollarBudget"`
@@ -44,6 +46,8 @@ type TaskResponse struct {
 // ToTaskResponse converts a db.Task to TaskResponse for clean JSON.
 // Note: This does not populate blocking info. Use ToTaskResponseWithBlocking
 // for responses where blocking state matters.
+// Note: Token counts (InputTokens, OutputTokens, TokenUsed) must be set separately
+// via SetTokensFromActivity() - they are computed from session_activity, not stored in task.
 func ToTaskResponse(t *db.Task) TaskResponse {
 	resp := TaskResponse{
 		ID:            t.ID,
@@ -54,7 +58,6 @@ func ToTaskResponse(t *db.Task) TaskResponse {
 		AutonomyLevel: t.AutonomyLevel,
 		Status:        t.Status,
 		BaseBranch:    t.BaseBranch,
-		TokenUsed:     t.TokenUsed,
 		TimeUsedMin:   t.TimeUsedMin,
 		DollarUsed:    t.DollarUsed,
 		CreatedAt:     t.CreatedAt.Format(time.RFC3339),
@@ -110,6 +113,14 @@ func ToTaskResponseWithBlocking(t *db.Task, blockerIDs []string) TaskResponse {
 	resp.IsBlocked = len(blockerIDs) > 0
 	resp.BlockedBy = blockerIDs
 	return resp
+}
+
+// SetTokensFromActivity updates the task response with token data computed from activity.
+// This should be called after ToTaskResponse/ToTaskResponseWithBlocking to add accurate token counts.
+func (r *TaskResponse) SetTokensFromActivity(inputTokens, outputTokens int64) {
+	r.InputTokens = inputTokens
+	r.OutputTokens = outputTokens
+	r.TokenUsed = inputTokens + outputTokens // Keep TokenUsed in sync for backwards compat
 }
 
 // ApprovalResponse is the JSON response format for approvals.

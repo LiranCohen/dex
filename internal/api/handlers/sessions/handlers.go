@@ -317,11 +317,11 @@ func (h *Handler) HandleGetTaskActivity(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 
-	// Calculate totals
-	var totalTokens int64
+	// Calculate totals - tokens from activity (single source of truth)
+	inputTokens, outputTokens, _ := h.deps.DB.GetTaskTokensFromActivity(taskID)
+	totalTokens := inputTokens + outputTokens
 	var totalIterations int
 	for _, sess := range sessions {
-		totalTokens += sess.TotalTokens()
 		if sess.IterationCount > totalIterations {
 			totalIterations = sess.IterationCount
 		}
@@ -338,6 +338,8 @@ func (h *Handler) HandleGetTaskActivity(c echo.Context) error {
 			"total_sessions":   len(sessions),
 			"total_iterations": totalIterations,
 			"total_tokens":     totalTokens,
+			"input_tokens":     inputTokens,
+			"output_tokens":    outputTokens,
 		},
 	})
 }

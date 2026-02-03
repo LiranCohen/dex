@@ -81,9 +81,7 @@ func (db *DB) Migrate() error {
 		"ALTER TABLE webauthn_credentials ADD COLUMN backup_state INTEGER NOT NULL DEFAULT 0",
 		"ALTER TABLE tasks ADD COLUMN quest_id TEXT REFERENCES quests(id)",
 		"ALTER TABLE tasks ADD COLUMN model TEXT DEFAULT 'sonnet'",
-		// Session token/rate tracking (replaces tokens_used, dollars_used)
-		"ALTER TABLE sessions ADD COLUMN input_tokens INTEGER DEFAULT 0",
-		"ALTER TABLE sessions ADD COLUMN output_tokens INTEGER DEFAULT 0",
+		// Session rate tracking for cost calculation (tokens computed from session_activity)
 		"ALTER TABLE sessions ADD COLUMN input_rate REAL DEFAULT 3.0",
 		"ALTER TABLE sessions ADD COLUMN output_rate REAL DEFAULT 15.0",
 		// Quest tool calls support
@@ -173,7 +171,7 @@ CREATE TABLE IF NOT EXISTS tasks (
 	branch_name TEXT,
 	pr_number INTEGER,
 	token_budget INTEGER,
-	token_used INTEGER DEFAULT 0,
+	-- token_used removed: computed from session_activity (single source of truth)
 	time_budget_min INTEGER,
 	time_used_min INTEGER DEFAULT 0,
 	dollar_budget REAL,
@@ -211,9 +209,8 @@ CREATE TABLE IF NOT EXISTS sessions (
 	iteration_count INTEGER DEFAULT 0,
 	max_iterations INTEGER DEFAULT 100,
 	completion_promise TEXT,
-	tokens_used INTEGER DEFAULT 0,
+	-- tokens_used/dollars_used removed: computed from session_activity (single source of truth)
 	tokens_budget INTEGER,
-	dollars_used REAL DEFAULT 0,
 	dollars_budget REAL,
 	created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 	started_at DATETIME,

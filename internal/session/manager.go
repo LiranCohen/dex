@@ -4,6 +4,7 @@ package session
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -60,6 +61,10 @@ type ActiveSession struct {
 
 	// For resuming from a previous session's checkpoint
 	RestoreFromSessionID string
+
+	// Termination tracking (persisted to DB when session ends)
+	TerminationReason   string // Why the session ended (e.g., "completed", "max_iterations", "quality_gate_exhausted")
+	QualityGateAttempts int    // Number of quality gate validation attempts
 
 	// For cancellation
 	cancel context.CancelFunc
@@ -467,21 +472,23 @@ func (m *Manager) ActiveCount() int {
 // copySession creates a copy of a session to prevent external modification
 func (m *Manager) copySession(s *ActiveSession) *ActiveSession {
 	copy := &ActiveSession{
-		ID:             s.ID,
-		TaskID:         s.TaskID,
-		Hat:            s.Hat,
-		State:          s.State,
-		WorktreePath:   s.WorktreePath,
-		IterationCount: s.IterationCount,
-		MaxIterations:  s.MaxIterations,
-		InputTokens:    s.InputTokens,
-		OutputTokens:   s.OutputTokens,
-		InputRate:      s.InputRate,
-		OutputRate:     s.OutputRate,
-		MaxRuntime:     s.MaxRuntime,
-		StartedAt:      s.StartedAt,
-		LastActivity:   s.LastActivity,
-		Scratchpad:     s.Scratchpad,
+		ID:                  s.ID,
+		TaskID:              s.TaskID,
+		Hat:                 s.Hat,
+		State:               s.State,
+		WorktreePath:        s.WorktreePath,
+		IterationCount:      s.IterationCount,
+		MaxIterations:       s.MaxIterations,
+		InputTokens:         s.InputTokens,
+		OutputTokens:        s.OutputTokens,
+		InputRate:           s.InputRate,
+		OutputRate:          s.OutputRate,
+		MaxRuntime:          s.MaxRuntime,
+		StartedAt:           s.StartedAt,
+		LastActivity:        s.LastActivity,
+		Scratchpad:          s.Scratchpad,
+		TerminationReason:   s.TerminationReason,
+		QualityGateAttempts: s.QualityGateAttempts,
 	}
 	// Copy pointers by creating new pointers to the same values
 	if s.TokensBudget != nil {
@@ -618,29 +625,66 @@ func (m *Manager) runSession(ctx context.Context, session *ActiveSession) {
 		loopErr = ctx.Err()
 	}
 
-	// Determine final state based on error
+	// Determine final state and termination reason based on error
 	m.mu.Lock()
 	nextHat := session.Hat
 	hatTransition := loopErr == nil && nextHat != originalHat
 	worktreePath := session.WorktreePath
 	taskID := session.TaskID
 	sessionID := session.ID
+	qualityGateAttempts := session.QualityGateAttempts
 
+	// Determine termination reason
+	var terminationReason string
 	if session.State == StateStopping {
 		session.State = StateStopped
+		terminationReason = string(TerminationUserStopped)
 	} else if session.State == StatePaused {
 		// Keep paused state
+		terminationReason = "paused"
 	} else if loopErr != nil {
 		// Check if it's a budget error (requires approval, not a failure)
-		if loopErr == ErrBudgetExceeded || loopErr == ErrIterationLimit ||
-			loopErr == ErrTokenBudget || loopErr == ErrDollarBudget {
+		switch loopErr {
+		case ErrIterationLimit:
 			session.State = StatePaused
-		} else if loopErr == context.Canceled {
+			terminationReason = string(TerminationMaxIterations)
+		case ErrTokenBudget:
+			session.State = StatePaused
+			terminationReason = string(TerminationMaxTokens)
+		case ErrDollarBudget:
+			session.State = StatePaused
+			terminationReason = string(TerminationMaxCost)
+		case ErrRuntimeLimit:
+			session.State = StatePaused
+			terminationReason = string(TerminationMaxRuntime)
+		case ErrBudgetExceeded:
+			session.State = StatePaused
+			terminationReason = "budget_exceeded"
+		case context.Canceled:
 			session.State = StateStopped
-		} else {
+			terminationReason = string(TerminationUserStopped)
+		default:
 			session.State = StateFailed
+			// Check if it's a loop health termination
+			errStr := loopErr.Error()
+			if strings.Contains(errStr, "loop terminated:") {
+				// Extract reason from "loop terminated: <reason>"
+				parts := strings.SplitN(errStr, "loop terminated: ", 2)
+				if len(parts) == 2 {
+					terminationReason = parts[1]
+				} else {
+					terminationReason = string(TerminationError)
+				}
+			} else {
+				terminationReason = string(TerminationError)
+			}
 		}
 	} else {
+		if hatTransition {
+			terminationReason = string(TerminationHatTransition)
+		} else {
+			terminationReason = string(TerminationCompleted)
+		}
 		session.State = StateCompleted
 	}
 	finalState := session.State
@@ -648,6 +692,9 @@ func (m *Manager) runSession(ctx context.Context, session *ActiveSession) {
 
 	// Update DB with final state and outcome
 	_ = m.db.UpdateSessionStatus(sessionID, string(finalState))
+
+	// Persist termination info for audit trail
+	_ = m.db.UpdateSessionTermination(sessionID, terminationReason, qualityGateAttempts)
 
 	// Handle hat transition: create and start new session with next hat
 	if hatTransition {
@@ -800,20 +847,31 @@ func (m *Manager) LoadActiveSessions() error {
 			continue // Skip unknown states
 		}
 
+		// Compute token counts from session_activity (single source of truth)
+		inputTokens, outputTokens, _ := m.db.GetSessionTokensFromActivity(dbSession.ID)
+
+		// Get termination reason from DB if set
+		var terminationReason string
+		if dbSession.TerminationReason.Valid {
+			terminationReason = dbSession.TerminationReason.String
+		}
+
 		session := &ActiveSession{
-			ID:             dbSession.ID,
-			TaskID:         dbSession.TaskID,
-			Hat:            dbSession.Hat,
-			State:          state,
-			WorktreePath:   dbSession.WorktreePath,
-			IterationCount: dbSession.IterationCount,
-			MaxIterations:  dbSession.MaxIterations,
-			InputTokens:    dbSession.InputTokens,
-			OutputTokens:   dbSession.OutputTokens,
-			InputRate:      dbSession.InputRate,
-			OutputRate:     dbSession.OutputRate,
-			MaxRuntime:     m.defaultMaxRuntime, // Use default for restored sessions
-			done:           make(chan struct{}),
+			ID:                  dbSession.ID,
+			TaskID:              dbSession.TaskID,
+			Hat:                 dbSession.Hat,
+			State:               state,
+			WorktreePath:        dbSession.WorktreePath,
+			IterationCount:      dbSession.IterationCount,
+			MaxIterations:       dbSession.MaxIterations,
+			InputTokens:         inputTokens,
+			OutputTokens:        outputTokens,
+			InputRate:           dbSession.InputRate,
+			OutputRate:          dbSession.OutputRate,
+			MaxRuntime:          m.defaultMaxRuntime, // Use default for restored sessions
+			TerminationReason:   terminationReason,
+			QualityGateAttempts: dbSession.QualityGateAttempts,
+			done:                make(chan struct{}),
 		}
 
 		if dbSession.TokensBudget.Valid {

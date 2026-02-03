@@ -33,25 +33,30 @@ instructions: |
 
   ### Recommended Hat Workflows
 
-  **Standard workflow (most tasks):** explorer → creator → critic → editor
-  - Explorer: Research and understand the codebase/requirements
-  - Creator: Implement the solution
-  - Critic: Review for issues (may loop back to creator once if issues found)
-  - Editor: Final polish and PR creation
+  Choose the starting hat based on the task type:
 
-  **Simple/clear tasks:** creator → critic → editor
-  - Skip explorer when requirements are unambiguous and codebase is familiar
+  **Greenfield projects (creating something new):** creator → editor
+  - Start with "creator" directly - there's nothing to explore
+  - Skip critic for simple setup tasks (blog, basic app scaffolding)
+  - Example: "Create a Hugo blog", "Initialize a new React app"
 
-  **Research-heavy tasks:** explorer → planner → creator → critic → editor
+  **Simple modifications to existing code:** creator → critic → editor
+  - Skip explorer when requirements are clear and changes are localized
+  - Example: "Add a logout button", "Fix the typo in header"
+
+  **Complex modifications:** explorer → creator → critic → editor
+  - Use explorer first to understand existing patterns
+  - Example: "Refactor the auth system", "Add caching layer"
+
+  **Research-heavy or ambiguous tasks:** explorer → planner → creator → critic → editor
   - Add planner for complex multi-step work needing strategy
+  - Example: "Improve performance", "Design new API"
 
   ### Objective Guidelines
   - Each objective should be atomic and independently completable
   - Title should be action-oriented (e.g., "Add user authentication", "Fix login bug")
   - Description provides context for the executing agent
   - Hat options: "explorer" (research), "planner" (strategy), "designer" (structure), "creator" (building), "critic" (review), "editor" (refinement), "resolver" (issues)
-  - Checklist must_have items are required for completion (3-5 items ideal)
-  - Checklist optional items are nice-to-have enhancements
   - Use blocked_by to reference other draft_ids if there are dependencies
   - auto_start: true means start immediately when ready, false requires manual start
   - complexity: "simple" or "complex" - determines which AI model executes the objective:
@@ -59,6 +64,31 @@ instructions: |
     * "complex": Advanced model (Opus) - architectural decisions, multi-file refactoring, ambiguous requirements, debugging intricate issues
   - estimated_iterations: estimated number of iterations needed (1-5 for simple, 5-10 for moderate, 10-20 for complex)
   - estimated_budget: estimated cost in USD based on complexity ($0.20-$0.50 for simple, $0.50-$2.00 for moderate, $2.00-$10.00 for complex with Opus)
+
+  ### Checklist Best Practices (IMPORTANT)
+  Checklists should have **3-5 must_have items** - fewer items means more efficient execution.
+
+  **DO combine related steps into single items:**
+  - BAD: "Create .gitignore" + "Create README" + "Create config file" (3 items)
+  - GOOD: "Create project files (.gitignore, README, config)" (1 item)
+
+  - BAD: "Configure setting A" + "Configure setting B" + "Configure setting C" (3 items)
+  - GOOD: "Configure all settings in config file" (1 item)
+
+  **DO keep items outcome-focused, not step-focused:**
+  - BAD: "Run hugo new site" + "Add theme" + "Configure hugo.toml" (3 items)
+  - GOOD: "Initialize Hugo site with theme and configuration" (1 item)
+
+  **DON'T create items for verification steps:**
+  - BAD: "Verify build works" as a checklist item
+  - GOOD: Verification is implicit in implementation
+
+  **Example - Creating a blog:**
+  Instead of 10 granular items, use 3-4 outcome items:
+  - "Create GitHub repo and initialize Hugo site structure"
+  - "Configure site (theme, settings, SEO, syntax highlighting)"
+  - "Create initial content (about page, first post, README)"
+  - "Push to GitHub"
 
   ### Project Context
   When proposing objectives, consider whether you're working with:

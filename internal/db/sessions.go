@@ -34,23 +34,25 @@ func (db *DB) CreateSession(taskID, hat, worktreePath string) (*Session, error) 
 }
 
 // GetSessionByID retrieves a session by its ID
+// Note: Token counts are computed from session_activity, not stored in sessions table
 func (db *DB) GetSessionByID(id string) (*Session, error) {
 	session := &Session{}
 	err := db.QueryRow(
 		`SELECT id, task_id, hat, claude_session_id, status, worktree_path,
 		        iteration_count, max_iterations, completion_promise,
-		        input_tokens, output_tokens, input_rate, output_rate,
-		        tokens_budget, dollars_budget,
-		        created_at, started_at, ended_at, outcome
+		        input_rate, output_rate, tokens_budget, dollars_budget,
+		        created_at, started_at, ended_at, outcome,
+		        termination_reason, quality_gate_attempts
 		 FROM sessions WHERE id = ?`,
 		id,
 	).Scan(
 		&session.ID, &session.TaskID, &session.Hat, &session.ClaudeSessionID,
 		&session.Status, &session.WorktreePath, &session.IterationCount,
 		&session.MaxIterations, &session.CompletionPromise,
-		&session.InputTokens, &session.OutputTokens, &session.InputRate, &session.OutputRate,
+		&session.InputRate, &session.OutputRate,
 		&session.TokensBudget, &session.DollarsBudget,
 		&session.CreatedAt, &session.StartedAt, &session.EndedAt, &session.Outcome,
+		&session.TerminationReason, &session.QualityGateAttempts,
 	)
 
 	if err == sql.ErrNoRows {
@@ -79,12 +81,13 @@ func (db *DB) ListActiveSessions() ([]*Session, error) {
 }
 
 // listSessions is a helper for listing sessions with a WHERE clause
+// Note: Token counts are computed from session_activity, not stored in sessions table
 func (db *DB) listSessions(whereClause string, args ...any) ([]*Session, error) {
 	query := `SELECT id, task_id, hat, claude_session_id, status, worktree_path,
 	                 iteration_count, max_iterations, completion_promise,
-	                 input_tokens, output_tokens, input_rate, output_rate,
-	                 tokens_budget, dollars_budget,
-	                 created_at, started_at, ended_at, outcome
+	                 input_rate, output_rate, tokens_budget, dollars_budget,
+	                 created_at, started_at, ended_at, outcome,
+	                 termination_reason, quality_gate_attempts
 	          FROM sessions ` + whereClause
 
 	rows, err := db.Query(query, args...)
@@ -100,9 +103,10 @@ func (db *DB) listSessions(whereClause string, args ...any) ([]*Session, error) 
 			&session.ID, &session.TaskID, &session.Hat, &session.ClaudeSessionID,
 			&session.Status, &session.WorktreePath, &session.IterationCount,
 			&session.MaxIterations, &session.CompletionPromise,
-			&session.InputTokens, &session.OutputTokens, &session.InputRate, &session.OutputRate,
+			&session.InputRate, &session.OutputRate,
 			&session.TokensBudget, &session.DollarsBudget,
 			&session.CreatedAt, &session.StartedAt, &session.EndedAt, &session.Outcome,
+			&session.TerminationReason, &session.QualityGateAttempts,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan session: %w", err)
@@ -175,24 +179,6 @@ func (db *DB) UpdateSessionIteration(id string, iterationCount int) error {
 	return nil
 }
 
-// UpdateSessionUsage updates the token usage for a session
-func (db *DB) UpdateSessionUsage(id string, inputTokens, outputTokens int64) error {
-	result, err := db.Exec(
-		`UPDATE sessions SET input_tokens = ?, output_tokens = ? WHERE id = ?`,
-		inputTokens, outputTokens, id,
-	)
-	if err != nil {
-		return fmt.Errorf("failed to update session usage: %w", err)
-	}
-
-	rows, _ := result.RowsAffected()
-	if rows == 0 {
-		return fmt.Errorf("session not found: %s", id)
-	}
-
-	return nil
-}
-
 // SetSessionRates sets the token rates for cost calculation
 func (db *DB) SetSessionRates(id string, inputRate, outputRate float64) error {
 	result, err := db.Exec(
@@ -216,6 +202,25 @@ func (db *DB) UpdateSessionOutcome(id, outcome string) error {
 	result, err := db.Exec(`UPDATE sessions SET outcome = ? WHERE id = ?`, outcome, id)
 	if err != nil {
 		return fmt.Errorf("failed to update session outcome: %w", err)
+	}
+
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("session not found: %s", id)
+	}
+
+	return nil
+}
+
+// UpdateSessionTermination records why a session ended and its quality gate attempts
+// This should be called when a session completes, fails, or is stopped
+func (db *DB) UpdateSessionTermination(id string, reason string, qualityGateAttempts int) error {
+	result, err := db.Exec(
+		`UPDATE sessions SET termination_reason = ?, quality_gate_attempts = ? WHERE id = ?`,
+		reason, qualityGateAttempts, id,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to update session termination: %w", err)
 	}
 
 	rows, _ := result.RowsAffected()

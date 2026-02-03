@@ -348,11 +348,12 @@ func (db *DB) DeleteQuestMessages(questID string) error {
 }
 
 // GetTasksByQuestID retrieves all tasks spawned by a Quest
+// Note: Token counts are computed from session_activity, not stored in tasks table
 func (db *DB) GetTasksByQuestID(questID string) ([]*Task, error) {
 	rows, err := db.Query(
-		`SELECT id, project_id, quest_id, github_issue_number, title, description, parent_id, type, hat,
-		        priority, autonomy_level, status, base_branch, worktree_path, branch_name, pr_number,
-		        token_budget, token_used, time_budget_min, time_used_min, dollar_budget, dollar_used,
+		`SELECT id, project_id, quest_id, github_issue_number, title, description, parent_id, type, hat, model,
+		        priority, autonomy_level, status, base_branch, worktree_path, branch_name, content_path, pr_number,
+		        token_budget, time_budget_min, time_used_min, dollar_budget, dollar_used,
 		        created_at, started_at, completed_at
 		 FROM tasks WHERE quest_id = ? ORDER BY created_at ASC`,
 		questID,
@@ -367,9 +368,9 @@ func (db *DB) GetTasksByQuestID(questID string) ([]*Task, error) {
 		task := &Task{}
 		err := rows.Scan(
 			&task.ID, &task.ProjectID, &task.QuestID, &task.GitHubIssueNumber, &task.Title, &task.Description,
-			&task.ParentID, &task.Type, &task.Hat, &task.Priority, &task.AutonomyLevel, &task.Status,
-			&task.BaseBranch, &task.WorktreePath, &task.BranchName, &task.PRNumber,
-			&task.TokenBudget, &task.TokenUsed, &task.TimeBudgetMin, &task.TimeUsedMin,
+			&task.ParentID, &task.Type, &task.Hat, &task.Model, &task.Priority, &task.AutonomyLevel, &task.Status,
+			&task.BaseBranch, &task.WorktreePath, &task.BranchName, &task.ContentPath, &task.PRNumber,
+			&task.TokenBudget, &task.TimeBudgetMin, &task.TimeUsedMin,
 			&task.DollarBudget, &task.DollarUsed, &task.CreatedAt, &task.StartedAt, &task.CompletedAt,
 		)
 		if err != nil {
@@ -429,11 +430,19 @@ func (db *DB) GetQuestSummary(questID string) (*QuestSummary, error) {
 		}
 	}
 
-	// Aggregate cost from sessions (derived from tokens and rates)
+	// Aggregate cost from session_activity (single source of truth for tokens)
+	// Tokens are summed from activity, then multiplied by rates stored in sessions
 	err = db.QueryRow(
-		`SELECT COALESCE(SUM(s.input_tokens * s.input_rate + s.output_tokens * s.output_rate) / 1000000.0, 0)
+		`SELECT COALESCE(SUM(session_tokens.input_sum * s.input_rate + session_tokens.output_sum * s.output_rate) / 1000000.0, 0)
 		 FROM sessions s
 		 JOIN tasks t ON s.task_id = t.id
+		 LEFT JOIN (
+		     SELECT session_id,
+		            COALESCE(SUM(tokens_input), 0) as input_sum,
+		            COALESCE(SUM(tokens_output), 0) as output_sum
+		     FROM session_activity
+		     GROUP BY session_id
+		 ) session_tokens ON session_tokens.session_id = s.id
 		 WHERE t.quest_id = ?`,
 		questID,
 	).Scan(&summary.TotalDollarsUsed)

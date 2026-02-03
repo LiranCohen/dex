@@ -532,60 +532,114 @@ func extractJSONObject(s string) (string, int) {
 
 // assignUniqueDraftIDs replaces draft_id values in OBJECTIVE_DRAFT signals with UUIDs.
 // This ensures each draft has a globally unique ID that persists across conversations.
+// It also updates blocked_by references to use the new UUIDs.
 func assignUniqueDraftIDs(content string) string {
 	marker := "OBJECTIVE_DRAFT:"
-	result := strings.Builder{}
-	remaining := content
 
+	// First pass: collect all drafts and build old_id -> new_id mapping
+	type draftInfo struct {
+		startIdx int    // position in content where OBJECTIVE_DRAFT: starts
+		endIdx   int    // position after the JSON ends
+		jsonStr  string // original JSON string
+		draft    map[string]interface{}
+	}
+	var drafts []draftInfo
+	idMapping := make(map[string]string) // old draft_id -> new UUID
+
+	remaining := content
+	offset := 0
 	for {
 		idx := strings.Index(remaining, marker)
 		if idx == -1 {
-			result.WriteString(remaining)
 			break
 		}
 
-		// Add content before the marker
-		result.WriteString(remaining[:idx])
-
-		// Extract JSON portion
 		jsonStart := idx + len(marker)
-		jsonStr, endIdx := extractJSONObject(remaining[jsonStart:])
+		jsonStr, jsonLen := extractJSONObject(remaining[jsonStart:])
 		if jsonStr == "" {
-			// No valid JSON found, keep marker and continue
-			result.WriteString(marker)
 			remaining = remaining[jsonStart:]
+			offset += jsonStart
 			continue
 		}
 
-		// Parse the JSON to modify draft_id
 		var draft map[string]interface{}
 		if err := json.Unmarshal([]byte(jsonStr), &draft); err != nil {
-			// Failed to parse, keep original
-			result.WriteString(marker)
-			result.WriteString(jsonStr)
-			remaining = remaining[jsonStart+endIdx:]
+			remaining = remaining[jsonStart+jsonLen:]
+			offset += jsonStart + jsonLen
 			continue
 		}
 
-		// Replace draft_id with UUID
-		draft["draft_id"] = uuid.New().String()
+		// Generate new UUID and build mapping
+		oldID, _ := draft["draft_id"].(string)
+		newID := uuid.New().String()
+		if oldID != "" {
+			idMapping[oldID] = newID
+		}
+
+		drafts = append(drafts, draftInfo{
+			startIdx: offset + idx,
+			endIdx:   offset + jsonStart + jsonLen,
+			jsonStr:  jsonStr,
+			draft:    draft,
+		})
+
+		remaining = remaining[jsonStart+jsonLen:]
+		offset += jsonStart + jsonLen
+	}
+
+	// If no drafts found, return original content
+	if len(drafts) == 0 {
+		return content
+	}
+
+	// Second pass: update draft_id and blocked_by references, then rebuild content
+	result := strings.Builder{}
+	lastEnd := 0
+
+	for _, d := range drafts {
+		// Add content before this draft
+		result.WriteString(content[lastEnd:d.startIdx])
+
+		// Update draft_id with new UUID
+		if oldID, ok := d.draft["draft_id"].(string); ok {
+			if newID, exists := idMapping[oldID]; exists {
+				d.draft["draft_id"] = newID
+			}
+		}
+
+		// Update blocked_by references
+		if blockedBy, ok := d.draft["blocked_by"].([]interface{}); ok {
+			newBlockedBy := make([]interface{}, len(blockedBy))
+			for i, ref := range blockedBy {
+				if refStr, ok := ref.(string); ok {
+					if newID, exists := idMapping[refStr]; exists {
+						newBlockedBy[i] = newID
+					} else {
+						newBlockedBy[i] = refStr
+					}
+				} else {
+					newBlockedBy[i] = ref
+				}
+			}
+			d.draft["blocked_by"] = newBlockedBy
+		}
 
 		// Marshal back to JSON
-		newJSON, err := json.Marshal(draft)
+		newJSON, err := json.Marshal(d.draft)
 		if err != nil {
 			// Failed to marshal, keep original
 			result.WriteString(marker)
-			result.WriteString(jsonStr)
-			remaining = remaining[jsonStart+endIdx:]
-			continue
+			result.WriteString(d.jsonStr)
+		} else {
+			result.WriteString(marker)
+			result.WriteString(string(newJSON))
 		}
 
-		// Write marker + new JSON
-		result.WriteString(marker)
-		result.WriteString(string(newJSON))
-
-		remaining = remaining[jsonStart+endIdx:]
+		lastEnd = d.endIdx
 	}
+
+	// Add remaining content after last draft
+	result.WriteString(content[lastEnd:])
 
 	return result.String()
 }

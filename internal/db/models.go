@@ -75,6 +75,7 @@ type ProjectServices struct {
 }
 
 // Task represents a work item
+// Note: Token counts are computed from session_activity (single source of truth)
 type Task struct {
 	ID                string
 	ProjectID         string
@@ -95,7 +96,6 @@ type Task struct {
 	ContentPath       sql.NullString // Path to git content (relative to repo): tasks/{task-id}/
 	PRNumber          sql.NullInt64
 	TokenBudget       sql.NullInt64
-	TokenUsed         int64
 	TimeBudgetMin     sql.NullInt64
 	TimeUsedMin       int64
 	DollarBudget      sql.NullFloat64
@@ -127,6 +127,7 @@ type TaskDependency struct {
 }
 
 // Session represents a Claude session working on a task
+// Note: Token counts are computed from session_activity (single source of truth)
 type Session struct {
 	ID                  string
 	TaskID              string
@@ -137,8 +138,6 @@ type Session struct {
 	IterationCount      int
 	MaxIterations       int
 	CompletionPromise   sql.NullString
-	InputTokens         int64   // Total input tokens used
-	OutputTokens        int64   // Total output tokens used
 	InputRate           float64 // $/MTok for input at session start
 	OutputRate          float64 // $/MTok for output at session start
 	TokensBudget        sql.NullInt64
@@ -149,18 +148,6 @@ type Session struct {
 	Outcome             sql.NullString
 	TerminationReason   sql.NullString // Why the session ended
 	QualityGateAttempts int            // Number of quality gate validation attempts
-}
-
-// Cost calculates the session cost from tokens and rates
-func (s *Session) Cost() float64 {
-	inputCost := float64(s.InputTokens) * s.InputRate / 1_000_000
-	outputCost := float64(s.OutputTokens) * s.OutputRate / 1_000_000
-	return inputCost + outputCost
-}
-
-// TotalTokens returns the combined input + output tokens
-func (s *Session) TotalTokens() int64 {
-	return s.InputTokens + s.OutputTokens
 }
 
 // SessionCheckpoint represents a saved state of a session

@@ -20,6 +20,8 @@ export interface Task {
   PRNumber: number | null;
   TokenBudget: number | null;
   TokenUsed: number;
+  InputTokens: number;  // Computed from session_activity
+  OutputTokens: number; // Computed from session_activity
   TimeBudgetMin: number | null;
   TimeUsedMin: number;
   DollarBudget: number | null;

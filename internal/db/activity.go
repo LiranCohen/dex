@@ -152,24 +152,18 @@ func (db *DB) ListTaskActivity(taskID string) ([]*SessionActivity, error) {
 func (db *DB) GetSessionActivitySummary(sessionID string) (*SessionActivitySummary, error) {
 	summary := &SessionActivitySummary{}
 
-	// Get max iteration
+	// Get max iteration and token totals in one query
 	err := db.QueryRow(
-		`SELECT COALESCE(MAX(iteration), 0) FROM session_activity WHERE session_id = ?`,
-		sessionID,
-	).Scan(&summary.TotalIterations)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get max iteration: %w", err)
-	}
-
-	// Get total tokens
-	err = db.QueryRow(
-		`SELECT COALESCE(SUM(tokens_input), 0) + COALESCE(SUM(tokens_output), 0)
+		`SELECT COALESCE(MAX(iteration), 0),
+		        COALESCE(SUM(tokens_input), 0),
+		        COALESCE(SUM(tokens_output), 0)
 		 FROM session_activity WHERE session_id = ?`,
 		sessionID,
-	).Scan(&summary.TotalTokens)
+	).Scan(&summary.TotalIterations, &summary.InputTokens, &summary.OutputTokens)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get total tokens: %w", err)
+		return nil, fmt.Errorf("failed to get session activity summary: %w", err)
 	}
+	summary.TotalTokens = summary.InputTokens + summary.OutputTokens
 
 	// Get completion reason (from the last completion_signal event)
 	var completionReason sql.NullString
@@ -193,7 +187,35 @@ func (db *DB) GetSessionActivitySummary(sessionID string) (*SessionActivitySumma
 type SessionActivitySummary struct {
 	TotalIterations  int    `json:"total_iterations"`
 	TotalTokens      int64  `json:"total_tokens"`
+	InputTokens      int64  `json:"input_tokens"`
+	OutputTokens     int64  `json:"output_tokens"`
 	CompletionReason string `json:"completion_reason,omitempty"`
+}
+
+// GetSessionTokensFromActivity returns aggregated input/output tokens for a session
+// by summing from session_activity (the source of truth)
+func (db *DB) GetSessionTokensFromActivity(sessionID string) (inputTokens, outputTokens int64, err error) {
+	err = db.QueryRow(`
+		SELECT COALESCE(SUM(tokens_input), 0), COALESCE(SUM(tokens_output), 0)
+		FROM session_activity WHERE session_id = ?`, sessionID).Scan(&inputTokens, &outputTokens)
+	if err != nil {
+		return 0, 0, fmt.Errorf("failed to get session tokens from activity: %w", err)
+	}
+	return inputTokens, outputTokens, nil
+}
+
+// GetTaskTokensFromActivity returns aggregated input/output tokens for a task
+// by summing from session_activity across all sessions (the source of truth)
+func (db *DB) GetTaskTokensFromActivity(taskID string) (inputTokens, outputTokens int64, err error) {
+	err = db.QueryRow(`
+		SELECT COALESCE(SUM(a.tokens_input), 0), COALESCE(SUM(a.tokens_output), 0)
+		FROM session_activity a
+		JOIN sessions s ON a.session_id = s.id
+		WHERE s.task_id = ?`, taskID).Scan(&inputTokens, &outputTokens)
+	if err != nil {
+		return 0, 0, fmt.Errorf("failed to get task tokens from activity: %w", err)
+	}
+	return inputTokens, outputTokens, nil
 }
 
 // DeleteSessionActivity removes all activity records for a session

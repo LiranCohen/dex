@@ -73,13 +73,14 @@ func (db *DB) CreateTaskForQuest(questID, projectID, title, description, hat, ta
 }
 
 // GetTaskByID retrieves a task by its ID
+// Note: Token counts are computed from session_activity, not stored in tasks table
 func (db *DB) GetTaskByID(id string) (*Task, error) {
 	task := &Task{}
 	err := db.QueryRow(
 		`SELECT id, project_id, quest_id, github_issue_number, title, description, parent_id,
 		        type, hat, model, priority, autonomy_level, status, base_branch,
 		        worktree_path, branch_name, content_path, pr_number,
-		        token_budget, token_used, time_budget_min, time_used_min,
+		        token_budget, time_budget_min, time_used_min,
 		        dollar_budget, dollar_used, created_at, started_at, completed_at
 		 FROM tasks WHERE id = ?`,
 		id,
@@ -87,7 +88,7 @@ func (db *DB) GetTaskByID(id string) (*Task, error) {
 		&task.ID, &task.ProjectID, &task.QuestID, &task.GitHubIssueNumber, &task.Title, &task.Description, &task.ParentID,
 		&task.Type, &task.Hat, &task.Model, &task.Priority, &task.AutonomyLevel, &task.Status, &task.BaseBranch,
 		&task.WorktreePath, &task.BranchName, &task.ContentPath, &task.PRNumber,
-		&task.TokenBudget, &task.TokenUsed, &task.TimeBudgetMin, &task.TimeUsedMin,
+		&task.TokenBudget, &task.TimeBudgetMin, &task.TimeUsedMin,
 		&task.DollarBudget, &task.DollarUsed, &task.CreatedAt, &task.StartedAt, &task.CompletedAt,
 	)
 
@@ -122,11 +123,12 @@ func (db *DB) ListAllTasks() ([]*Task, error) {
 }
 
 // listTasks is a helper for listing tasks with a WHERE clause
+// Note: Token counts are computed from session_activity, not stored in tasks table
 func (db *DB) listTasks(whereClause string, args ...any) ([]*Task, error) {
 	query := `SELECT id, project_id, quest_id, github_issue_number, title, description, parent_id,
-	                 type, hat, priority, autonomy_level, status, base_branch,
+	                 type, hat, model, priority, autonomy_level, status, base_branch,
 	                 worktree_path, branch_name, content_path, pr_number,
-	                 token_budget, token_used, time_budget_min, time_used_min,
+	                 token_budget, time_budget_min, time_used_min,
 	                 dollar_budget, dollar_used, created_at, started_at, completed_at
 	          FROM tasks ` + whereClause
 
@@ -141,9 +143,9 @@ func (db *DB) listTasks(whereClause string, args ...any) ([]*Task, error) {
 		task := &Task{}
 		err := rows.Scan(
 			&task.ID, &task.ProjectID, &task.QuestID, &task.GitHubIssueNumber, &task.Title, &task.Description, &task.ParentID,
-			&task.Type, &task.Hat, &task.Priority, &task.AutonomyLevel, &task.Status, &task.BaseBranch,
+			&task.Type, &task.Hat, &task.Model, &task.Priority, &task.AutonomyLevel, &task.Status, &task.BaseBranch,
 			&task.WorktreePath, &task.BranchName, &task.ContentPath, &task.PRNumber,
-			&task.TokenBudget, &task.TokenUsed, &task.TimeBudgetMin, &task.TimeUsedMin,
+			&task.TokenBudget, &task.TimeBudgetMin, &task.TimeUsedMin,
 			&task.DollarBudget, &task.DollarUsed, &task.CreatedAt, &task.StartedAt, &task.CompletedAt,
 		)
 		if err != nil {
@@ -259,24 +261,6 @@ func (db *DB) UpdateTaskContentPath(id, contentPath string) error {
 	result, err := db.Exec(`UPDATE tasks SET content_path = ? WHERE id = ?`, path, id)
 	if err != nil {
 		return fmt.Errorf("failed to update task content path: %w", err)
-	}
-
-	rows, _ := result.RowsAffected()
-	if rows == 0 {
-		return fmt.Errorf("task not found: %s", id)
-	}
-
-	return nil
-}
-
-// UpdateTaskUsage updates the token, time, and dollar usage for a task
-func (db *DB) UpdateTaskUsage(id string, tokenUsed int64, timeUsedMin int64, dollarUsed float64) error {
-	result, err := db.Exec(
-		`UPDATE tasks SET token_used = ?, time_used_min = ?, dollar_used = ? WHERE id = ?`,
-		tokenUsed, timeUsedMin, dollarUsed, id,
-	)
-	if err != nil {
-		return fmt.Errorf("failed to update task usage: %w", err)
 	}
 
 	rows, _ := result.RowsAffected()
@@ -456,13 +440,14 @@ func (db *DB) CreateTaskForQuestWithStatus(questID, projectID, title, descriptio
 // 1. Were blocked by the completed task
 // 2. Have status 'blocked'
 // 3. Now have all their blockers completed
+// Note: Token counts are computed from session_activity, not stored in tasks table
 func (db *DB) GetTasksUnblockedBy(completedTaskID string) ([]*Task, error) {
 	// Find tasks that were blocked by the completed task and are now ready
 	query := `
 		SELECT DISTINCT t.id, t.project_id, t.quest_id, t.github_issue_number, t.title, t.description, t.parent_id,
-		       t.type, t.hat, t.priority, t.autonomy_level, t.status, t.base_branch,
+		       t.type, t.hat, t.model, t.priority, t.autonomy_level, t.status, t.base_branch,
 		       t.worktree_path, t.branch_name, t.content_path, t.pr_number,
-		       t.token_budget, t.token_used, t.time_budget_min, t.time_used_min,
+		       t.token_budget, t.time_budget_min, t.time_used_min,
 		       t.dollar_budget, t.dollar_used, t.created_at, t.started_at, t.completed_at
 		FROM tasks t
 		JOIN task_dependencies td ON t.id = td.blocked_id
@@ -487,9 +472,9 @@ func (db *DB) GetTasksUnblockedBy(completedTaskID string) ([]*Task, error) {
 		task := &Task{}
 		err := rows.Scan(
 			&task.ID, &task.ProjectID, &task.QuestID, &task.GitHubIssueNumber, &task.Title, &task.Description, &task.ParentID,
-			&task.Type, &task.Hat, &task.Priority, &task.AutonomyLevel, &task.Status, &task.BaseBranch,
+			&task.Type, &task.Hat, &task.Model, &task.Priority, &task.AutonomyLevel, &task.Status, &task.BaseBranch,
 			&task.WorktreePath, &task.BranchName, &task.ContentPath, &task.PRNumber,
-			&task.TokenBudget, &task.TokenUsed, &task.TimeBudgetMin, &task.TimeUsedMin,
+			&task.TokenBudget, &task.TimeBudgetMin, &task.TimeUsedMin,
 			&task.DollarBudget, &task.DollarUsed, &task.CreatedAt, &task.StartedAt, &task.CompletedAt,
 		)
 		if err != nil {
@@ -554,12 +539,13 @@ func (db *DB) GetIncompleteBlockerIDs(taskID string) ([]string, error) {
 // 2. Have auto_start = true
 // 3. Now have all their blockers completed (no incomplete blockers remaining)
 // 4. Are in 'ready' status (not already running/completed/etc.)
+// Note: Token counts are computed from session_activity, not stored in tasks table
 func (db *DB) GetTasksReadyToAutoStart(completedTaskID string) ([]*Task, error) {
 	query := `
 		SELECT DISTINCT t.id, t.project_id, t.quest_id, t.github_issue_number, t.title, t.description, t.parent_id,
-		       t.type, t.hat, t.priority, t.autonomy_level, t.status, t.base_branch,
+		       t.type, t.hat, t.model, t.priority, t.autonomy_level, t.status, t.base_branch,
 		       t.worktree_path, t.branch_name, t.content_path, t.pr_number,
-		       t.token_budget, t.token_used, t.time_budget_min, t.time_used_min,
+		       t.token_budget, t.time_budget_min, t.time_used_min,
 		       t.dollar_budget, t.dollar_used, t.created_at, t.started_at, t.completed_at
 		FROM tasks t
 		JOIN task_dependencies td ON t.id = td.blocked_id
@@ -585,9 +571,9 @@ func (db *DB) GetTasksReadyToAutoStart(completedTaskID string) ([]*Task, error) 
 		task := &Task{}
 		err := rows.Scan(
 			&task.ID, &task.ProjectID, &task.QuestID, &task.GitHubIssueNumber, &task.Title, &task.Description, &task.ParentID,
-			&task.Type, &task.Hat, &task.Priority, &task.AutonomyLevel, &task.Status, &task.BaseBranch,
+			&task.Type, &task.Hat, &task.Model, &task.Priority, &task.AutonomyLevel, &task.Status, &task.BaseBranch,
 			&task.WorktreePath, &task.BranchName, &task.ContentPath, &task.PRNumber,
-			&task.TokenBudget, &task.TokenUsed, &task.TimeBudgetMin, &task.TimeUsedMin,
+			&task.TokenBudget, &task.TimeBudgetMin, &task.TimeUsedMin,
 			&task.DollarBudget, &task.DollarUsed, &task.CreatedAt, &task.StartedAt, &task.CompletedAt,
 		)
 		if err != nil {
