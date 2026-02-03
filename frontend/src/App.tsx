@@ -16,6 +16,7 @@ import {
   type QuestQuestion,
 } from './components/QuestChat';
 import type { Task, TasksResponse, SystemStatus, TaskStatus, WebSocketEvent, SessionEvent, Approval, Quest, QuestMessage, QuestResponse, ObjectiveDraft, QuestModel, PreflightCheck } from './lib/types';
+import { V2App } from './v2/App';
 
 // Setup status type
 interface SetupStatus {
@@ -2511,6 +2512,15 @@ function App() {
         element={
           <ProtectedRoute>
             <QuestDetailPage />
+          </ProtectedRoute>
+        }
+      />
+      {/* V2 UI */}
+      <Route
+        path="/v2/*"
+        element={
+          <ProtectedRoute>
+            <V2App />
           </ProtectedRoute>
         }
       />

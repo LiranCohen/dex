@@ -256,6 +256,18 @@ export async function fetchPreflightCheck(questId: string): Promise<import('./ty
   return api.get(`/quests/${questId}/preflight`);
 }
 
+export async function cancelQuestSession(questId: string): Promise<void> {
+  // Attempt to cancel the quest session - this endpoint may not exist yet
+  // The backend will need to implement POST /quests/:id/cancel
+  try {
+    await api.post(`/quests/${questId}/cancel`);
+  } catch (err) {
+    // Silently ignore if endpoint doesn't exist (404)
+    // The user can still navigate away to effectively stop processing
+    console.warn('Cancel quest session not available:', err);
+  }
+}
+
 // Quest template API functions
 export async function fetchQuestTemplates(projectId: string): Promise<import('./types').QuestTemplate[]> {
   return api.get(`/projects/${projectId}/quest-templates`);
