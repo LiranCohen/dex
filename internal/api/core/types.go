@@ -36,9 +36,14 @@ type TaskResponse struct {
 	CreatedAt         string   `json:"CreatedAt"`
 	StartedAt         *string  `json:"StartedAt"`
 	CompletedAt       *string  `json:"CompletedAt"`
+	// Derived blocking info - computed from dependencies
+	IsBlocked bool     `json:"IsBlocked"`
+	BlockedBy []string `json:"BlockedBy,omitempty"`
 }
 
 // ToTaskResponse converts a db.Task to TaskResponse for clean JSON.
+// Note: This does not populate blocking info. Use ToTaskResponseWithBlocking
+// for responses where blocking state matters.
 func ToTaskResponse(t *db.Task) TaskResponse {
 	resp := TaskResponse{
 		ID:            t.ID,
@@ -95,6 +100,15 @@ func ToTaskResponse(t *db.Task) TaskResponse {
 		s := t.CompletedAt.Time.Format(time.RFC3339)
 		resp.CompletedAt = &s
 	}
+	return resp
+}
+
+// ToTaskResponseWithBlocking converts a db.Task to TaskResponse with blocking info.
+// blockerIDs should be the list of incomplete blocker task IDs (from GetIncompleteBlockerIDs).
+func ToTaskResponseWithBlocking(t *db.Task, blockerIDs []string) TaskResponse {
+	resp := ToTaskResponse(t)
+	resp.IsBlocked = len(blockerIDs) > 0
+	resp.BlockedBy = blockerIDs
 	return resp
 }
 

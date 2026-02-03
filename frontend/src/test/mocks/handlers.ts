@@ -73,7 +73,8 @@ export const handlers = [
     if (!task) {
       return new HttpResponse(null, { status: 404 });
     }
-    return HttpResponse.json({ task });
+    // Return task directly (component expects Task, not { task })
+    return HttpResponse.json(task);
   }),
 
   http.get(`${API_BASE}/tasks/:taskId/checklist`, () => {

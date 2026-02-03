@@ -61,6 +61,7 @@ export const mockTask: Task = {
   CreatedAt: '2024-01-01T00:00:00Z',
   StartedAt: '2024-01-01T01:00:00Z',
   CompletedAt: null,
+  IsBlocked: false,
 };
 
 export const mockPendingTask: Task = {

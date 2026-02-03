@@ -397,6 +397,7 @@ type QuestSummary struct {
 }
 
 // GetQuestSummary calculates task statistics for a Quest (derived from tasks and sessions)
+// BlockedTasks count is derived from dependencies, not from stored status
 func (db *DB) GetQuestSummary(questID string) (*QuestSummary, error) {
 	tasks, err := db.GetTasksByQuestID(questID)
 	if err != nil {
@@ -406,17 +407,25 @@ func (db *DB) GetQuestSummary(questID string) (*QuestSummary, error) {
 	summary := &QuestSummary{}
 	for _, task := range tasks {
 		summary.TotalTasks++
+
+		// Check if task is blocked by incomplete dependencies (derived, not stored)
+		blockerIDs, _ := db.GetIncompleteBlockerIDs(task.ID)
+		isBlocked := len(blockerIDs) > 0
+
 		switch task.Status {
 		case TaskStatusCompleted, TaskStatusCompletedWithIssues:
 			summary.CompletedTasks++
 		case TaskStatusRunning:
 			summary.RunningTasks++
-		case TaskStatusBlocked:
-			summary.BlockedTasks++
 		case TaskStatusQuarantined:
 			summary.FailedTasks++
 		default:
-			summary.PendingTasks++
+			// For ready/pending tasks, check if they're blocked by dependencies
+			if isBlocked {
+				summary.BlockedTasks++
+			} else {
+				summary.PendingTasks++
+			}
 		}
 	}
 

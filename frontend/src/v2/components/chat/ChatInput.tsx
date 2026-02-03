@@ -100,45 +100,52 @@ export function ChatInput({
   const showStop = isGenerating && onStop;
 
   return (
-    <div
-      ref={containerRef}
-      className={`v2-chat-input ${!isConnected ? 'v2-chat-input--disconnected' : ''}`}
-    >
-      <span className="v2-chat-input__cursor">▌</span>
-      <TextareaAutosize
-        ref={textareaRef}
-        className="v2-chat-input__field"
-        value={value}
-        onChange={(e) => {
-          setValue(e.target.value);
-          setHistoryIndex(-1);
-        }}
-        onKeyDown={handleKeyDown}
-        placeholder={getPlaceholder()}
-        disabled={disabled || !isConnected}
-        minRows={1}
-        maxRows={6}
-      />
-      {showStop ? (
-        <button
-          type="button"
-          className="v2-btn v2-btn--secondary v2-chat-input__stop"
-          onClick={handleStop}
-          aria-label="Stop generating"
-        >
-          Stop
-        </button>
-      ) : (
-        <button
-          type="button"
-          className="v2-chat-input__send"
-          onClick={handleSend}
-          disabled={!canSend}
-          aria-label="Send message"
-        >
-          Send
-        </button>
-      )}
+    <div className="v2-chat-input-wrapper">
+      <div
+        ref={containerRef}
+        className={`v2-chat-input ${!isConnected ? 'v2-chat-input--disconnected' : ''}`}
+      >
+        <span className="v2-chat-input__cursor">▌</span>
+        <TextareaAutosize
+          ref={textareaRef}
+          className="v2-chat-input__field"
+          value={value}
+          onChange={(e) => {
+            setValue(e.target.value);
+            setHistoryIndex(-1);
+          }}
+          onKeyDown={handleKeyDown}
+          placeholder={getPlaceholder()}
+          disabled={disabled || !isConnected}
+          minRows={1}
+          maxRows={6}
+        />
+        {showStop ? (
+          <button
+            type="button"
+            className="v2-btn v2-btn--secondary v2-chat-input__stop"
+            onClick={handleStop}
+            aria-label="Stop generating"
+          >
+            Stop
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="v2-chat-input__send"
+            onClick={handleSend}
+            disabled={!canSend}
+            aria-label="Send message"
+          >
+            <svg className="v2-chat-input__send-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+            </svg>
+          </button>
+        )}
+      </div>
+      <div className="v2-chat-input__hint">
+        Enter to send · Shift+Enter for newline · ↑ for history
+      </div>
     </div>
   );
 }

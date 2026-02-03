@@ -3,6 +3,7 @@ import { Button } from './Button';
 interface ObjectiveActionsProps {
   status: string;
   actionLoading: string | null;
+  isBlocked?: boolean;
   onStart: () => void;
   onPause: () => void;
   onResume: () => void;
@@ -12,12 +13,14 @@ interface ObjectiveActionsProps {
 export function ObjectiveActions({
   status,
   actionLoading,
+  isBlocked = false,
   onStart,
   onPause,
   onResume,
   onCancel,
 }: ObjectiveActionsProps) {
-  const canStart = status === 'ready' || status === 'pending';
+  // Can only start if status allows it AND not blocked by dependencies
+  const canStart = (status === 'ready' || status === 'pending') && !isBlocked;
   const canPause = status === 'running';
   const canResume = status === 'paused';
   const canCancel = status === 'running' || status === 'paused';

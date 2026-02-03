@@ -208,7 +208,7 @@ describe('ObjectiveDetail', () => {
       beforeEach(() => {
         server.use(
           http.get('/api/v1/tasks/:id', () => {
-            return HttpResponse.json({ task: { ...mockTask, Status: 'paused' } });
+            return HttpResponse.json({ ...mockTask, Status: 'paused' });
           })
         );
       });
@@ -250,7 +250,7 @@ describe('ObjectiveDetail', () => {
       beforeEach(() => {
         server.use(
           http.get('/api/v1/tasks/:id', () => {
-            return HttpResponse.json({ task: mockPendingTask });
+            return HttpResponse.json(mockPendingTask);
           })
         );
       });
@@ -399,7 +399,7 @@ describe('ObjectiveDetail', () => {
     it('shows back link to home when task has no QuestID', async () => {
       server.use(
         http.get('/api/v1/tasks/:id', () => {
-          return HttpResponse.json({ task: { ...mockTask, QuestID: null } });
+          return HttpResponse.json({ ...mockTask, QuestID: null });
         })
       );
 

@@ -2,6 +2,7 @@
 package quests
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"github.com/lirancohen/dex/internal/api/core"
 	"github.com/lirancohen/dex/internal/api/websocket"
 	"github.com/lirancohen/dex/internal/db"
+	"github.com/lirancohen/dex/internal/toolbelt"
 )
 
 // Handler handles quest-related HTTP requests.
@@ -266,6 +268,25 @@ func (h *Handler) HandleSendMessage(c echo.Context) error {
 
 	assistantMsg, err := h.deps.QuestHandler.ProcessMessage(c.Request().Context(), questID, req.Content)
 	if err != nil {
+		// Check if this is a billing/credit error from Anthropic
+		var apiErr *toolbelt.AnthropicAPIError
+		if errors.As(err, &apiErr) && apiErr.IsBillingError() {
+			return c.JSON(http.StatusPaymentRequired, map[string]any{
+				"error":        "billing_error",
+				"message":      "Your Anthropic API credit balance is too low. Please add credits at console.anthropic.com and try again.",
+				"retryable":    true,
+				"user_message": core.ToQuestMessageResponse(userMsg),
+			})
+		}
+		// Check for rate limit errors
+		if errors.As(err, &apiErr) && apiErr.IsRateLimitError() {
+			return c.JSON(http.StatusTooManyRequests, map[string]any{
+				"error":        "rate_limit",
+				"message":      "Rate limit exceeded. Please wait a moment and try again.",
+				"retryable":    true,
+				"user_message": core.ToQuestMessageResponse(userMsg),
+			})
+		}
 		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("failed to process message: %v", err))
 	}
 

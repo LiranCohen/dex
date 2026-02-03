@@ -1089,7 +1089,8 @@ function TaskDetailPage() {
   }
 
   const isPlanning = task.Status === 'planning';
-  const canStart = task.Status === 'pending' || task.Status === 'ready';
+  // Can only start if status allows it AND not blocked by dependencies
+  const canStart = (task.Status === 'pending' || task.Status === 'ready') && !task.IsBlocked;
   const isRunning = task.Status === 'running';
   const isPaused = task.Status === 'paused';
   const isComplete = task.Status === 'completed' || task.Status === 'cancelled';
@@ -1133,6 +1134,16 @@ function TaskDetailPage() {
 
           {task.Description && (
             <p className="text-gray-300 mb-4">{task.Description}</p>
+          )}
+
+          {/* Blocked notice (derived from dependencies) */}
+          {task.IsBlocked && (
+            <div className="bg-yellow-900/30 border border-yellow-700 rounded-lg p-3 mb-4">
+              <p className="text-yellow-400 text-sm font-medium">Waiting for dependencies</p>
+              <p className="text-yellow-300/70 text-xs mt-1">
+                This objective will automatically start when its blocking objectives complete.
+              </p>
+            </div>
           )}
 
           {/* Task Metadata */}

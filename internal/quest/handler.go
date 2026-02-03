@@ -237,14 +237,32 @@ func (h *Handler) ProcessMessage(ctx context.Context, questID, content string) (
 	// Tool use loop - continue until we get a non-tool response
 	maxToolIterations := 10
 	for i := 0; i < maxToolIterations; i++ {
-		// Call the model
-		response, err := h.client.Chat(ctx, &toolbelt.AnthropicChatRequest{
+		// Track accumulated streaming content for this iteration
+		var streamedContent strings.Builder
+
+		// Streaming callback to broadcast content deltas in real-time
+		onDelta := func(delta string) {
+			streamedContent.WriteString(delta)
+			if h.hub != nil {
+				h.hub.Broadcast(websocket.Message{
+					Type: "quest.content_delta",
+					Payload: map[string]any{
+						"quest_id": questID,
+						"delta":    delta,
+						"content":  streamedContent.String(), // Full content so far
+					},
+				})
+			}
+		}
+
+		// Call the model with streaming
+		response, err := h.client.ChatWithStreaming(ctx, &toolbelt.AnthropicChatRequest{
 			Model:     model,
 			MaxTokens: 4096,
 			System:    systemPrompt,
 			Messages:  anthropicMessages,
 			Tools:     h.readOnlyTools,
-		})
+		}, onDelta)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get response from Dex: %w", err)
 		}
@@ -703,8 +721,8 @@ func (h *Handler) CreateObjectiveFromDraft(ctx context.Context, questID string, 
 	// Calculate priority from complexity and estimated iterations
 	priority := complexityToPriority(draft.Complexity, draft.EstimatedIterations)
 
-	// Create the task
-	task, err := h.db.CreateTaskForQuest(
+	// Create the task with auto_start preference
+	task, err := h.db.CreateTaskForQuestWithStatus(
 		questID,
 		quest.ProjectID,
 		draft.Title,
@@ -713,6 +731,8 @@ func (h *Handler) CreateObjectiveFromDraft(ctx context.Context, questID string, 
 		db.TaskTypeTask,
 		model,
 		priority,
+		db.TaskStatusReady,
+		draft.AutoStart,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create task: %w", err)

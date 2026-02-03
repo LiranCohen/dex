@@ -58,7 +58,9 @@ func (h *Handler) HandleList(c echo.Context) error {
 
 	taskResponses := make([]core.TaskResponse, len(tasks))
 	for i, t := range tasks {
-		taskResponses[i] = core.ToTaskResponse(t)
+		// Get blocking info for each task
+		blockerIDs, _ := h.deps.DB.GetIncompleteBlockerIDs(t.ID)
+		taskResponses[i] = core.ToTaskResponseWithBlocking(t, blockerIDs)
 	}
 
 	return c.JSON(http.StatusOK, map[string]any{
@@ -148,7 +150,10 @@ func (h *Handler) HandleGet(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusNotFound, err.Error())
 	}
 
-	return c.JSON(http.StatusOK, core.ToTaskResponse(t))
+	// Get blocking info
+	blockerIDs, _ := h.deps.DB.GetIncompleteBlockerIDs(t.ID)
+
+	return c.JSON(http.StatusOK, core.ToTaskResponseWithBlocking(t, blockerIDs))
 }
 
 // HandleUpdate updates a task.
@@ -191,6 +196,15 @@ func (h *Handler) HandleStart(c echo.Context) error {
 	}
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
+	}
+
+	// Check if task is blocked by incomplete dependencies
+	blockerIDs, err := h.deps.DB.GetIncompleteBlockerIDs(taskID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to check dependencies")
+	}
+	if len(blockerIDs) > 0 {
+		return echo.NewHTTPError(http.StatusConflict, fmt.Sprintf("task is blocked by incomplete dependencies: %v", blockerIDs))
 	}
 
 	result, err := h.deps.StartTaskInternal(context.Background(), taskID, req.BaseBranch)

@@ -11,6 +11,8 @@ interface QuestionPromptProps {
   options: QuestionOption[];
   onSelect: (optionId: string) => void;
   disabled?: boolean;
+  /** The ID of the selected answer (when already answered) */
+  answeredId?: string;
 }
 
 export function QuestionPrompt({
@@ -18,14 +20,16 @@ export function QuestionPrompt({
   options,
   onSelect,
   disabled = false,
+  answeredId,
 }: QuestionPromptProps) {
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(answeredId || null);
+  const isAnswered = answeredId != null || selectedId != null;
 
   const handleSelect = useCallback((optionId: string) => {
-    if (disabled) return;
+    if (disabled || isAnswered) return;
     setSelectedId(optionId);
     onSelect(optionId);
-  }, [disabled, onSelect]);
+  }, [disabled, isAnswered, onSelect]);
 
   // Number key shortcuts (1-9)
   useEffect(() => {
@@ -48,36 +52,46 @@ export function QuestionPrompt({
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [disabled, selectedId, options, handleSelect]);
 
+  // Determine the effective selected ID (from prop or local state)
+  const effectiveSelectedId = answeredId || selectedId;
+
   return (
-    <div className="v2-question" role="group" aria-labelledby="question-text">
-      <div className="v2-question__label">Question</div>
+    <div className={`v2-question ${isAnswered ? 'v2-question--answered' : ''}`} role="group" aria-labelledby="question-text">
+      <div className="v2-question__label">
+        {isAnswered ? 'Answered' : 'Question'}
+      </div>
       <p id="question-text" className="v2-question__text">{question}</p>
 
       <div className="v2-question__options" role="listbox" aria-label="Answer options">
-        {options.map((option, index) => (
-          <button
-            key={option.id}
-            type="button"
-            className={`v2-question__option ${selectedId === option.id ? 'v2-question__option--selected' : ''}`}
-            onClick={() => handleSelect(option.id)}
-            disabled={disabled}
-            role="option"
-            aria-selected={selectedId === option.id}
-          >
-            <span className="v2-question__option-key" aria-hidden="true">
-              {index + 1}
-            </span>
-            <div>
-              <div className="v2-question__option-title">{option.title}</div>
-              {option.description && (
-                <div className="v2-question__option-desc">{option.description}</div>
-              )}
-            </div>
-          </button>
-        ))}
+        {options.map((option, index) => {
+          const isSelected = effectiveSelectedId === option.id;
+          const isNotSelected = isAnswered && !isSelected;
+
+          return (
+            <button
+              key={option.id}
+              type="button"
+              className={`v2-question__option ${isSelected ? 'v2-question__option--selected' : ''} ${isNotSelected ? 'v2-question__option--dimmed' : ''}`}
+              onClick={() => handleSelect(option.id)}
+              disabled={disabled || isAnswered}
+              role="option"
+              aria-selected={isSelected}
+            >
+              <span className="v2-question__option-key" aria-hidden="true">
+                {isSelected ? '✓' : index + 1}
+              </span>
+              <div>
+                <div className="v2-question__option-title">{option.title}</div>
+                {option.description && (
+                  <div className="v2-question__option-desc">{option.description}</div>
+                )}
+              </div>
+            </button>
+          );
+        })}
       </div>
 
-      {!disabled && !selectedId && options.length > 0 && (
+      {!disabled && !isAnswered && options.length > 0 && (
         <p className="v2-question__hint">
           Press 1-{Math.min(options.length, 9)} to select
         </p>

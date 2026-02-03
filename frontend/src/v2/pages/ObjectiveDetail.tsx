@@ -33,12 +33,12 @@ export function ObjectiveDetail() {
     if (!id) return;
     try {
       const [taskData, checklistData, activityData, approvalsData] = await Promise.all([
-        api.get<{ task: Task }>(`/tasks/${id}`),
+        api.get<Task>(`/tasks/${id}`),
         api.get<{ items: ChecklistItem[] }>(`/tasks/${id}/checklist`).catch(() => ({ items: [] })),
         api.get<{ activities: Activity[] }>(`/tasks/${id}/activity`).catch(() => ({ activities: [] })),
         fetchApprovals(),
       ]);
-      setTask(taskData.task);
+      setTask(taskData);
       setChecklist(checklistData.items || []);
       setActivity(activityData.activities || []);
       setApprovalCount((approvalsData.approvals || []).filter((a: Approval) => a.status === 'pending').length);
@@ -177,19 +177,30 @@ export function ObjectiveDetail() {
             <h1 className="v2-page-title">{task.Title}</h1>
             <div className="v2-objective-header__status">
               <StatusBar status={getTaskStatus(task.Status)} pulse={task.Status === 'running'} />
-              <span className="v2-label">{task.Status.toUpperCase()}</span>
+              <span className="v2-label">{(task.Status || 'unknown').toUpperCase()}</span>
             </div>
           </div>
 
           <ObjectiveActions
             status={task.Status}
             actionLoading={actionLoading}
+            isBlocked={task.IsBlocked}
             onStart={handleStart}
             onPause={handlePause}
             onResume={handleResume}
             onCancel={() => setShowCancelConfirm(true)}
           />
         </div>
+
+        {/* Blocked status indicator (derived from dependencies) */}
+        {task.IsBlocked && (
+          <div className="v2-blocked-notice">
+            <span className="v2-label">Waiting for dependencies</span>
+            <p className="v2-blocked-notice__text">
+              This objective will automatically start when its blocking objectives complete.
+            </p>
+          </div>
+        )}
 
         {/* Description */}
         {task.Description && (

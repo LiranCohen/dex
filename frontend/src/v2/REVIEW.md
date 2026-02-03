@@ -8,10 +8,9 @@ After analyzing Goose's chat implementation, several gaps and opportunities for 
 
 ## Critical Issues
 
-### 1. No Streaming Support
-**Current:** `streamingContent` state exists but is never populated. Messages appear all at once.
-**Goose:** Text streams in progressively with `isStreaming` prop, creating a responsive feel.
-**Fix:** Implement WebSocket event for partial content (`quest.content_delta` or similar) and render incrementally.
+### 1. ~~No Streaming Support~~ ✅ DONE
+**Fixed:** Backend now uses `ChatWithStreaming()` which broadcasts `quest.content_delta` WebSocket events.
+Frontend handles these in QuestDetail.tsx and updates `streamingContent` state for real-time rendering.
 
 ### 2. Tool Activity Not Inline
 **Current:** Tool activity shows in a separate section below all messages.
@@ -173,7 +172,7 @@ Issues:
 ## Recommended Priority Fixes
 
 ### P0 - Must Have for Usable Chat
-1. Streaming content support
+1. ~~Streaming content support~~ ✅
 2. Error handling with retry
 3. Connection status awareness
 4. Stop/cancel button
@@ -211,7 +210,7 @@ Issues:
 
 ## Action Items
 
-1. [ ] Implement streaming content WebSocket handling (requires backend changes)
+1. [x] Implement streaming content WebSocket handling (quest.content_delta event)
 2. [x] Add connection status to chat UI
 3. [x] Add error state to messages with retry
 4. [x] Add stop button during generation
@@ -255,7 +254,7 @@ Issues:
 ## Remaining Work
 
 ### Backend Required
-1. Streaming content support (needs WebSocket events for partial content)
+1. ~~Streaming content support~~ ✅ (`quest.content_delta` WebSocket events implemented)
 2. Quest session cancel endpoint (POST /quests/:id/cancel)
 
 ### Future Enhancements

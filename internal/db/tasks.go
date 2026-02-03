@@ -517,3 +517,88 @@ func (db *DB) GetTaskAutoStart(taskID string) (bool, error) {
 	}
 	return autoStart, nil
 }
+
+// GetIncompleteBlockerIDs returns the IDs of tasks that block the given task and are not completed
+// This is used for deriving the blocked status at query time
+func (db *DB) GetIncompleteBlockerIDs(taskID string) ([]string, error) {
+	rows, err := db.Query(
+		`SELECT t.id FROM tasks t
+		 JOIN task_dependencies td ON t.id = td.blocker_id
+		 WHERE td.blocked_id = ? AND t.status NOT IN (?, ?)`,
+		taskID, TaskStatusCompleted, TaskStatusCancelled,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get incomplete blockers: %w", err)
+	}
+	defer rows.Close()
+
+	var blockerIDs []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("failed to scan blocker id: %w", err)
+		}
+		blockerIDs = append(blockerIDs, id)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating blocker ids: %w", err)
+	}
+
+	return blockerIDs, nil
+}
+
+// GetTasksReadyToAutoStart returns tasks that became ready because the given task completed
+// These are tasks that:
+// 1. Were blocked by the completed task
+// 2. Have auto_start = true
+// 3. Now have all their blockers completed (no incomplete blockers remaining)
+// 4. Are in 'ready' status (not already running/completed/etc.)
+func (db *DB) GetTasksReadyToAutoStart(completedTaskID string) ([]*Task, error) {
+	query := `
+		SELECT DISTINCT t.id, t.project_id, t.quest_id, t.github_issue_number, t.title, t.description, t.parent_id,
+		       t.type, t.hat, t.priority, t.autonomy_level, t.status, t.base_branch,
+		       t.worktree_path, t.branch_name, t.content_path, t.pr_number,
+		       t.token_budget, t.token_used, t.time_budget_min, t.time_used_min,
+		       t.dollar_budget, t.dollar_used, t.created_at, t.started_at, t.completed_at
+		FROM tasks t
+		JOIN task_dependencies td ON t.id = td.blocked_id
+		WHERE td.blocker_id = ?
+		  AND t.status = ?
+		  AND COALESCE(t.auto_start, FALSE) = TRUE
+		  AND NOT EXISTS (
+		      SELECT 1 FROM task_dependencies td2
+		      JOIN tasks blocker ON td2.blocker_id = blocker.id
+		      WHERE td2.blocked_id = t.id
+		        AND blocker.status NOT IN (?, ?)
+		  )
+	`
+
+	rows, err := db.Query(query, completedTaskID, TaskStatusReady, TaskStatusCompleted, TaskStatusCancelled)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get tasks ready to auto-start: %w", err)
+	}
+	defer rows.Close()
+
+	var tasks []*Task
+	for rows.Next() {
+		task := &Task{}
+		err := rows.Scan(
+			&task.ID, &task.ProjectID, &task.QuestID, &task.GitHubIssueNumber, &task.Title, &task.Description, &task.ParentID,
+			&task.Type, &task.Hat, &task.Priority, &task.AutonomyLevel, &task.Status, &task.BaseBranch,
+			&task.WorktreePath, &task.BranchName, &task.ContentPath, &task.PRNumber,
+			&task.TokenBudget, &task.TokenUsed, &task.TimeBudgetMin, &task.TimeUsedMin,
+			&task.DollarBudget, &task.DollarUsed, &task.CreatedAt, &task.StartedAt, &task.CompletedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan task: %w", err)
+		}
+		tasks = append(tasks, task)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating tasks: %w", err)
+	}
+
+	return tasks, nil
+}

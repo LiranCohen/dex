@@ -93,21 +93,16 @@ func (h *ObjectivesHandler) HandleCreate(c echo.Context) error {
 	}
 
 	// Wire up dependencies
+	// Note: We don't change status to 'blocked' - blocked state is derived from dependencies
+	var blockerIDs []string
 	if len(req.BlockedBy) > 0 {
 		for _, blockerID := range req.BlockedBy {
 			if err := h.deps.DB.AddTaskDependency(blockerID, createdTask.ID); err != nil {
 				fmt.Printf("warning: failed to add dependency %s -> %s: %v\n", blockerID, createdTask.ID, err)
 			}
 		}
-
-		isReady, err := h.deps.DB.IsTaskReady(createdTask.ID)
-		if err == nil && !isReady {
-			if err := h.deps.DB.UpdateTaskStatus(createdTask.ID, db.TaskStatusBlocked); err != nil {
-				fmt.Printf("warning: failed to set task %s to blocked: %v\n", createdTask.ID, err)
-			} else {
-				createdTask.Status = db.TaskStatusBlocked
-			}
-		}
+		// Get the list of incomplete blockers for the response
+		blockerIDs, _ = h.deps.DB.GetIncompleteBlockerIDs(createdTask.ID)
 	}
 
 	// Sync to GitHub Issue (async)
@@ -131,17 +126,20 @@ func (h *ObjectivesHandler) HandleCreate(c echo.Context) error {
 
 	response := map[string]any{
 		"message": "objective created",
-		"task":    core.ToTaskResponse(createdTask),
+		"task":    core.ToTaskResponseWithBlocking(createdTask, blockerIDs),
 	}
 
-	// Auto-start if requested and not blocked
-	if req.AutoStart && createdTask.Status != db.TaskStatusBlocked {
+	// Auto-start if requested and not blocked (derived from dependencies)
+	isBlocked := len(blockerIDs) > 0
+	if req.AutoStart && !isBlocked {
 		startResult, err := h.deps.StartTaskInternal(context.Background(), createdTask.ID, "")
 		if err != nil {
 			response["auto_start_error"] = err.Error()
 			fmt.Printf("auto-start failed for task %s: %v\n", createdTask.ID, err)
 		} else {
-			response["task"] = core.ToTaskResponse(startResult.Task)
+			// Get fresh blocking info for the started task
+			startedBlockerIDs, _ := h.deps.DB.GetIncompleteBlockerIDs(startResult.Task.ID)
+			response["task"] = core.ToTaskResponseWithBlocking(startResult.Task, startedBlockerIDs)
 			response["worktree_path"] = startResult.WorktreePath
 			response["session_id"] = startResult.SessionID
 			response["auto_started"] = true
@@ -222,20 +220,20 @@ func (h *ObjectivesHandler) HandleCreateBatch(c echo.Context) error {
 
 		draftToTaskID[draft.DraftID] = task.ID
 		createdTasks = append(createdTasks, task)
+		// Initial response without blocking info (will be updated after dependencies are wired)
 		taskResults = append(taskResults, map[string]any{
 			"draft_id": draft.DraftID,
 			"task":     core.ToTaskResponse(task),
 		})
 	}
 
-	// Phase 2: Wire up dependencies
+	// Phase 2: Wire up dependencies (don't change status - blocked is derived)
 	for i, draft := range req.Drafts {
 		if len(draft.BlockedBy) == 0 {
 			continue
 		}
 
 		task := createdTasks[i]
-		hasActiveBlocker := false
 
 		for _, blockerDraftID := range draft.BlockedBy {
 			blockerTaskID, ok := draftToTaskID[blockerDraftID]
@@ -245,26 +243,15 @@ func (h *ObjectivesHandler) HandleCreateBatch(c echo.Context) error {
 
 			if err := h.deps.DB.AddTaskDependency(blockerTaskID, task.ID); err != nil {
 				fmt.Printf("warning: failed to add dependency %s -> %s: %v\n", blockerTaskID, task.ID, err)
-				continue
-			}
-
-			blockerTask, err := h.deps.DB.GetTaskByID(blockerTaskID)
-			if err == nil && blockerTask != nil && blockerTask.Status != db.TaskStatusCompleted {
-				hasActiveBlocker = true
 			}
 		}
 
-		if hasActiveBlocker {
-			if err := h.deps.DB.UpdateTaskStatus(task.ID, db.TaskStatusBlocked); err != nil {
-				fmt.Printf("warning: failed to set task %s to blocked: %v\n", task.ID, err)
-			} else {
-				task.Status = db.TaskStatusBlocked
-				taskResults[i]["task"] = core.ToTaskResponse(task)
-			}
-		}
+		// Update response with derived blocking info
+		blockerIDs, _ := h.deps.DB.GetIncompleteBlockerIDs(task.ID)
+		taskResults[i]["task"] = core.ToTaskResponseWithBlocking(task, blockerIDs)
 	}
 
-	// Phase 3: Sync to GitHub and auto-start ready tasks
+	// Phase 3: Sync to GitHub and auto-start tasks that are not blocked
 	var autoStarted []string
 	var autoStartErrors []string
 
@@ -274,18 +261,23 @@ func (h *ObjectivesHandler) HandleCreateBatch(c echo.Context) error {
 			go h.SyncObjectiveToGitHubIssue(task.ID)
 		}
 
-		// Auto-start if requested and not blocked
-		if req.Drafts[i].AutoStart && task.Status != db.TaskStatusBlocked {
-			startResult, err := h.deps.StartTaskInternal(context.Background(), task.ID, "")
-			if err != nil {
-				autoStartErrors = append(autoStartErrors, fmt.Sprintf("%s: %v", task.Title, err))
-				fmt.Printf("auto-start failed for task %s: %v\n", task.ID, err)
-			} else {
-				taskResults[i]["task"] = core.ToTaskResponse(startResult.Task)
-				taskResults[i]["worktree_path"] = startResult.WorktreePath
-				taskResults[i]["session_id"] = startResult.SessionID
-				taskResults[i]["auto_started"] = true
-				autoStarted = append(autoStarted, task.ID)
+		// Auto-start if requested and not blocked (derived from dependencies)
+		if req.Drafts[i].AutoStart {
+			blockerIDs, _ := h.deps.DB.GetIncompleteBlockerIDs(task.ID)
+			isBlocked := len(blockerIDs) > 0
+			if !isBlocked {
+				startResult, err := h.deps.StartTaskInternal(context.Background(), task.ID, "")
+				if err != nil {
+					autoStartErrors = append(autoStartErrors, fmt.Sprintf("%s: %v", task.Title, err))
+					fmt.Printf("auto-start failed for task %s: %v\n", task.ID, err)
+				} else {
+					startedBlockerIDs, _ := h.deps.DB.GetIncompleteBlockerIDs(startResult.Task.ID)
+					taskResults[i]["task"] = core.ToTaskResponseWithBlocking(startResult.Task, startedBlockerIDs)
+					taskResults[i]["worktree_path"] = startResult.WorktreePath
+					taskResults[i]["session_id"] = startResult.SessionID
+					taskResults[i]["auto_started"] = true
+					autoStarted = append(autoStarted, task.ID)
+				}
 			}
 		}
 	}

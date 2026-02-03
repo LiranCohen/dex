@@ -78,8 +78,25 @@ describe('QuestDetail', () => {
   });
 
   describe('objectives list', () => {
-    it('displays objectives', async () => {
+    it('displays objectives summary', async () => {
       render(<QuestDetail />);
+
+      await waitFor(() => {
+        // Objectives are in a collapsible summary
+        expect(screen.getByText('3 objectives')).toBeInTheDocument();
+      });
+    });
+
+    it('expands to show objectives when clicked', async () => {
+      const user = userEvent.setup();
+      render(<QuestDetail />);
+
+      await waitFor(() => {
+        expect(screen.getByText('3 objectives')).toBeInTheDocument();
+      });
+
+      // Click to expand
+      await user.click(screen.getByText('3 objectives'));
 
       await waitFor(() => {
         expect(screen.getByText('Implement feature X')).toBeInTheDocument();
@@ -88,7 +105,15 @@ describe('QuestDetail', () => {
     });
 
     it('links objectives to their detail pages', async () => {
+      const user = userEvent.setup();
       render(<QuestDetail />);
+
+      await waitFor(() => {
+        expect(screen.getByText('3 objectives')).toBeInTheDocument();
+      });
+
+      // Click to expand
+      await user.click(screen.getByText('3 objectives'));
 
       await waitFor(() => {
         const link = screen.getByText('Implement feature X').closest('a');
@@ -96,8 +121,16 @@ describe('QuestDetail', () => {
       });
     });
 
-    it('shows objective status labels', async () => {
+    it('shows objective status labels when expanded', async () => {
+      const user = userEvent.setup();
       render(<QuestDetail />);
+
+      await waitFor(() => {
+        expect(screen.getByText('3 objectives')).toBeInTheDocument();
+      });
+
+      // Click to expand
+      await user.click(screen.getByText('3 objectives'));
 
       await waitFor(() => {
         expect(screen.getByText('running')).toBeInTheDocument();
@@ -105,7 +138,7 @@ describe('QuestDetail', () => {
       });
     });
 
-    it('hides objectives section when empty', async () => {
+    it('hides objectives summary when empty', async () => {
       server.use(
         http.get('/api/v1/quests/:id/tasks', () => {
           return HttpResponse.json([]);
@@ -114,9 +147,13 @@ describe('QuestDetail', () => {
 
       render(<QuestDetail />);
 
+      // Wait for quest to load
       await waitFor(() => {
-        expect(screen.queryByText('Objectives')).not.toBeInTheDocument();
+        expect(screen.getByText('Test Quest')).toBeInTheDocument();
       });
+
+      // The collapsible objectives summary should not be present
+      expect(screen.queryByRole('button', { name: /objectives/i })).not.toBeInTheDocument();
     });
   });
 
@@ -159,7 +196,7 @@ describe('QuestDetail', () => {
       render(<QuestDetail />);
 
       await waitFor(() => {
-        expect(screen.getByText('Start by describing what you want to accomplish.')).toBeInTheDocument();
+        expect(screen.getByText('Start a conversation')).toBeInTheDocument();
       });
     });
   });

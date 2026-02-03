@@ -9,7 +9,7 @@ import {
   QuestObjectivesList,
   MessageList,
 } from '../components';
-import { fetchQuest, fetchQuestTasks, sendQuestMessage, createObjective, fetchApprovals, cancelQuestSession } from '../../lib/api';
+import { fetchQuest, fetchQuestTasks, sendQuestMessage, createObjective, createObjectivesBatch, fetchApprovals, cancelQuestSession, isApiError } from '../../lib/api';
 import { useWebSocket } from '../../hooks/useWebSocket';
 import { useKeyboardNavigation } from '../hooks/useKeyboardNavigation';
 import type { Quest, QuestMessage, Task, Approval, WebSocketEvent, ObjectiveDraft } from '../../lib/types';
@@ -27,9 +27,11 @@ export function QuestDetail() {
   const [activeTools, setActiveTools] = useState<Map<string, { tool: string; status: 'running' | 'complete' | 'error' }>>(new Map());
   const [pendingDrafts, setPendingDrafts] = useState<Map<string, ObjectiveDraft>>(new Map());
   const [pendingQuestions, setPendingQuestions] = useState<QuestQuestion[]>([]);
+  const [answeredQuestionId, setAnsweredQuestionId] = useState<string | null>(null);
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [commandHistory, setCommandHistory] = useState<string[]>([]);
   const [failedMessages, setFailedMessages] = useState<Set<string>>(new Set());
+  const [billingWarning, setBillingWarning] = useState<string | null>(null);
   const { subscribe, connected: isConnected } = useWebSocket();
   const { showToast } = useToast();
 
@@ -115,7 +117,11 @@ export function QuestDetail() {
               setMessages((prev) => [...prev, msg]);
               setSending(false);
 
-              // Parse drafts and questions
+              // Clear previous questions when new message arrives
+              setPendingQuestions([]);
+              setAnsweredQuestionId(null);
+
+              // Parse drafts and questions from new message
               const drafts = parseObjectiveDrafts(msg.content);
               const questions = parseQuestions(msg.content);
               if (drafts.length > 0) {
@@ -130,9 +136,18 @@ export function QuestDetail() {
           }
           break;
 
+        case 'quest.content_delta':
+          if (payload?.quest_id === id) {
+            const content = payload.content as string;
+            setStreamingContent(content);
+          }
+          break;
+
         case 'quest.tool_call':
           if (payload?.quest_id === id) {
             const toolName = payload.tool_name as string;
+            // Clear streaming content when tools start - we're in tool execution phase
+            setStreamingContent('');
             setActiveTools((prev) => new Map(prev).set(toolName, { tool: toolName, status: 'running' }));
           }
           break;
@@ -198,12 +213,29 @@ export function QuestDetail() {
     setMessages((prev) => [...prev, userMsg]);
 
     try {
-      await sendQuestMessage(id, content);
+      const result = await sendQuestMessage(id, content);
+      // On success, clear any billing warning
+      setBillingWarning(null);
+      return result;
     } catch (err) {
       console.error('Failed to send message:', err);
       setSending(false);
       // Mark message as failed
       setFailedMessages((prev) => new Set(prev).add(userMsg.id));
+
+      // Check for billing/rate limit errors
+      if (isApiError(err)) {
+        if (err.errorType === 'billing_error') {
+          setBillingWarning(err.message);
+          showToast('Credit balance too low', 'error');
+          return;
+        }
+        if (err.errorType === 'rate_limit') {
+          showToast('Rate limit exceeded - please wait and try again', 'error');
+          return;
+        }
+      }
+
       showToast('Failed to send message', 'error');
     }
   };
@@ -240,6 +272,25 @@ export function QuestDetail() {
     }
   };
 
+  const handleAcceptAll = async () => {
+    if (!id || pendingDrafts.size === 0) return;
+    try {
+      // Convert all pending drafts to batch format
+      const draftsArray = Array.from(pendingDrafts.values()).map((draft) => ({
+        draft,
+        selectedOptional: (draft.checklist.optional || []).map((_, i) => i),
+      }));
+
+      await createObjectivesBatch(id, draftsArray);
+      setPendingDrafts(new Map());
+      showToast(`Created ${draftsArray.length} objectives`, 'success');
+      loadData();
+    } catch (err) {
+      console.error('Failed to create objectives:', err);
+      showToast('Failed to create objectives', 'error');
+    }
+  };
+
   const handleRejectDraft = (draftKey: string) => {
     setPendingDrafts((prev) => {
       const next = new Map(prev);
@@ -248,8 +299,9 @@ export function QuestDetail() {
     });
   };
 
-  const handleAnswerQuestion = async (answer: string) => {
-    setPendingQuestions([]);
+  const handleAnswerQuestion = async (answer: string, optionId: string) => {
+    // Keep the question visible but mark as answered
+    setAnsweredQuestionId(optionId);
     await handleSend(answer);
   };
 
@@ -282,6 +334,29 @@ export function QuestDetail() {
       <Header backLink={{ to: '/v2', label: 'Back' }} inboxCount={approvalCount} />
 
       <main className="v2-quest-main">
+        {/* Billing warning banner */}
+        {billingWarning && (
+          <div className="v2-warning-banner">
+            <span className="v2-warning-icon">!</span>
+            <span className="v2-warning-text">{billingWarning}</span>
+            <a
+              href="https://console.anthropic.com"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="v2-warning-link"
+            >
+              Add credits
+            </a>
+            <button
+              className="v2-warning-dismiss"
+              onClick={() => setBillingWarning(null)}
+              aria-label="Dismiss warning"
+            >
+              x
+            </button>
+          </div>
+        )}
+
         {/* Quest header */}
         <div className="v2-quest-header">
           <h1 className="v2-page-title">
@@ -299,11 +374,13 @@ export function QuestDetail() {
           sending={sending}
           pendingDrafts={pendingDrafts}
           pendingQuestions={pendingQuestions}
+          answeredQuestionId={answeredQuestionId}
           onRetry={handleRetry}
           onCopy={handleCopyMessage}
           onAcceptDraft={handleAcceptDraft}
           onRejectDraft={handleRejectDraft}
           onAnswerQuestion={handleAnswerQuestion}
+          onAcceptAll={pendingDrafts.size > 1 ? handleAcceptAll : undefined}
         />
 
         {/* Input */}

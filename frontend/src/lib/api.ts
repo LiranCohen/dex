@@ -1,8 +1,15 @@
 const BASE_URL = import.meta.env.VITE_API_URL || '/api/v1';
 
-interface ApiError {
+export interface ApiError {
   message: string;
   status: number;
+  errorType?: string;    // Specific error type (e.g., 'billing_error', 'rate_limit')
+  retryable?: boolean;   // Whether the operation can be retried
+  data?: Record<string, unknown>;  // Full response data for custom handling
+}
+
+export function isApiError(error: unknown): error is ApiError {
+  return typeof error === 'object' && error !== null && 'status' in error && 'message' in error;
 }
 
 class ApiClient {
@@ -55,6 +62,15 @@ class ApiClient {
         const msg = data.message || data.error;
         // Ensure message is always a string (prevent React error #310 if object is passed)
         error.message = typeof msg === 'string' ? msg : (msg ? JSON.stringify(msg) : response.statusText);
+        // Preserve structured error info for special error types
+        if (typeof data.error === 'string') {
+          error.errorType = data.error;
+        }
+        if (typeof data.retryable === 'boolean') {
+          error.retryable = data.retryable;
+        }
+        // Store full data for custom handling (e.g., billing errors with user_message)
+        error.data = data;
       } catch {
         // Use default statusText
       }
@@ -298,5 +314,3 @@ export async function updateQuestTemplate(
 export async function deleteQuestTemplate(templateId: string): Promise<{ message: string }> {
   return api.delete(`/quest-templates/${templateId}`);
 }
-
-export type { ApiError };

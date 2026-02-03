@@ -278,7 +278,9 @@ func (s *SyncService) OnTaskCompleted(taskID string) {
 	s.updateQuestIssueForTask(ctx, task, syncService, syncConfig)
 }
 
-// handleTaskUnblocking finds tasks that became ready because the given task completed.
+// handleTaskUnblocking finds tasks that are ready to auto-start because the given task completed.
+// Uses fully derived blocked state - tasks stay 'ready' and we query for those with auto_start=true
+// and no more incomplete blockers.
 func (s *SyncService) handleTaskUnblocking(ctx context.Context, completedTaskID string) {
 	completedTask, err := s.deps.DB.GetTaskByID(completedTaskID)
 	if err != nil || completedTask == nil {
@@ -286,52 +288,39 @@ func (s *SyncService) handleTaskUnblocking(ctx context.Context, completedTaskID 
 		return
 	}
 
-	unblockedTasks, err := s.deps.DB.GetTasksUnblockedBy(completedTaskID)
+	tasksToAutoStart, err := s.deps.DB.GetTasksReadyToAutoStart(completedTaskID)
 	if err != nil {
-		fmt.Printf("handleTaskUnblocking: failed to get unblocked tasks for %s: %v\n", completedTaskID, err)
+		fmt.Printf("handleTaskUnblocking: failed to get tasks ready to auto-start for %s: %v\n", completedTaskID, err)
 		return
 	}
 
-	if len(unblockedTasks) == 0 {
+	if len(tasksToAutoStart) == 0 {
 		return
 	}
 
-	fmt.Printf("handleTaskUnblocking: %d tasks unblocked by completion of %s\n", len(unblockedTasks), completedTaskID)
+	fmt.Printf("handleTaskUnblocking: %d tasks ready to auto-start after completion of %s\n", len(tasksToAutoStart), completedTaskID)
 
 	var predecessorHandoff string
 	if s.deps.GeneratePredecessorHandoff != nil && completedTask.WorktreePath.Valid && completedTask.WorktreePath.String != "" {
 		predecessorHandoff = s.deps.GeneratePredecessorHandoff(completedTask)
 	}
 
-	for _, task := range unblockedTasks {
-		if err := s.deps.DB.TransitionTaskStatus(task.ID, db.TaskStatusBlocked, db.TaskStatusReady); err != nil {
-			fmt.Printf("handleTaskUnblocking: failed to transition task %s to ready: %v\n", task.ID, err)
-			continue
-		}
-
-		fmt.Printf("handleTaskUnblocking: task %s transitioned to ready\n", task.ID)
-
+	for _, task := range tasksToAutoStart {
+		// Broadcast task unblocked event for UI update
 		if s.deps.Hub != nil {
 			s.deps.Hub.Broadcast(websocket.Message{
 				Type: "task.unblocked",
 				Payload: map[string]any{
-					"task_id":         task.ID,
-					"unblocked_by":    completedTaskID,
-					"quest_id":        task.QuestID.String,
-					"title":           task.Title,
-					"previous_status": db.TaskStatusBlocked,
-					"new_status":      db.TaskStatusReady,
+					"task_id":      task.ID,
+					"unblocked_by": completedTaskID,
+					"quest_id":     task.QuestID.String,
+					"title":        task.Title,
 				},
 			})
 		}
 
-		autoStart, err := s.deps.DB.GetTaskAutoStart(task.ID)
-		if err != nil {
-			fmt.Printf("handleTaskUnblocking: failed to get auto_start for task %s: %v\n", task.ID, err)
-			continue
-		}
-
-		if autoStart && s.deps.StartTaskWithInheritance != nil {
+		// Auto-start the task
+		if s.deps.StartTaskWithInheritance != nil {
 			taskID := task.ID
 			inheritedWorktree := completedTask.GetWorktreePath()
 			handoff := predecessorHandoff

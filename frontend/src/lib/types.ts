@@ -27,6 +27,9 @@ export interface Task {
   CreatedAt: string;
   StartedAt: string | null;
   CompletedAt: string | null;
+  // Derived blocking info - computed from dependencies, not stored
+  IsBlocked: boolean;
+  BlockedBy?: string[];
 }
 
 export type TaskStatus =
@@ -354,7 +357,7 @@ export interface QuestTemplate {
 
 // Quest WebSocket events
 export interface QuestEvent extends WebSocketEvent {
-  type: 'quest.created' | 'quest.message' | 'quest.completed' | 'quest.reopened' | 'quest.deleted' | 'quest.objective_draft' | 'quest.question' | 'quest.ready' | 'quest.tool_call' | 'quest.tool_result';
+  type: 'quest.created' | 'quest.message' | 'quest.completed' | 'quest.reopened' | 'quest.deleted' | 'quest.objective_draft' | 'quest.question' | 'quest.ready' | 'quest.tool_call' | 'quest.tool_result' | 'quest.content_delta';
   payload: {
     quest_id: string;
     project_id?: string;
@@ -369,5 +372,8 @@ export interface QuestEvent extends WebSocketEvent {
     output?: string;
     is_error?: boolean;
     duration_ms?: number;
+    // Streaming content events
+    delta?: string;
+    content?: string;
   };
 }

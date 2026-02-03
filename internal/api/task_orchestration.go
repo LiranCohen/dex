@@ -247,18 +247,20 @@ func (s *Server) handleTaskUnblocking(ctx context.Context, completedTaskID strin
 		return
 	}
 
-	// Find tasks that are now unblocked
-	unblockedTasks, err := s.db.GetTasksUnblockedBy(completedTaskID)
+	// Find tasks that are now ready to auto-start
+	// This uses the new fully-derived blocked state - tasks stay 'ready' and we query
+	// for tasks that have auto_start=true and no more incomplete blockers
+	tasksToAutoStart, err := s.db.GetTasksReadyToAutoStart(completedTaskID)
 	if err != nil {
-		fmt.Printf("handleTaskUnblocking: failed to get unblocked tasks for %s: %v\n", completedTaskID, err)
+		fmt.Printf("handleTaskUnblocking: failed to get tasks ready to auto-start for %s: %v\n", completedTaskID, err)
 		return
 	}
 
-	if len(unblockedTasks) == 0 {
+	if len(tasksToAutoStart) == 0 {
 		return
 	}
 
-	fmt.Printf("handleTaskUnblocking: %d tasks unblocked by completion of %s\n", len(unblockedTasks), completedTaskID)
+	fmt.Printf("handleTaskUnblocking: %d tasks ready to auto-start after completion of %s\n", len(tasksToAutoStart), completedTaskID)
 
 	// Get handoff summary from completed task for context passing
 	var predecessorHandoff string
@@ -266,77 +268,58 @@ func (s *Server) handleTaskUnblocking(ctx context.Context, completedTaskID strin
 		predecessorHandoff = s.generatePredecessorHandoff(completedTask)
 	}
 
-	for _, task := range unblockedTasks {
-		// Transition from blocked to ready
-		if err := s.db.TransitionTaskStatus(task.ID, db.TaskStatusBlocked, db.TaskStatusReady); err != nil {
-			fmt.Printf("handleTaskUnblocking: failed to transition task %s to ready: %v\n", task.ID, err)
-			continue
-		}
-
-		fmt.Printf("handleTaskUnblocking: task %s transitioned to ready\n", task.ID)
-
-		// Broadcast task unblocked event
+	for _, task := range tasksToAutoStart {
+		// Broadcast task unblocked event (for UI update)
 		if s.hub != nil {
 			s.hub.Broadcast(websocket.Message{
 				Type: "task.unblocked",
 				Payload: map[string]any{
-					"task_id":         task.ID,
-					"unblocked_by":    completedTaskID,
-					"quest_id":        task.QuestID.String,
-					"title":           task.Title,
-					"previous_status": db.TaskStatusBlocked,
-					"new_status":      db.TaskStatusReady,
+					"task_id":      task.ID,
+					"unblocked_by": completedTaskID,
+					"quest_id":     task.QuestID.String,
+					"title":        task.Title,
 				},
 			})
 		}
 
-		// Check if task should auto-start
-		autoStart, err := s.db.GetTaskAutoStart(task.ID)
-		if err != nil {
-			fmt.Printf("handleTaskUnblocking: failed to get auto_start for task %s: %v\n", task.ID, err)
-			continue
-		}
-
-		if autoStart {
-			// Auto-start the task in a goroutine, inheriting predecessor's worktree
-			taskID := task.ID
-			inheritedWorktree := completedTask.GetWorktreePath()
-			handoff := predecessorHandoff
-			go func() {
-				startResult, err := s.startTaskWithInheritance(context.Background(), taskID, inheritedWorktree, handoff)
-				if err != nil {
-					fmt.Printf("handleTaskUnblocking: auto-start failed for task %s: %v\n", taskID, err)
-					// Broadcast auto-start failure
-					if s.hub != nil {
-						s.hub.Broadcast(websocket.Message{
-							Type: "task.auto_start_failed",
-							Payload: map[string]any{
-								"task_id": taskID,
-								"error":   err.Error(),
-							},
-						})
-					}
-					return
-				}
-
-				fmt.Printf("handleTaskUnblocking: auto-started task %s (session %s) with inherited worktree from %s\n",
-					taskID, startResult.SessionID, completedTaskID)
-
-				// Broadcast auto-start success
+		// Auto-start the task in a goroutine, inheriting predecessor's worktree
+		taskID := task.ID
+		inheritedWorktree := completedTask.GetWorktreePath()
+		handoff := predecessorHandoff
+		go func() {
+			startResult, err := s.startTaskWithInheritance(context.Background(), taskID, inheritedWorktree, handoff)
+			if err != nil {
+				fmt.Printf("handleTaskUnblocking: auto-start failed for task %s: %v\n", taskID, err)
+				// Broadcast auto-start failure
 				if s.hub != nil {
 					s.hub.Broadcast(websocket.Message{
-						Type: "task.auto_started",
+						Type: "task.auto_start_failed",
 						Payload: map[string]any{
-							"task_id":           taskID,
-							"session_id":        startResult.SessionID,
-							"worktree_path":     startResult.WorktreePath,
-							"inherited_from":    completedTaskID,
-							"predecessor_title": completedTask.Title,
+							"task_id": taskID,
+							"error":   err.Error(),
 						},
 					})
 				}
-			}()
-		}
+				return
+			}
+
+				fmt.Printf("handleTaskUnblocking: auto-started task %s (session %s) with inherited worktree from %s\n",
+				taskID, startResult.SessionID, completedTaskID)
+
+			// Broadcast auto-start success
+			if s.hub != nil {
+				s.hub.Broadcast(websocket.Message{
+					Type: "task.auto_started",
+					Payload: map[string]any{
+						"task_id":           taskID,
+						"session_id":        startResult.SessionID,
+						"worktree_path":     startResult.WorktreePath,
+						"inherited_from":    completedTaskID,
+						"predecessor_title": completedTask.Title,
+					},
+				})
+			}
+		}()
 	}
 }
 

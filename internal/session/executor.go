@@ -389,6 +389,20 @@ func (e *ToolExecutor) executeGitHubCreatePR(ctx context.Context, input map[stri
 		}
 	}
 
+	// Auto-push the branch before creating PR to ensure it exists on remote
+	// This prevents 422 errors from GitHub when the branch hasn't been pushed yet
+	pushResult := e.executeGitPush(map[string]any{"set_upstream": true})
+	if pushResult.IsError {
+		// Only fail if it's not an "already up to date" style message
+		if !strings.Contains(strings.ToLower(pushResult.Output), "up to date") &&
+			!strings.Contains(strings.ToLower(pushResult.Output), "everything up-to-date") {
+			return ToolResult{
+				Output:  fmt.Sprintf("Failed to push branch before creating PR: %v", pushResult.Output),
+				IsError: true,
+			}
+		}
+	}
+
 	opts := toolbelt.CreatePROptions{
 		Owner: e.owner,
 		Repo:  e.repo,
@@ -409,6 +423,22 @@ func (e *ToolExecutor) executeGitHubCreatePR(ctx context.Context, input map[stri
 
 	pr, err := e.githubClient.CreatePR(ctx, opts)
 	if err != nil {
+		errMsg := err.Error()
+		// Provide more helpful error messages for common issues
+		if strings.Contains(errMsg, "422") {
+			if strings.Contains(errMsg, "already exists") {
+				return ToolResult{
+					Output:  fmt.Sprintf("A pull request already exists for branch '%s'. Check existing PRs or use a different branch.", branch),
+					IsError: true,
+				}
+			}
+			if strings.Contains(errMsg, "No commits") || strings.Contains(errMsg, "no difference") {
+				return ToolResult{
+					Output:  fmt.Sprintf("Cannot create PR: branch '%s' has no changes compared to '%s'. Make sure you have committed changes.", branch, opts.Base),
+					IsError: true,
+				}
+			}
+		}
 		return ToolResult{
 			Output:  fmt.Sprintf("Failed to create pull request: %v", err),
 			IsError: true,

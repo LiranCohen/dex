@@ -1,4 +1,5 @@
 export { Message } from './Message';
+export { MarkdownContent } from './MarkdownContent';
 export { ToolActivity } from './ToolActivity';
 export { ProposedObjective } from './ProposedObjective';
 export { QuestionPrompt } from './QuestionPrompt';
