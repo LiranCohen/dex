@@ -31,7 +31,8 @@ instructions: |
   5. Document architectural decisions
   6. Create implementation guidance with specific file paths
   7. Report any design checklist items as done
-  8. Output `HAT_TRANSITION:creator` when design is complete
+  8. When design is complete: `EVENT:design.complete` (triggers creator)
+     - If blocked: `EVENT:task.blocked:{"reason":"..."}` (triggers resolver)
 
   ### Design Output
   Your design should include:

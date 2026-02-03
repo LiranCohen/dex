@@ -19,41 +19,30 @@ instructions: |
      c. Run `run_lint` to check code style
      d. Commit with descriptive message
      e. Report: `CHECKLIST_DONE:<item_id>` or `CHECKLIST_FAILED:<item_id>:<reason>`
-  3. When all items complete:
-     - Call `task_complete` with a summary of your changes
-     - If QUALITY_PASSED → `HAT_TRANSITION:editor` for polish
-     - If QUALITY_BLOCKED → Fix the issues, try again (max 5 attempts)
+  3. Before signaling completion, validate your work:
+     - Run `run_tests` - all tests must pass
+     - Run `run_lint` - no lint errors
+     - Run `run_build` - build must succeed
+  4. When all checks pass: `EVENT:implementation.done` (triggers critic review)
 
-  ### Quality Gates (Automatic Validation)
-  The `task_complete` tool validates your work automatically:
-  - **Tests pass** (or skipped if no tests exist)
-  - **Lint clean** (or skipped if no linter configured)
-  - **Build succeeds** (or skipped if not applicable)
+  ### Quality Validation Tools
+  Use these tools to validate your work before signaling completion:
+  - `run_tests` - Run the project's test suite
+  - `run_lint` - Run linter checks
+  - `run_build` - Verify the build succeeds
 
-  Use skip flags when appropriate:
-  - `skip_tests: true` - when no tests exist for this project/feature
-  - `skip_lint: true` - when no linter is configured
-  - `skip_build: true` - for projects without a build step
+  Run these throughout development, not just at the end. Fix any failures before moving on.
 
-  ### When to Use Critic (Optional)
-  Most tasks should use quality gates instead of critic review. Only transition to critic for:
-  - Complex architectural decisions that need human-like review
-  - Subjective design choices where automated checks aren't sufficient
-  - When you want a second opinion on your approach
+  ### Events You Can Publish
+  - `EVENT:implementation.done` - Ready for review (triggers critic)
+  - `EVENT:task.blocked:{"reason":"..."}` - Blocked (triggers resolver)
 
-  For straightforward implementations, skip critic and go directly to editor after passing quality gates.
-
-  ### When to Transition
-  - **To editor**: After QUALITY_PASSED - editor will polish and finalize
-  - **To critic**: (Optional) For complex reviews before completion
-  - **To resolver**: If blocked by merge conflicts, dependency issues, or environment problems
-
-  ### If Quality Gate Fails
-  When `task_complete` returns QUALITY_BLOCKED:
+  ### If Quality Checks Fail
+  When tests, lint, or build fail:
   1. Read the specific error output carefully
   2. Fix the failing tests, lint issues, or build errors
-  3. Call `task_complete` again
-  4. After 5 failed attempts, the loop will terminate
+  3. Run the check again to verify the fix
+  4. Only emit `EVENT:implementation.done` when all checks pass
 
   ### Creating New Projects
   When the task involves creating a new repository:
@@ -78,12 +67,5 @@ instructions: |
   - Use quality gate tools throughout development, not just at the end
   - For code: run builds and tests to verify
   - Never commit secrets, credentials, or sensitive data
-  - Ask for help if stuck: `HAT_TRANSITION:resolver`
+  - Ask for help if stuck: `EVENT:task.blocked:{"reason":"description"}`
 
-  ### Common Mistakes to Avoid
-  - Don't make changes outside your worktree
-  - Don't skip testing - always verify your changes work
-  - Don't make massive commits - break work into logical pieces
-  - Don't ignore existing code style/patterns
-  - Don't forget to report checklist progress
-  - Don't call `task_complete` without running tests first

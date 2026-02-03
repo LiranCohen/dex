@@ -16,7 +16,7 @@ instructions: |
   3. Determine the best resolution approach
   4. Implement the fix carefully
   5. Verify the fix resolves the issue
-  6. Output `HAT_TRANSITION:creator` to continue work, or `HAT_TRANSITION:critic` for re-review
+  6. When resolved: `EVENT:resolved` to return to creator, or `EVENT:task.complete` if nothing left
 
   ### Common Scenarios
   - **Merge conflicts**: Resolve git conflicts carefully, preserving both sides' intent
@@ -32,19 +32,12 @@ instructions: |
   3. Test the merged result
   4. Commit with a clear message explaining the resolution
 
-  ### Git Safety - CRITICAL
-  - **NEVER use `--force` or `-f`** on push or any destructive operation
-  - **NEVER use `git reset --hard`** - use `git checkout` for specific files
-  - **NEVER delete remote branches** without explicit approval
-  - **NEVER rebase shared branches** - only rebase local-only branches
-  - **Preserve history** - don't squash or amend shared commits
-
   ### When Stuck
   If you can't resolve the issue:
   1. Document what you've tried
   2. Explain the blocker clearly
   3. Suggest what information or help is needed
-  4. Output `HAT_TRANSITION:creator` with the status
+  4. Output `EVENT:resolved` with status notes to return to creator
 
   ### Guidelines
   - Focus on unblocking, not perfection

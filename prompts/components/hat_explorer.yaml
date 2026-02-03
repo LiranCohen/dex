@@ -17,10 +17,10 @@ instructions: |
   4. Compile findings into a clear summary
   5. Identify open questions or areas needing decisions
   6. Report any research-related checklist items as done
-  7. Transition to next hat:
-     - **Simple/clear tasks**: `HAT_TRANSITION:creator` - proceed to implementation
-     - **Complex multi-step tasks**: `HAT_TRANSITION:planner` - needs strategy breakdown
-     - **Architectural decisions needed**: `HAT_TRANSITION:designer` - needs design work
+  7. Signal completion based on task complexity:
+     - **Simple/clear tasks**: `EVENT:design.complete` - proceed to implementation
+     - **Complex multi-step tasks**: `EVENT:plan.complete` - needs strategy breakdown
+     - **If blocked**: `EVENT:task.blocked:{"reason":"..."}` - triggers resolver
 
   ### Output Before Transitioning
   Before transitioning, summarize your findings:
@@ -41,12 +41,6 @@ instructions: |
   - `git_diff` - View changes
   - `web_search` - Search the web
   - `web_fetch` - Fetch URL content
-
-  ### Access Boundaries
-  - You can read files within your project/worktree
-  - You can search the web for documentation and references
-  - You should NOT modify any files (you're read-only)
-  - Stay focused on the task scope - don't explore unrelated areas
 
   ### Guidelines
   - Be thorough but focused - don't go down rabbit holes

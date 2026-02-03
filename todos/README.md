@@ -130,13 +130,12 @@ Implement [07-structured-output-validation.md](./07-structured-output-validation
 - JSON Schema validation for task outputs
 - Useful for tasks generating configs, specs, etc.
 
-### Phase 9: Event-Driven Coordination
+### Phase 9: Event-Driven Coordination ✅ COMPLETED
 Complete [04-hat-system.md](./04-hat-system.md):
-- Event bus for hat coordination
-- Configuration-driven hat contracts
-- Quality gates as event transformers
-
-This is the largest architectural change and benefits from all prior work.
+- ✅ Event routing for hat coordination (`EVENT:topic` signals)
+- ✅ Contract-driven hat registration (`HatContracts` in contracts.go)
+- ✅ SQLite event persistence
+- ✅ Removed legacy signals (`HAT_TRANSITION`, `TASK_COMPLETE`, `HAT_COMPLETE`)
 
 ### Phase 10: Subagent System
 Implement [06-subagent-system.md](./06-subagent-system.md):
@@ -190,8 +189,8 @@ Implement [06-subagent-system.md](./06-subagent-system.md):
                                   │
                                   ▼
                          ┌─────────────────────┐  ┌─────────────────────┐
-                         │ 04: Events          │  │ 07: Structured      │
-                         │   (second half)     │  │   Output (optional) │
+                         │ 04: Events ✅       │  │ 07: Structured      │
+                         │   (COMPLETED)       │  │   Output (optional) │
                          └─────────────────────┘  └─────────────────────┘
                                   │
                                   ▼
@@ -249,7 +248,7 @@ These improvements build on existing Dex components:
 | Checkpoints | `internal/session/ralph.go` | Periodic state saves as map[string]any JSON (iteration, tokens, hat, messages, failure context) | Scratchpad field (TODO 01), HandoffSummary (TODO 01) |
 | Termination | `internal/session/termination.go` | TerminationCompleted, TerminationMaxIterations, TerminationMaxTokens, TerminationMaxCost, TerminationQualityGateExhausted, TerminationLoopThrashing, TerminationConsecutiveFailures, TerminationUserStopped, TerminationError | TerminationMaxRuntime, TerminationValidationFailure, TerminationRepetitionLoop (TODO 03) |
 | Transition tracker | `internal/session/transition_tracker.go` | Loop detection for hat transitions (oscillation, repetition tracking) | Tool call repetition detection is separate (TODO 03) |
-| Hat transitions | `internal/orchestrator/transitions.go` | Valid transitions map, TransitionHandler | Event-driven coordination (TODO 04 Phase 2) |
+| Event system | `internal/session/event.go`, `contracts.go`, `router.go` | ✅ EVENT:topic signals, HatContracts, EventRouter, SQLite persistence | — |
 | Activity log | `internal/session/activity.go` | Event recording, WebSocket broadcast | GitHub Issue comments (TODO 05) |
 | Tool sets | `internal/tools/sets.go` | ReadOnlyTools(), ReadWriteTools() | Per-hat tool profiles, tool annotations (TODO 04) |
 | Prompts | `internal/session/prompts.go` | ValidHats list (explorer, planner, designer, creator, critic, editor, resolver), PromptLoader | Scratchpad instructions (TODO 01), memory instructions (TODO 02) |
@@ -280,7 +279,7 @@ Summary of what exists vs what needs to be built for each TODO:
 | **Phase 4: Tool Profiles** | ✅ Complete | Tool groups, hat-to-profile mapping, GetToolsForHat(), tool registry |
 | **Phase 5: Memory System** | ✅ Complete | `memories` table, MEMORY: signal parsing, relevance scoring, API endpoints, activity logging |
 | **Phase 7: Issue Activity Sync** | ✅ Complete | IssueCommenter, CommentBuilder, rate limiting, debounced hat transition comments |
-| **04: Hat System (Events)** | Pending | Event bus for hat coordination (Phase 9 scope) |
+| **04: Hat System (Events)** | ✅ Complete | EVENT:topic signals, HatContracts, EventRouter, SQLite persistence |
 | **06: Subagent System** | Pending | spawn_subagent tool, SubagentExecutor, context isolation |
 | **07: Structured Output** | Pending | OutputSchema field, task_output tool, JSON Schema validation |
 | **10: Quest Chat UI** | ✅ Complete | All 5 phases done - Core chat, tool activity, decision UI, objective management, polish |
@@ -341,6 +340,28 @@ Implemented in `internal/db/`, `internal/session/`, and `internal/api/`:
 - **Activity Logging** (`activity.go`): `RecordMemoryCreated()`, `ActivityTypeMemoryCreated`
 - **Lifecycle** (`memory.go`): Usage tracking, confidence boost/decay, cleanup of low-value memories
 - **Prompt Instructions** (`system.yaml`): Memory recording instructions for all hats
+
+### Phase 9 Completion Details (Event-Driven Coordination)
+
+Implemented in `internal/session/` and `internal/db/`:
+
+- **Event Struct** (`event.go`): ID, SessionID, Topic, Payload (JSON), SourceHat, CreatedAt
+- **Topic Constants** (`event.go`): 9 topics (task.started, plan.complete, design.complete, implementation.done, review.approved, review.rejected, task.blocked, resolved, task.complete)
+- **ParseEvent()** (`event.go`): Parses `EVENT:topic` and `EVENT:topic:{"json"}` from agent responses
+- **IsTerminalEvent()** (`event.go`): Identifies task.complete as terminal
+- **HatContracts** (`contracts.go`): Pub/sub contracts for all 7 hats (explorer, planner, designer, creator, critic, editor, resolver)
+- **CanPublish()** (`contracts.go`): Validates hat can publish a topic
+- **GetNextHatForTopic()** (`contracts.go`): Routes topics to subscribing hats with priority
+- **EventRouter** (`router.go`): Routes events, validates contracts, integrates with TransitionTracker for loop detection
+- **SQLite Persistence** (`db/events.go`): `events` table with session_id, topic, payload, source_hat; CreateEvent(), ListEventsBySession(), GetEventsByTopic()
+- **RalphLoop Integration** (`ralph.go`): `detectEvent()`, event routing in main loop, hat-specific continuation prompts updated
+- **Prompt Updates**: All `hat_*.yaml` and `system.yaml` updated with EVENT:topic instructions
+
+**Removed (dead code cleanup):**
+- `internal/orchestrator/transitions.go` - Entire file deleted (HatTransitions map, TransitionHandler, ValidateTransition, OnHatComplete)
+- `TASK_COMPLETE` / `HAT_COMPLETE` signals - Replaced by `EVENT:task.complete`
+- `HAT_TRANSITION:x` signals - Replaced by `EVENT:topic`
+- `transitionHandler` field in Manager - No longer needed
 
 ### Phase 7 Completion Details
 

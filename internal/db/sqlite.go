@@ -65,6 +65,7 @@ func (db *DB) Migrate() error {
 		migrationOnboardingProgress,
 		migrationSecrets,
 		migrationMemories,
+		migrationEvents,
 	}
 
 	for i, migration := range migrations {
@@ -460,4 +461,19 @@ CREATE INDEX IF NOT EXISTS idx_memories_project ON memories(project_id);
 CREATE INDEX IF NOT EXISTS idx_memories_project_type ON memories(project_id, type);
 CREATE INDEX IF NOT EXISTS idx_memories_project_confidence ON memories(project_id, confidence DESC);
 CREATE INDEX IF NOT EXISTS idx_memories_last_used ON memories(last_used_at DESC);
+`
+
+const migrationEvents = `
+-- Event system for hat coordination (pub/sub with persistence)
+CREATE TABLE IF NOT EXISTS events (
+	id TEXT PRIMARY KEY,
+	session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+	topic TEXT NOT NULL,
+	payload TEXT,
+	source_hat TEXT NOT NULL,
+	created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id);
+CREATE INDEX IF NOT EXISTS idx_events_topic ON events(topic);
 `

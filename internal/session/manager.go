@@ -104,9 +104,8 @@ type Manager struct {
 	promptLoader *PromptLoader
 
 	// External dependencies for Ralph loop
-	anthropicClient   *toolbelt.AnthropicClient
-	wsHub             *websocket.Hub
-	transitionHandler *orchestrator.TransitionHandler
+	anthropicClient *toolbelt.AnthropicClient
+	wsHub           *websocket.Hub
 
 	// Git and GitHub for PR creation on completion
 	gitOps              *git.Operations
@@ -190,12 +189,6 @@ func (m *Manager) SetWebSocketHub(hub *websocket.Hub) {
 	m.wsHub = hub
 }
 
-// SetTransitionHandler sets the transition handler for hat transitions
-func (m *Manager) SetTransitionHandler(handler *orchestrator.TransitionHandler) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.transitionHandler = handler
-}
 
 // SetGitOperations sets the git operations for pushing branches
 func (m *Manager) SetGitOperations(ops *git.Operations) {
@@ -522,6 +515,16 @@ func (m *Manager) runSession(ctx context.Context, session *ActiveSession) {
 		fmt.Printf("runSession: Anthropic client is configured, starting Ralph loop\n")
 		loop := NewRalphLoop(m, session, anthropicClient, wsHub, m.db)
 
+		// Get or create transition tracker for this task and set up event router
+		m.mu.Lock()
+		tracker := m.transitionTrackers[session.TaskID]
+		if tracker == nil {
+			tracker = NewTransitionTracker()
+			m.transitionTrackers[session.TaskID] = tracker
+		}
+		m.mu.Unlock()
+		loop.SetEventRouter(NewEventRouter(m.db, tracker))
+
 		// Get task and project for tool executor context
 		task, err := m.db.GetTaskByID(session.TaskID)
 		if err != nil {
@@ -695,25 +698,15 @@ func (m *Manager) runSession(ctx context.Context, session *ActiveSession) {
 
 // handleHatTransition handles transitioning a task to a new hat
 func (m *Manager) handleHatTransition(ctx context.Context, taskID, originalHat, nextHat, worktreePath string) {
-	// Validate transition BEFORE removing old session
+	// Get transition tracker and old session ID
 	m.mu.Lock()
-	handler := m.transitionHandler
 	oldSessionID := m.byTask[taskID]
-
-	// Get or create transition tracker for this task
 	tracker := m.transitionTrackers[taskID]
 	if tracker == nil {
 		tracker = NewTransitionTracker()
 		m.transitionTrackers[taskID] = tracker
 	}
 	m.mu.Unlock()
-
-	if handler != nil && !handler.ValidateTransition(originalHat, nextHat) {
-		fmt.Printf("warning: invalid hat transition from %s to %s, marking task failed\n", originalHat, nextHat)
-		_ = m.db.UpdateTaskStatus(taskID, db.TaskStatusCancelled)
-		m.cleanupTransitionTracker(taskID)
-		return
-	}
 
 	// Check for transition loops
 	if err := tracker.RecordTransition(originalHat, nextHat); err != nil {

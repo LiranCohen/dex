@@ -333,7 +333,9 @@ func (db *DB) GetRelevantMemories(ctx MemoryContext, limit int) ([]Memory, error
 	result := make([]Memory, 0, limit)
 	for i := 0; i < len(scored) && i < limit; i++ {
 		result = append(result, scored[i].Memory)
-		db.RecordMemoryUsage(scored[i].Memory.ID)
+		if err := db.RecordMemoryUsage(scored[i].Memory.ID); err != nil {
+			fmt.Printf("warning: failed to record memory usage for %s: %v\n", scored[i].Memory.ID, err)
+		}
 	}
 
 	return result, nil
@@ -365,7 +367,9 @@ func (db *DB) DecayUnusedMemories() error {
 // CleanupMemories removes low-value memories
 func (db *DB) CleanupMemories() error {
 	// Decay unused memories first
-	db.DecayUnusedMemories()
+	if err := db.DecayUnusedMemories(); err != nil {
+		fmt.Printf("warning: failed to decay unused memories: %v\n", err)
+	}
 
 	// Remove very low confidence memories that haven't been used
 	_, err := db.Exec(`
@@ -423,8 +427,16 @@ func scanMemory(row *sql.Row) (*Memory, error) {
 		return nil, err
 	}
 
-	json.Unmarshal([]byte(tagsJSON), &m.Tags)
-	json.Unmarshal([]byte(refsJSON), &m.FileRefs)
+	if tagsJSON != "" {
+		if err := json.Unmarshal([]byte(tagsJSON), &m.Tags); err != nil {
+			fmt.Printf("warning: failed to unmarshal memory tags for %s: %v\n", m.ID, err)
+		}
+	}
+	if refsJSON != "" {
+		if err := json.Unmarshal([]byte(refsJSON), &m.FileRefs); err != nil {
+			fmt.Printf("warning: failed to unmarshal memory file_refs for %s: %v\n", m.ID, err)
+		}
+	}
 
 	return &m, nil
 }
@@ -447,8 +459,16 @@ func scanMemories(rows *sql.Rows) ([]Memory, error) {
 			return nil, err
 		}
 
-		json.Unmarshal([]byte(tagsJSON), &m.Tags)
-		json.Unmarshal([]byte(refsJSON), &m.FileRefs)
+		if tagsJSON != "" {
+			if err := json.Unmarshal([]byte(tagsJSON), &m.Tags); err != nil {
+				fmt.Printf("warning: failed to unmarshal memory tags for %s: %v\n", m.ID, err)
+			}
+		}
+		if refsJSON != "" {
+			if err := json.Unmarshal([]byte(refsJSON), &m.FileRefs); err != nil {
+				fmt.Printf("warning: failed to unmarshal memory file_refs for %s: %v\n", m.ID, err)
+			}
+		}
 
 		memories = append(memories, m)
 	}

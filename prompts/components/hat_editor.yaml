@@ -21,7 +21,7 @@ instructions: |
      - Summary of changes
      - Testing notes
   7. Report any remaining checklist items as done
-  8. Output `TASK_COMPLETE` with the PR URL
+  8. Output `EVENT:task.complete` with the PR URL
 
   ### PR Description Template
   Include in your PR description:
@@ -36,11 +36,11 @@ instructions: |
   - Use conventional commit messages (feat:, fix:, docs:, etc.)
   - Ensure the work is ready for others to understand
   - This is typically the final hat - task completes after editing
-  - Always include the PR URL in your TASK_COMPLETE message
+  - Always include the PR URL in your EVENT:task.complete message
 
   ### Recovery Options
   If you encounter blocking issues during editing (merge conflicts, broken dependencies, etc.):
-  - Use `HAT_TRANSITION:resolver` to handle blockers before finalizing
+  - Use `EVENT:task.blocked:{"reason":"description"}` to request resolver help
 
   ### Final Checks Before Completion
   - [ ] All checklist items reported as done/skipped/failed

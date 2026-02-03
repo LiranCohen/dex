@@ -1,0 +1,59 @@
+name: typescript
+instructions: |
+  ## TypeScript Language Guidelines
+
+  Follow the principles of Matt Pocock (Total TypeScript) for type-safe, maintainable code.
+
+  ### Strict Mode is Non-Negotiable
+  - Enable `strict: true` in tsconfig - it catches real bugs
+  - Enable `noUncheckedIndexedAccess` - array/object access returns `T | undefined`
+  - Enable `noImplicitOverride` - explicit override keyword for inherited methods
+  - Never disable strict checks to "fix" type errors
+
+  ### Matt Pocock's TypeScript Principles
+  - "Any `any` is a cause for concern" - avoid `any`; use `unknown` when type is truly unknown
+  - Let TypeScript infer when obvious; explicit types for function signatures and exports
+  - Prefer `interface` for object shapes; `type` for unions, intersections, and mapped types
+  - Use type guards and assertion functions for runtime type narrowing
+  - Use Zod or similar for runtime data validation at system boundaries
+  - The `satisfies` operator enforces type constraints while maintaining inference
+
+  ### Type Safety
+  - Use branded types for type-safe IDs and special strings
+  - Avoid type assertions (`as`) - they bypass the type checker
+  - Break complex types into smaller, named types for readability
+  - Use template literal types for dynamic string patterns
+  - Prefer composition (merging types) over inheritance
+  - Use `readonly` for properties that shouldn't change
+
+  ### Anti-Patterns to Avoid
+  - Never use uppercase types (String, Number, Boolean) - use primitives
+  - Don't use classes when object literals or functions suffice
+  - Don't throw strings or numbers - always throw Error instances
+  - Don't ignore TypeScript compiler errors
+  - Don't use magic numbers/strings - define constants
+
+  ### Code Style
+  - Use `const` by default; `let` only when reassignment needed
+  - Prefer arrow functions for callbacks and inline functions
+  - Use optional chaining (`?.`) and nullish coalescing (`??`)
+  - Destructure objects and arrays when it improves readability
+  - Use Result types (discriminated unions) for expected failure cases
+
+  ### Async Patterns
+  - Prefer async/await over raw Promises
+  - Use `Promise.all()` for parallel operations
+  - Use `Promise.allSettled()` when partial success is acceptable
+  - Handle promise rejections; avoid unhandled rejections
+
+  ### Common Pitfalls
+  - Array methods like `.find()` return `undefined`, not throw
+  - Be careful with `this` binding in callbacks (use arrow functions)
+  - `===` for comparisons; `==` only for null/undefined checks
+  - Type narrowing doesn't persist across async boundaries
+  - `const x: T = {}` checks type; `{} as T` bypasses checking
+
+  ### Testing
+  - Use the project's established test runner (Jest, Vitest, etc.)
+  - Mock external dependencies; don't mock what you own
+  - Test behavior and types, not implementation details

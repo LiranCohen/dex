@@ -205,19 +205,22 @@ func TestCheckBudget_RuntimeZeroMeansNoLimit(t *testing.T) {
 }
 
 func TestDetectCompletion_TaskComplete(t *testing.T) {
-	loop := &RalphLoop{}
+	loop := &RalphLoop{
+		session: &ActiveSession{
+			ID:  "test-session",
+			Hat: "editor",
+		},
+	}
 
 	tests := []struct {
 		response string
 		expected bool
 	}{
-		{"The task is done. TASK_COMPLETE", true},
-		{"TASK_COMPLETE - all tests pass", true},
-		{"some output\nTASK_COMPLETE\nmore output", true},
-		{"HAT_COMPLETE", true},
-		{"Task done HAT_COMPLETE successfully", true},
-		{"task complete", false}, // case sensitive
-		{"TASK COMPLETE", false}, // no underscore
+		{"The task is done. EVENT:task.complete", true},
+		{"EVENT:task.complete - all tests pass", true},
+		{"some output\nEVENT:task.complete\nmore output", true},
+		{"task complete", false},
+		{"EVENT:plan.complete", false}, // not terminal
 		{"nothing special here", false},
 		{"", false},
 	}
@@ -230,78 +233,91 @@ func TestDetectCompletion_TaskComplete(t *testing.T) {
 	}
 }
 
-func TestDetectHatTransition_ValidHats(t *testing.T) {
-	loop := &RalphLoop{}
+func TestDetectEvent_ValidEvents(t *testing.T) {
+	loop := &RalphLoop{
+		session: &ActiveSession{
+			ID:  "test-session",
+			Hat: "creator",
+		},
+	}
 
 	tests := []struct {
-		response    string
-		expectedHat string
+		response      string
+		expectedTopic string
 	}{
-		{"Work is done. HAT_TRANSITION:critic", "critic"},
-		{"HAT_TRANSITION:creator", "creator"},
-		{"Let's move on. HAT_TRANSITION:editor now", "editor"},
-		{"HAT_TRANSITION:designer\nmore text", "designer"},
-		{"HAT_TRANSITION:planner", "planner"},
-		{"HAT_TRANSITION:explorer", "explorer"},
-		{"HAT_TRANSITION:resolver", "resolver"},
+		{"Work is done. EVENT:implementation.done", "implementation.done"},
+		{"EVENT:plan.complete", "plan.complete"},
+		{"Let's move on. EVENT:design.complete now", "design.complete"},
+		{"EVENT:review.approved\nmore text", "review.approved"},
+		{"EVENT:review.rejected", "review.rejected"},
+		{"EVENT:task.blocked", "task.blocked"},
+		{"EVENT:resolved", "resolved"},
+		{"EVENT:task.complete", "task.complete"},
 	}
 
 	for _, tt := range tests {
-		result := loop.detectHatTransition(tt.response)
-		if result != tt.expectedHat {
-			t.Errorf("detectHatTransition(%q) = %q, want %q", tt.response, result, tt.expectedHat)
+		result := loop.detectEvent(tt.response)
+		if result == nil {
+			t.Errorf("detectEvent(%q) = nil, want event with topic %q", tt.response, tt.expectedTopic)
+			continue
+		}
+		if result.Topic != tt.expectedTopic {
+			t.Errorf("detectEvent(%q).Topic = %q, want %q", tt.response, result.Topic, tt.expectedTopic)
 		}
 	}
 }
 
-func TestDetectHatTransition_InvalidHats(t *testing.T) {
-	loop := &RalphLoop{}
+func TestDetectEvent_InvalidEvents(t *testing.T) {
+	loop := &RalphLoop{
+		session: &ActiveSession{
+			ID:  "test-session",
+			Hat: "creator",
+		},
+	}
 
 	tests := []struct {
 		response string
 	}{
-		{"HAT_TRANSITION:invalid_hat"},
-		{"HAT_TRANSITION:foobar"},
-		{"HAT_TRANSITION:"},
-		{"HAT_TRANSITION: creator"}, // space before hat name
-		{"hat_transition:creator"},  // lowercase
-		{"no transition here"},
+		{"EVENT:invalid_topic"},
+		{"EVENT:foobar"},
+		{"EVENT:"},
+		{"event:plan.complete"}, // lowercase
+		{"no event here"},
 		{""},
 	}
 
 	for _, tt := range tests {
-		result := loop.detectHatTransition(tt.response)
-		if result != "" {
-			t.Errorf("detectHatTransition(%q) = %q, want empty string", tt.response, result)
+		result := loop.detectEvent(tt.response)
+		if result != nil {
+			t.Errorf("detectEvent(%q) = %v, want nil", tt.response, result)
 		}
 	}
 }
 
-func TestDetectHatTransition_EdgeCases(t *testing.T) {
-	loop := &RalphLoop{}
-
-	// Hat name at end of string
-	result := loop.detectHatTransition("HAT_TRANSITION:critic")
-	if result != "critic" {
-		t.Errorf("expected 'critic' for end-of-string case, got %q", result)
+func TestDetectEvent_WithPayload(t *testing.T) {
+	loop := &RalphLoop{
+		session: &ActiveSession{
+			ID:  "test-session",
+			Hat: "creator",
+		},
 	}
 
-	// Hat name followed by newline
-	result = loop.detectHatTransition("HAT_TRANSITION:creator\n")
-	if result != "creator" {
-		t.Errorf("expected 'creator' for newline case, got %q", result)
+	// Event with JSON payload
+	result := loop.detectEvent(`EVENT:task.blocked:{"reason":"merge conflict"}`)
+	if result == nil {
+		t.Fatal("expected event with payload, got nil")
+	}
+	if result.Topic != "task.blocked" {
+		t.Errorf("expected topic 'task.blocked', got %q", result.Topic)
+	}
+	if result.Payload != `{"reason":"merge conflict"}` {
+		t.Errorf("expected payload with reason, got %q", result.Payload)
 	}
 
-	// Hat name followed by tab
-	result = loop.detectHatTransition("HAT_TRANSITION:editor\textra")
-	if result != "editor" {
-		t.Errorf("expected 'editor' for tab case, got %q", result)
-	}
-
-	// Hat name followed by carriage return
-	result = loop.detectHatTransition("HAT_TRANSITION:designer\r\n")
-	if result != "designer" {
-		t.Errorf("expected 'designer' for CR case, got %q", result)
+	// Verify GetPayloadValue works
+	reason, ok := result.GetPayloadValue("reason")
+	if !ok || reason != "merge conflict" {
+		t.Errorf("GetPayloadValue('reason') = %q, %v; want 'merge conflict', true", reason, ok)
 	}
 }
 

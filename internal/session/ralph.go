@@ -24,11 +24,8 @@ import (
 	"github.com/lirancohen/dex/internal/tools"
 )
 
-// Completion/transition signals that Ralph looks for in responses
+// Signals that Ralph looks for in responses
 const (
-	SignalTaskComplete        = "TASK_COMPLETE"
-	SignalHatComplete         = "HAT_COMPLETE"
-	SignalHatTransition       = "HAT_TRANSITION:"
 	SignalChecklistDone       = "CHECKLIST_DONE:"
 	SignalChecklistFailed     = "CHECKLIST_FAILED:"
 	SignalAcknowledgeFailures = "ACKNOWLEDGE_FAILURES"
@@ -76,6 +73,9 @@ type RalphLoop struct {
 	// Quality gate for task completion
 	qualityGate *QualityGate
 
+	// Event routing for hat transitions
+	eventRouter *EventRouter
+
 	// Context management
 	contextGuard     *ContextGuard
 	handoffGen       *HandoffGenerator
@@ -112,6 +112,11 @@ func (r *RalphLoop) InitExecutor(worktreePath string, gitOps *git.Operations, gi
 	r.executor = NewToolExecutor(worktreePath, gitOps, githubClient, owner, repo)
 	// Quality gate will be initialized when activity recorder is ready
 	r.qualityGate = NewQualityGate(worktreePath, nil)
+}
+
+// SetEventRouter sets the event router for hat transitions
+func (r *RalphLoop) SetEventRouter(router *EventRouter) {
+	r.eventRouter = router
 }
 
 // SetOnRepoCreated sets the callback for when a GitHub repo is created
@@ -628,10 +633,10 @@ func (r *RalphLoop) Run(ctx context.Context) error {
 %s
 
 Please either:
-1. Complete the remaining items and call TASK_COMPLETE again
+1. Complete the remaining items and signal EVENT:task.complete again
 2. Mark items as failed with CHECKLIST_FAILED:<id>:<reason>
-3. If failures are known and accepted, output ACKNOWLEDGE_FAILURES along with TASK_COMPLETE
-4. Use HAT_TRANSITION:resolver if blocked`, issuesList),
+3. If failures are known and accepted, output ACKNOWLEDGE_FAILURES along with EVENT:task.complete
+4. If blocked, use EVENT:task.blocked:{"reason":"description"}`, issuesList),
 					})
 					fmt.Printf("RalphLoop.Run: task completion blocked - %d unacknowledged checklist issues\n", len(issues))
 					continue // Continue loop, don't complete
@@ -646,7 +651,7 @@ Please either:
 			}
 
 			// Record completion signal
-			if err := r.activity.RecordCompletion(r.session.IterationCount, SignalTaskComplete); err != nil {
+			if err := r.activity.RecordCompletion(r.session.IterationCount, TopicTaskComplete); err != nil {
 				fmt.Printf("RalphLoop.Run: warning - failed to record completion: %v\n", err)
 			}
 
@@ -668,32 +673,55 @@ Please either:
 			return nil
 		}
 
-		// 9. Check for hat transition
-		if nextHat := r.detectHatTransition(responseText); nextHat != "" {
-			// Record hat transition
-			oldHat := r.session.Hat
-			if err := r.activity.RecordHatTransition(r.session.IterationCount, oldHat, nextHat); err != nil {
-				fmt.Printf("RalphLoop.Run: warning - failed to record hat transition: %v\n", err)
-			}
+		// 9. Check for event-based transition
+		if event := r.detectEvent(responseText); event != nil {
+			// Route the event through the event router
+			if r.eventRouter != nil {
+				result := r.eventRouter.RouteAndPersist(event, r.session.Hat)
 
-			// Post hat transition comment to GitHub issue (with debouncing)
-			if r.issueCommenter != nil && r.issueCommenter.ShouldPostHatTransition(r.session.IterationCount) {
-				commentData := r.buildCommentData(ctx)
-				commentData.Hat = nextHat
-				commentData.PreviousHat = oldHat
-				comment := github.BuildHatTransitionComment(commentData)
-				r.postIssueComment(ctx, comment)
-			}
+				if result.Error != nil {
+					// Log routing error but continue
+					fmt.Printf("RalphLoop.Run: event routing error: %v\n", result.Error)
+					r.activity.Debug(r.session.IterationCount, fmt.Sprintf("Event routing error: %v", result.Error))
+				} else if result.IsTerminal {
+					// Terminal event (task.complete) - end the session
+					r.activity.Debug(r.session.IterationCount, fmt.Sprintf("Terminal event: %s", event.Topic))
+					r.broadcastEvent(websocket.EventSessionCompleted, map[string]any{
+						"session_id": r.session.ID,
+						"outcome":    "event_complete",
+						"event":      event.Topic,
+					})
+					return nil
+				} else if result.NextHat != "" {
+					// Hat transition via event
+					oldHat := r.session.Hat
+					nextHat := result.NextHat
 
-			// Store transition for manager to handle
-			r.session.Hat = nextHat
-			r.activity.SetHat(nextHat)
-			r.broadcastEvent(websocket.EventSessionCompleted, map[string]any{
-				"session_id": r.session.ID,
-				"outcome":    "hat_transition",
-				"next_hat":   nextHat,
-			})
-			return nil
+					if err := r.activity.RecordHatTransition(r.session.IterationCount, oldHat, nextHat); err != nil {
+						fmt.Printf("RalphLoop.Run: warning - failed to record hat transition: %v\n", err)
+					}
+
+					// Post hat transition comment to GitHub issue (with debouncing)
+					if r.issueCommenter != nil && r.issueCommenter.ShouldPostHatTransition(r.session.IterationCount) {
+						commentData := r.buildCommentData(ctx)
+						commentData.Hat = nextHat
+						commentData.PreviousHat = oldHat
+						comment := github.BuildHatTransitionComment(commentData)
+						r.postIssueComment(ctx, comment)
+					}
+
+					// Store transition for manager to handle
+					r.session.Hat = nextHat
+					r.activity.SetHat(nextHat)
+					r.broadcastEvent(websocket.EventSessionCompleted, map[string]any{
+						"session_id": r.session.ID,
+						"outcome":    "hat_transition",
+						"next_hat":   nextHat,
+						"event":      event.Topic,
+					})
+					return nil
+				}
+			}
 		}
 
 		// 10. Checkpoint periodically
@@ -797,7 +825,10 @@ func (r *RalphLoop) buildMemorySection(projectID string) string {
 
 		sb.WriteString(fmt.Sprintf("### %s\n", memType.Title()))
 		for _, m := range mems {
-			sb.WriteString(fmt.Sprintf("- **%s**: %s\n", m.Title, m.Content))
+			// Sanitize memory content before injection (defense in depth)
+			safeTitle := security.SanitizeForPrompt(m.Title)
+			safeContent := security.SanitizeForPrompt(m.Content)
+			sb.WriteString(fmt.Sprintf("- **%s**: %s\n", safeTitle, safeContent))
 		}
 		sb.WriteString("\n")
 	}
@@ -936,6 +967,12 @@ func (r *RalphLoop) buildPrompt() (string, error) {
 		projectMemories = r.buildMemorySection(task.ProjectID)
 	}
 
+	// Detect programming language from project
+	var detectedLanguage tools.ProjectType
+	if r.qualityGate != nil {
+		detectedLanguage = r.qualityGate.GetProjectType()
+	}
+
 	ctx := &PromptContext{
 		Task:               task,
 		Session:            r.session,
@@ -946,6 +983,7 @@ func (r *RalphLoop) buildPrompt() (string, error) {
 		ProjectHints:       projectHints,
 		ProjectMemories:    projectMemories,
 		PredecessorContext: r.session.PredecessorContext,
+		Language:           detectedLanguage,
 	}
 
 	return r.manager.promptLoader.Get(r.session.Hat, ctx)
@@ -970,38 +1008,23 @@ func (r *RalphLoop) sendMessage(ctx context.Context, systemPrompt string) (*tool
 	return r.client.Chat(ctx, req)
 }
 
-// detectCompletion checks if the response indicates task completion
+// detectCompletion checks if the response indicates task completion via EVENT:task.complete
 func (r *RalphLoop) detectCompletion(response string) bool {
-	return strings.Contains(response, SignalTaskComplete) ||
-		strings.Contains(response, SignalHatComplete)
+	event, found := ParseEvent(response, r.session.ID, r.session.Hat)
+	if !found {
+		return false
+	}
+	return IsTerminalEvent(event.Topic)
 }
 
-// detectHatTransition parses the response for a hat transition signal
-// Returns the next hat name, or empty string if no transition
-func (r *RalphLoop) detectHatTransition(response string) string {
-	// Look for HAT_TRANSITION:hat_name pattern
-	idx := strings.Index(response, SignalHatTransition)
-	if idx == -1 {
-		return ""
+// detectEvent parses the response for an EVENT:topic signal
+// Returns the parsed Event or nil if no event found
+func (r *RalphLoop) detectEvent(response string) *Event {
+	event, found := ParseEvent(response, r.session.ID, r.session.Hat)
+	if !found {
+		return nil
 	}
-
-	// Extract hat name after the signal
-	remaining := response[idx+len(SignalHatTransition):]
-
-	// Find end of hat name (whitespace or end of string)
-	endIdx := strings.IndexAny(remaining, " \t\n\r")
-	if endIdx == -1 {
-		endIdx = len(remaining)
-	}
-
-	hatName := strings.TrimSpace(remaining[:endIdx])
-
-	// Validate hat name
-	if IsValidHat(hatName) {
-		return hatName
-	}
-
-	return ""
+	return event
 }
 
 // checkpoint saves the current session state to the database
@@ -1159,7 +1182,7 @@ func (r *RalphLoop) RestoreFromCheckpoint(checkpoint *db.SessionCheckpoint) erro
 		if state.RecoveryHint != "" {
 			recoveryMsg.WriteString(fmt.Sprintf("Hint: %s\n", state.RecoveryHint))
 		}
-		recoveryMsg.WriteString("\nPlease try a different approach. If blocked, use HAT_TRANSITION:resolver to handle the blocker.\n")
+		recoveryMsg.WriteString("\nPlease try a different approach. If blocked, use EVENT:task.blocked:{\"reason\":\"description\"}.\n")
 	}
 
 	// Add recovery message if we have any content
@@ -1233,7 +1256,7 @@ func (r *RalphLoop) buildChecklistPrompt(items []*db.ChecklistItem) string {
 	sb.WriteString("- CHECKLIST_FAILED:<item_id>:<reason> - Use when an item failed or could not be completed\n\n")
 	sb.WriteString("If a tool returns an error or an operation fails, you MUST use CHECKLIST_FAILED, not CHECKLIST_DONE.\n")
 	sb.WriteString("Do not claim success for items that encountered errors.\n\n")
-	sb.WriteString("When all items are addressed (done or failed), output TASK_COMPLETE.\n\n")
+	sb.WriteString("When all items are addressed (done or failed), output EVENT:task.complete.\n\n")
 	sb.WriteString("Begin working on the task. Follow your hat instructions and report progress.")
 
 	return sb.String()
@@ -1330,9 +1353,7 @@ func parseScratchpadSignal(text string) (string, bool) {
 	// Find end of scratchpad (next signal or end)
 	// Check for common signals that would end the scratchpad
 	endSignals := []string{
-		SignalTaskComplete,
-		SignalHatComplete,
-		SignalHatTransition,
+		SignalEvent,
 		SignalChecklistDone,
 		SignalChecklistFailed,
 	}
@@ -1378,45 +1399,38 @@ func (r *RalphLoop) formatChecklistIssues(issues []db.ChecklistIssue) string {
 	return sb.String()
 }
 
-// hatContinuations provides hat-specific continuation prompts
+// hatContinuations provides hat-specific continuation prompts using the event system
 var hatContinuations = map[string]string{
 	"explorer": `Continue exploring. When you have enough information:
-- Transition to planner to create strategy: HAT_TRANSITION:planner
-- Or transition to creator if ready to implement: HAT_TRANSITION:creator
-If exploration is complete, output TASK_COMPLETE.`,
+- Plan is ready: EVENT:plan.complete
+- Design is ready: EVENT:design.complete`,
 
 	"planner": `Continue planning. When the strategy is ready:
-- Transition to designer for architecture: HAT_TRANSITION:designer
-- Or transition to creator to implement: HAT_TRANSITION:creator
-If planning is complete, output TASK_COMPLETE.`,
+- Plan complete, needs design: EVENT:plan.complete
+- Plan complete, ready to build: EVENT:design.complete`,
 
 	"designer": `Continue designing. When the architecture is ready:
-- Transition to creator to implement: HAT_TRANSITION:creator
-If design is complete, output TASK_COMPLETE.`,
+- Design complete: EVENT:design.complete`,
 
 	"creator": `Continue implementing. Report progress with CHECKLIST_DONE/FAILED signals.
 When implementation is complete:
-- Transition to critic for review: HAT_TRANSITION:critic
-- Or transition to editor to finalize: HAT_TRANSITION:editor
-If blocked, use HAT_TRANSITION:resolver.`,
+- Ready for review: EVENT:implementation.done
+If blocked: EVENT:task.blocked:{"reason":"description of blocker"}`,
 
-	"critic": `Continue reviewing. If issues found:
-- Send back to creator for fixes: HAT_TRANSITION:creator
-If approved:
-- Transition to editor for polish: HAT_TRANSITION:editor
-If review is complete, output TASK_COMPLETE.`,
+	"critic": `Continue reviewing. When review is complete:
+- Approved, ready to finalize: EVENT:review.approved
+- Needs fixes: EVENT:review.rejected
+If blocked: EVENT:task.blocked:{"reason":"description of blocker"}`,
 
 	"editor": `Continue polishing. When ready to finalize:
 - Commit any remaining changes
 - Create PR if needed
-- Output TASK_COMPLETE with the PR URL when done
-If blocked, use HAT_TRANSITION:resolver.`,
+- Task complete: EVENT:task.complete
+If blocked: EVENT:task.blocked:{"reason":"description of blocker"}`,
 
 	"resolver": `Continue resolving blockers. When resolved:
-- Return to creator: HAT_TRANSITION:creator
-- Return to critic: HAT_TRANSITION:critic
-- Or go to editor: HAT_TRANSITION:editor
-If all blockers resolved, output TASK_COMPLETE.`,
+- Blocker cleared: EVENT:resolved
+- Task complete (if nothing left to do): EVENT:task.complete`,
 }
 
 // getContinuationPrompt returns a hat-specific continuation prompt
@@ -1424,7 +1438,7 @@ func (r *RalphLoop) getContinuationPrompt() string {
 	if cont, ok := hatContinuations[r.session.Hat]; ok {
 		return cont
 	}
-	return "Continue. Output TASK_COMPLETE when done or HAT_TRANSITION:<hat> to switch roles."
+	return "Continue. Output EVENT:task.complete when done or EVENT:<topic> to signal progress."
 }
 
 // processMemorySignals detects and stores memory signals from the response
@@ -1480,6 +1494,9 @@ func parseMemorySignal(sig, projectID string, session *ActiveSession) (*db.Memor
 	if content == "" || !db.IsValidMemoryType(memType) {
 		return nil, false
 	}
+
+	// Sanitize content to prevent prompt injection
+	content = security.SanitizeForPrompt(content)
 
 	// Extract title (first sentence or line)
 	title := content

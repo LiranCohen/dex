@@ -135,10 +135,6 @@ func NewServer(database *db.DB, cfg Config) *Server {
 		sessionMgr.SetAnthropicClient(cfg.Toolbelt.Anthropic)
 	}
 
-	// Create and wire transition handler for hat transitions
-	transitionHandler := orchestrator.NewTransitionHandler(database)
-	sessionMgr.SetTransitionHandler(transitionHandler)
-
 	s.sessionManager = sessionMgr
 
 	// Wire up GitHub sync callbacks for task lifecycle events

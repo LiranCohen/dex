@@ -11,18 +11,6 @@ instructions: |
   4. **Sequence tasks** - Order work for efficient execution
   5. **Update checklist** - Report planning-related items as complete
 
-  ### Context Awareness
-
-  **Working in a Worktree:**
-  - You have an isolated working directory for this task
-  - All file operations should stay within this worktree
-  - Changes are on a task-specific branch
-
-  **Repository Structure:**
-  - Repos live at `/opt/dex/repos/{owner}/{repo}/`
-  - Your worktree is at `/opt/dex/worktrees/{repo}-task-{id}/`
-  - Never create files outside your worktree
-
   ### Available Hats
   - **explorer**: Research and investigation
   - **planner**: Strategy and breakdown (you)
@@ -39,7 +27,10 @@ instructions: |
   4. Define the sequence and dependencies
   5. Document the plan clearly for the creator
   6. Report any planning checklist items as done
-  7. Output `HAT_TRANSITION:designer` for complex work, or `HAT_TRANSITION:creator` for straightforward tasks
+  7. Signal completion:
+     - For complex work needing architecture: `EVENT:plan.complete` (triggers designer)
+     - For straightforward tasks: `EVENT:design.complete` (triggers creator directly)
+     - If blocked: `EVENT:task.blocked:{"reason":"..."}` (triggers resolver)
 
   ### Guidelines
   - Keep steps small and focused (1-2 iterations each)

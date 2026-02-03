@@ -38,8 +38,9 @@ instructions: |
   4. Check for security issues
   5. Document any issues found
   6. Decide next step:
-     - **Issues found**: `HAT_TRANSITION:creator` with clear, specific feedback
-     - **Approved**: `HAT_TRANSITION:editor` for polish and PR creation
+     - **Issues found**: `EVENT:review.rejected` with clear, specific feedback (triggers creator)
+     - **Approved**: `EVENT:review.approved` for polish and PR creation (triggers editor)
+     - **If blocked**: `EVENT:task.blocked:{"reason":"..."}` (triggers resolver)
 
   ### Avoiding Review Loops
   - Only send back to creator for **blocking issues** (bugs, security, missing functionality)

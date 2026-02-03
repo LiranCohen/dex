@@ -49,29 +49,37 @@ instructions: |
 
   Report checklist progress as you complete each item, not just at the end.
 
-  ### Hat Transitions
-  Use `HAT_TRANSITION:<hat_name>` when you need different expertise:
-  - Research needed → `HAT_TRANSITION:explorer`
-  - Strategy/breakdown needed → `HAT_TRANSITION:planner`
-  - Architecture decisions → `HAT_TRANSITION:designer`
-  - Implementation work → `HAT_TRANSITION:creator`
-  - Quality review → `HAT_TRANSITION:critic`
-  - Polish/finalization → `HAT_TRANSITION:editor`
-  - Blockers/conflicts → `HAT_TRANSITION:resolver`
+  ### Event System
+  Use `EVENT:<topic>` to signal transitions and task state:
 
-  ### Valid Hat Transitions
-  - explorer → planner, designer, creator
-  - planner → designer, creator
-  - designer → creator
-  - creator → critic, editor, resolver
-  - critic → creator, editor
-  - editor → resolver (can recover if issues found)
-  - resolver → creator, critic, editor
+  **Available Events:**
+  - `EVENT:plan.complete` - Planning is done (triggers designer or creator)
+  - `EVENT:design.complete` - Design is done (triggers creator)
+  - `EVENT:implementation.done` - Implementation ready for review (triggers critic)
+  - `EVENT:review.approved` - Review passed (triggers editor)
+  - `EVENT:review.rejected` - Review failed, needs fixes (triggers creator)
+  - `EVENT:task.blocked:{"reason":"..."}` - Blocked (triggers resolver)
+  - `EVENT:resolved` - Blocker cleared (triggers creator)
+  - `EVENT:task.complete` - Task finished (terminal)
+
+  **Event Format:**
+  - Simple: `EVENT:topic`
+  - With payload: `EVENT:topic:{"key":"value"}`
+
+  **Event Routing:**
+  - `task.started` → planner (system event)
+  - `plan.complete` → designer
+  - `design.complete` → creator
+  - `implementation.done` → critic
+  - `review.approved` → editor
+  - `review.rejected` → creator
+  - `task.blocked` → resolver
+  - `resolved` → creator
+  - `task.complete` → (terminal)
 
   ### Completion Signals
-  - `TASK_COMPLETE` - The entire task is finished (all checklist items done)
-  - `HAT_COMPLETE` - Your hat's work is done, but task continues
-  - `ACKNOWLEDGE_FAILURES` - Acknowledge known checklist failures before completing (use with TASK_COMPLETE when some items failed)
+  - `EVENT:task.complete` - The entire task is finished (all checklist items done)
+  - `ACKNOWLEDGE_FAILURES` - Acknowledge known checklist failures before completing (use with EVENT:task.complete)
 
   ### Maintaining Your Scratchpad
 
@@ -130,4 +138,8 @@ instructions: |
 
   {{#if has_memories}}
   {{project_memories}}
+  {{/if}}
+
+  {{#if has_language_guidelines}}
+  {{language_guidelines}}
   {{/if}}

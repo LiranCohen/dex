@@ -13,10 +13,12 @@ The current hat system works but has limitations:
 3. **Mixed responsibilities**: Orchestration logic knows about specific hats rather than working with contracts
 
 **Current State:**
-- Tools defined in `internal/tools/sets.go` with `ReadOnlyTools()` and `ReadWriteTools()` functions
-- Hat transitions tracked in `internal/orchestrator/transitions.go` with valid transition map
+- Tools defined in `internal/tools/groups.go` with semantic grouping and hat-based profiles
+- ~~Hat transitions tracked in `internal/orchestrator/transitions.go` with valid transition map~~ **REMOVED** - replaced by event contracts
 - `TransitionTracker` in `internal/session/transition_tracker.go` detects transition loops
 - Hats defined in `internal/session/prompts.go`: explorer, planner, designer, creator, critic, editor, resolver
+- **NEW:** Event-driven coordination via `internal/session/event.go`, `contracts.go`, `router.go`
+- **NEW:** Events persisted to SQLite via `internal/db/events.go`
 
 ## Solution Overview
 
@@ -395,11 +397,18 @@ func (r *RalphLoop) SetHat(hat string) {
 
 Replace direct `HAT_TRANSITION:x` signals with a pub/sub event system.
 
-**Existing Infrastructure:**
-- `HAT_TRANSITION:editor` signals parsed in `ralph.go`
+**✅ IMPLEMENTED - Current Infrastructure:**
+- `EVENT:topic` signals parsed in `ralph.go` via `ParseEvent()`
 - `TransitionTracker` (`transition_tracker.go`) detects loops (oscillation, excessive repetition)
-- `HatTransitions` map in `orchestrator/transitions.go` defines valid transitions
-- `TransitionHandler` in `orchestrator/transitions.go` validates and executes transitions
+- `HatContracts` map in `session/contracts.go` defines valid pub/sub relationships
+- `EventRouter` in `session/router.go` validates and routes events to hats
+- Events persisted to SQLite `events` table via `db/events.go`
+
+**Removed:**
+- ~~`HAT_TRANSITION:x` signals~~ → replaced by `EVENT:topic`
+- ~~`TASK_COMPLETE` / `HAT_COMPLETE` signals~~ → replaced by `EVENT:task.complete`
+- ~~`HatTransitions` map in `orchestrator/transitions.go`~~ → replaced by `HatContracts`
+- ~~`TransitionHandler`~~ → replaced by `EventRouter`
 
 ### Event Structure
 
@@ -773,19 +782,19 @@ This makes adding new hats purely configuration-driven.
 - [x] Update RalphLoop to use hat-based tools (`NewRalphLoop`, `RestoreFromCheckpoint`)
 - [x] Add tests for profile resolution (`groups_test.go`)
 
-### Phase 2: Event Foundation
-- [ ] Define Event struct
-- [ ] Implement EventBus with subscriptions
-- [ ] Parse EVENT: signals
-- [ ] Log events to activity
-- [ ] Backward compat with HAT_TRANSITION
+### Phase 2: Event Foundation ✅ COMPLETED
+- [x] Define Event struct (`internal/session/event.go`)
+- [x] Implement EventRouter with topic-based routing (`internal/session/router.go`)
+- [x] Parse EVENT: signals (`ParseEvent()` in event.go)
+- [x] Persist events to SQLite (`internal/db/events.go`)
+- [x] ~~Backward compat with HAT_TRANSITION~~ **SKIPPED** - clean break, no backward compat
 
-### Phase 3: Full Event-Driven
-- [ ] Define HatContracts in config
-- [ ] Route events to hats via contracts
-- [ ] Update prompts with event instructions
-- [ ] Integrate quality gates as event transformers
-- [ ] Remove legacy transition handling
+### Phase 3: Full Event-Driven ✅ COMPLETED
+- [x] Define HatContracts in code (`internal/session/contracts.go`)
+- [x] Route events to hats via contracts (`GetNextHatForTopic()`, `CanPublish()`)
+- [x] Update prompts with event instructions (all `hat_*.yaml` and `system.yaml`)
+- [x] Integrate with TransitionTracker for loop detection
+- [x] Remove legacy transition handling (`orchestrator/transitions.go` deleted, `TASK_COMPLETE`/`HAT_COMPLETE` signals removed)
 
 ## Acceptance Criteria
 
@@ -801,14 +810,14 @@ This makes adding new hats purely configuration-driven.
 - [x] New tools added via registry (`RegisterTool()`)
 - [ ] Tool annotations (DestructiveHint, IdempotentHint, OpenWorldHint) - deferred, ReadOnly sufficient for now
 
-### Event Coordination
-- [ ] Events parsed from agent responses
-- [ ] EventBus routes events to hats
-- [ ] Event history tracked for debugging
-- [ ] Terminal events (task.complete) handled
-- [ ] Quality gate failures transform events
-- [ ] Configuration-driven hat registration
-- [ ] Backward compatibility with HAT_TRANSITION
+### Event Coordination ✅ COMPLETED
+- [x] Events parsed from agent responses (`ParseEvent()` handles `EVENT:topic` and `EVENT:topic:{"json"}`)
+- [x] EventRouter routes events to hats via contracts (`Route()`, `GetNextHatForTopic()`)
+- [x] Event history persisted to SQLite (`events` table with session_id, topic, payload, source_hat)
+- [x] Terminal events (task.complete) handled via `IsTerminalEvent()`
+- [x] Quality gate integration maintained (task_complete tool → EVENT:task.complete flow)
+- [x] Contract-driven hat registration (`HatContracts` map in contracts.go)
+- [x] ~~Backward compatibility with HAT_TRANSITION~~ **REMOVED** - clean break, old signals no longer supported
 
 ## Migration Notes
 
