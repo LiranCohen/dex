@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { ObjectiveDetail } from './ObjectiveDetail';
 import { server } from '../../test/mocks/server';
 import { http, HttpResponse } from 'msw';
-import { mockTask, mockPendingTask, mockChecklistResponse } from '../../test/mocks/data';
+import { mockTask, mockPendingTask } from '../../test/mocks/data';
 
 // Mock useWebSocket
 vi.mock('../../hooks/useWebSocket', () => ({

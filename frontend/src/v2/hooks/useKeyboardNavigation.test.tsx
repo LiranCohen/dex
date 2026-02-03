@@ -245,7 +245,7 @@ describe('useKeyboardNavigation', () => {
       expect(result.current.selectedIndex).toBe(0);
 
       // Change items
-      rerender({ items: [{ id: 'new1' }, { id: 'new2' }] });
+      rerender({ items: [{ id: 'new1', onClick: vi.fn() }, { id: 'new2', onClick: vi.fn() }] });
 
       expect(result.current.selectedIndex).toBe(-1);
       expect(result.current.isNavigating).toBe(false);

@@ -6,7 +6,6 @@ import {
   mockTask,
   mockApprovals,
   mockMessages,
-  mockChecklistResponse,
 } from './data';
 
 const API_BASE = '/api/v1';

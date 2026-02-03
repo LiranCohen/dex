@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent } from '../../../test/test-utils';
+import { render, screen } from '../../../test/test-utils';
 import userEvent from '@testing-library/user-event';
 import { ChatInput } from './ChatInput';
 
@@ -93,8 +93,7 @@ describe('ChatInput', () => {
     expect(defaultProps.onSend).not.toHaveBeenCalled();
   });
 
-  it('does not send when disabled', async () => {
-    const user = userEvent.setup();
+  it('does not send when disabled', () => {
     render(<ChatInput {...defaultProps} disabled />);
 
     const textarea = screen.getByRole('textbox');
@@ -106,7 +105,8 @@ describe('ChatInput', () => {
     render(<ChatInput {...defaultProps} isGenerating />);
 
     const textarea = screen.getByRole('textbox');
-    await user.type(textarea, 'Hello{Enter}', { delay: 10 });
+    await user.type(textarea, 'Hello');
+    await user.keyboard('{Enter}');
 
     expect(defaultProps.onSend).not.toHaveBeenCalled();
   });

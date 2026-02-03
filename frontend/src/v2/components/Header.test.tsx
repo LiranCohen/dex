@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import { render, screen, fireEvent } from '../../test/test-utils';
 import userEvent from '@testing-library/user-event';
 import { Header } from './Header';
