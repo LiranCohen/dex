@@ -70,12 +70,9 @@ export function useWebSocket(): UseWebSocketReturn {
   const handlePublication = useCallback((ctx: PublicationContext) => {
     try {
       const data = ctx.data as WebSocketEvent;
-      console.log('[Centrifuge] Received:', data.type, data);
       setLastMessage(data);
 
       // Notify all subscribers
-      const handlerCount = handlersRef.current.size;
-      console.log(`[Centrifuge] Notifying ${handlerCount} handlers`);
       handlersRef.current.forEach((handler) => {
         try {
           handler(data);

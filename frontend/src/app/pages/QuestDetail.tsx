@@ -450,12 +450,14 @@ export function QuestDetail() {
       // Skip state updates if component is unmounted
       if (!id || !isMountedRef.current) return;
 
-      const payload = event.payload as Record<string, unknown>;
+      // Event data is flat (quest_id, message, content, etc. are top-level properties)
+      // Cast to Record for property access since WebSocketEvent type doesn't include all fields
+      const eventData = event as unknown as Record<string, unknown>;
 
       switch (event.type) {
         case 'quest.message':
-          if (payload?.quest_id === id && isQuestMessage(payload.message)) {
-            const msg = payload.message;
+          if (eventData.quest_id === id && isQuestMessage(eventData.message)) {
+            const msg = eventData.message;
             if (msg.role === 'assistant') {
               setStreamingContent('');
               setMessages((prev) => [...prev, msg]);
@@ -494,16 +496,16 @@ export function QuestDetail() {
           break;
 
         case 'quest.content_delta':
-          if (payload?.quest_id === id && isString(payload.content)) {
-            setStreamingContent(payload.content);
+          if (eventData.quest_id === id && isString(eventData.content)) {
+            setStreamingContent(eventData.content);
           }
           break;
 
         case 'quest.tool_call':
-          if (payload?.quest_id === id && isString(payload.tool_name)) {
-            const toolName = payload.tool_name;
+          if (eventData.quest_id === id && isString(eventData.tool_name)) {
+            const toolName = eventData.tool_name;
             // Use call_id for pairing if available, fall back to tool_name for backwards compat
-            const callId = isString(payload.call_id) ? payload.call_id : toolName;
+            const callId = isString(eventData.call_id) ? eventData.call_id : toolName;
             // Clear streaming content when tools start - we're in tool execution phase
             setStreamingContent('');
             // Cancel any pending cleanup timer for this tool
@@ -526,11 +528,11 @@ export function QuestDetail() {
           break;
 
         case 'quest.tool_result':
-          if (payload?.quest_id === id && isString(payload.tool_name)) {
-            const toolName = payload.tool_name;
+          if (eventData.quest_id === id && isString(eventData.tool_name)) {
+            const toolName = eventData.tool_name;
             // Use call_id for pairing if available, fall back to tool_name for backwards compat
-            const callId = isString(payload.call_id) ? payload.call_id : toolName;
-            const isError = isBoolean(payload.is_error) ? payload.is_error : false;
+            const callId = isString(eventData.call_id) ? eventData.call_id : toolName;
+            const isError = isBoolean(eventData.is_error) ? eventData.is_error : false;
             const newStatus = isError ? 'error' : 'complete';
             // Only update if status actually changed
             setActiveTools((prev) => {
@@ -568,8 +570,8 @@ export function QuestDetail() {
         case 'task.created':
         case 'task.updated': {
           // Only reload if the task belongs to this quest or if we can't determine
-          const taskPayload = payload as { task_id?: string; task?: { QuestID?: string | null } };
-          const taskQuestId = taskPayload.task?.QuestID;
+          const task = eventData.task as { QuestID?: string | null } | undefined;
+          const taskQuestId = task?.QuestID;
           // Reload if: task belongs to this quest, or payload doesn't include quest info (backwards compat)
           if (taskQuestId === id || taskQuestId === undefined) {
             debouncedLoadData();
