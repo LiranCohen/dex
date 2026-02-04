@@ -95,7 +95,6 @@ export function useWebSocket(): UseWebSocketReturn {
 
     // Check if already subscribed
     if (subscriptionsRef.current.has(channel)) {
-      console.log(`[Centrifuge] Already subscribed to ${channel}`);
       return () => {
         // Return unsubscribe for the existing subscription
         const sub = subscriptionsRef.current.get(channel);
@@ -107,7 +106,6 @@ export function useWebSocket(): UseWebSocketReturn {
       };
     }
 
-    console.log(`[Centrifuge] Subscribing to ${channel}`);
     const sub = centrifuge.newSubscription(channel, {
       // Enable recovery to receive missed messages on reconnect
       recoverable: true,
@@ -115,11 +113,8 @@ export function useWebSocket(): UseWebSocketReturn {
 
     sub.on('publication', handlePublication);
 
-    sub.on('subscribed', (ctx) => {
-      console.log(`[Centrifuge] Subscribed to ${channel}`, ctx.wasRecovering ? '(recovered)' : '');
-      if (ctx.wasRecovering && ctx.recovered && ctx.hasRecoveredPublications) {
-        console.log(`[Centrifuge] Recovered missed messages for ${channel}`);
-      }
+    sub.on('subscribed', () => {
+      // Subscription successful
     });
 
     sub.on('error', (ctx) => {
@@ -132,7 +127,6 @@ export function useWebSocket(): UseWebSocketReturn {
 
     // Return unsubscribe function
     return () => {
-      console.log(`[Centrifuge] Unsubscribing from ${channel}`);
       sub.unsubscribe();
       subscriptionsRef.current.delete(channel);
       setSubscribedChannels(new Set(subscriptionsRef.current.keys()));
@@ -180,7 +174,6 @@ export function useWebSocket(): UseWebSocketReturn {
 
       // Handle connection state changes
       centrifuge.on('connected', () => {
-        console.log('[Centrifuge] Connected');
         setConnected(true);
         setConnectionState('connected');
         reconnectAttemptsRef.current = 0;
@@ -192,12 +185,10 @@ export function useWebSocket(): UseWebSocketReturn {
       });
 
       centrifuge.on('connecting', () => {
-        console.log('[Centrifuge] Connecting...');
         setConnectionState('reconnecting');
       });
 
-      centrifuge.on('disconnected', (ctx) => {
-        console.log('[Centrifuge] Disconnected:', ctx.reason);
+      centrifuge.on('disconnected', () => {
         setConnected(false);
         setLatency(null);
 
@@ -213,7 +204,6 @@ export function useWebSocket(): UseWebSocketReturn {
 
           if (reconnectAttemptsRef.current >= MAX_RECONNECT_ATTEMPTS) {
             setConnectionState('failed');
-            console.log('[Centrifuge] Max reconnect attempts reached');
           } else {
             setConnectionState('reconnecting');
           }
@@ -233,8 +223,8 @@ export function useWebSocket(): UseWebSocketReturn {
 
       globalSub.on('publication', handlePublication);
 
-      globalSub.on('subscribed', (ctx) => {
-        console.log('[Centrifuge] Subscribed to global channel', ctx.wasRecovering ? '(recovered)' : '');
+      globalSub.on('subscribed', () => {
+        // Global subscription successful
       });
 
       globalSub.on('error', (ctx) => {
