@@ -282,6 +282,7 @@ func AppManifest(name, callbackURL, setupURL string) map[string]any {
 			"metadata":       "read",  // Read repo metadata
 			"issues":         "write", // Create/update issues
 			"pull_requests":  "write", // Create PRs
+			"workflows":      "write", // Manage GitHub Actions workflows
 		},
 	}
 }

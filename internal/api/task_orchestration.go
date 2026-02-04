@@ -102,6 +102,18 @@ func (s *Server) startTaskInternal(ctx context.Context, taskID string, baseBranc
 		return nil, fmt.Errorf("failed to transition to running: %w", err)
 	}
 
+	// Broadcast task started
+	if s.hub != nil {
+		s.hub.Broadcast(websocket.Message{
+			Type:   websocket.EventTaskUpdated,
+			TaskID: taskID,
+			Payload: map[string]any{
+				"task_id": taskID,
+				"status":  "running",
+			},
+		})
+	}
+
 	// Create and start a session for this task
 	hat := "creator" // Default hat - could be determined from task type
 	if t.Hat.Valid && t.Hat.String != "" {
@@ -204,6 +216,18 @@ func (s *Server) startTaskWithInheritance(ctx context.Context, taskID string, in
 	}
 	if err := s.taskService.UpdateStatus(taskID, "running"); err != nil {
 		return nil, fmt.Errorf("failed to transition to running: %w", err)
+	}
+
+	// Broadcast task started
+	if s.hub != nil {
+		s.hub.Broadcast(websocket.Message{
+			Type:   websocket.EventTaskUpdated,
+			TaskID: taskID,
+			Payload: map[string]any{
+				"task_id": taskID,
+				"status":  "running",
+			},
+		})
 	}
 
 	// Create and start a session for this task

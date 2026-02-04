@@ -272,6 +272,24 @@ func (m *Manager) notifyTaskStatus(taskID string, status string) {
 	}
 }
 
+// broadcastTaskUpdated sends a task.updated WebSocket event
+func (m *Manager) broadcastTaskUpdated(taskID string, status string) {
+	m.mu.RLock()
+	hub := m.wsHub
+	m.mu.RUnlock()
+
+	if hub != nil {
+		hub.Broadcast(websocket.Message{
+			Type:   websocket.EventTaskUpdated,
+			TaskID: taskID,
+			Payload: map[string]any{
+				"task_id": taskID,
+				"status":  status,
+			},
+		})
+	}
+}
+
 // SetPredecessorContext sets the context from a predecessor task in a dependency chain
 // This should be called after CreateSession but before Start
 func (m *Manager) SetPredecessorContext(sessionID string, context string) {
@@ -713,6 +731,7 @@ func (m *Manager) runSession(ctx context.Context, session *ActiveSession) {
 	switch finalState {
 	case StateCompleted:
 		_ = m.db.UpdateTaskStatus(taskID, db.TaskStatusCompleted)
+		m.broadcastTaskUpdated(taskID, db.TaskStatusCompleted)
 
 		// Notify task completed (for GitHub sync)
 		m.mu.RLock()
@@ -728,6 +747,7 @@ func (m *Manager) runSession(ctx context.Context, session *ActiveSession) {
 	case StateFailed:
 		// Mark task as paused so it can be resumed after fixing the issue
 		_ = m.db.UpdateTaskStatus(taskID, db.TaskStatusPaused)
+		m.broadcastTaskUpdated(taskID, db.TaskStatusPaused)
 
 		// Notify with error status (adds comment to GitHub issue, doesn't close it)
 		reason := "Session failed"
@@ -739,6 +759,7 @@ func (m *Manager) runSession(ctx context.Context, session *ActiveSession) {
 	case StatePaused, StateStopped:
 		// Mark task as paused so it can be resumed
 		_ = m.db.UpdateTaskStatus(taskID, db.TaskStatusPaused)
+		m.broadcastTaskUpdated(taskID, db.TaskStatusPaused)
 		m.notifyTaskStatus(taskID, "paused")
 	}
 }
@@ -759,6 +780,7 @@ func (m *Manager) handleHatTransition(ctx context.Context, taskID, originalHat, 
 	if err := tracker.RecordTransition(originalHat, nextHat); err != nil {
 		fmt.Printf("error: %v (history: %s), marking task quarantined\n", err, tracker.History())
 		_ = m.db.UpdateTaskStatus(taskID, db.TaskStatusQuarantined)
+		m.broadcastTaskUpdated(taskID, db.TaskStatusQuarantined)
 		m.cleanupTransitionTracker(taskID)
 		return
 	}
@@ -774,6 +796,7 @@ func (m *Manager) handleHatTransition(ctx context.Context, taskID, originalHat, 
 	if err != nil {
 		fmt.Printf("error: failed to create session for hat transition: %v\n", err)
 		_ = m.db.UpdateTaskStatus(taskID, db.TaskStatusCancelled)
+		m.broadcastTaskUpdated(taskID, db.TaskStatusCancelled)
 		return
 	}
 
@@ -781,6 +804,7 @@ func (m *Manager) handleHatTransition(ctx context.Context, taskID, originalHat, 
 	if err := m.Start(ctx, newSession.ID); err != nil {
 		fmt.Printf("error: failed to start session for hat transition: %v\n", err)
 		_ = m.db.UpdateTaskStatus(taskID, db.TaskStatusCancelled)
+		m.broadcastTaskUpdated(taskID, db.TaskStatusCancelled)
 		return
 	}
 
