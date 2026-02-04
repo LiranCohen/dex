@@ -182,7 +182,7 @@ func (db *DB) ListMemories(projectID string, memType *MemoryType, minConfidence 
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	return scanMemories(rows)
 }
@@ -233,7 +233,7 @@ func (db *DB) SearchMemories(projectID string, params MemorySearchParams) ([]Mem
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	return scanMemories(rows)
 }
@@ -265,7 +265,7 @@ func (db *DB) GetRelevantMemories(ctx MemoryContext, limit int) ([]Memory, error
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	candidates, err := scanMemories(rows)
 	if err != nil {

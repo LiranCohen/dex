@@ -133,7 +133,7 @@ func (m *AppManager) GetInstallationToken(ctx context.Context, installationID in
 	if err != nil {
 		return "", fmt.Errorf("failed to get installation token: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusCreated {
 		body, _ := io.ReadAll(resp.Body)
@@ -190,7 +190,7 @@ func (m *AppManager) ListInstallations(ctx context.Context) ([]*Installation, er
 	if err != nil {
 		return nil, fmt.Errorf("failed to list installations: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)

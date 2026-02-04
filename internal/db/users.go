@@ -13,7 +13,7 @@ import (
 // Format: 8 random hex characters (e.g., "a1b2c3d4")
 func NewID() string {
 	b := make([]byte, 4)
-	rand.Read(b)
+	_, _ = rand.Read(b)
 	return hex.EncodeToString(b)
 }
 

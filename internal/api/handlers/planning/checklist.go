@@ -192,7 +192,7 @@ func (h *ChecklistHandler) HandleAccept(c echo.Context) error {
 	var req struct {
 		SelectedOptional []int `json:"selected_optional"`
 	}
-	c.Bind(&req) // Ignore error
+	_ = c.Bind(&req) // Ignore error
 
 	// Create a set of selected optional indices
 	selectedOptionalSet := make(map[int]bool)

@@ -399,7 +399,7 @@ func (h *Handler) ProcessMessage(ctx context.Context, questID, content string) (
 		if !quest.Title.Valid && len(messages) >= 1 {
 			title := h.generateTitle(messages[0].Content)
 			if title != "" {
-				h.db.UpdateQuestTitle(questID, title)
+				_ = h.db.UpdateQuestTitle(questID, title)
 			}
 		}
 

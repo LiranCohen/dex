@@ -63,7 +63,7 @@ func (db *DB) GetQuestTemplatesByProjectID(projectID string) ([]*QuestTemplate, 
 	if err != nil {
 		return nil, fmt.Errorf("failed to get quest templates: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var templates []*QuestTemplate
 	for rows.Next() {

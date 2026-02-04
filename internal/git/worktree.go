@@ -107,7 +107,7 @@ func (m *WorktreeManager) Remove(projectPath, worktreePath string, force, cleanu
 	if cleanupBranch && branchName != "" {
 		branchCmd := exec.Command("git", "branch", "-D", branchName)
 		branchCmd.Dir = projectPath
-		branchCmd.CombinedOutput() // Ignore errors - branch may already be merged/deleted
+		_, _ = branchCmd.CombinedOutput() // Ignore errors - branch may already be merged/deleted
 	}
 
 	return nil
@@ -189,8 +189,8 @@ func (m *WorktreeManager) GetStatus(worktreePath string) (*GitStatus, error) {
 	if out, err := cmd.Output(); err == nil {
 		parts := strings.Fields(string(out))
 		if len(parts) == 2 {
-			fmt.Sscanf(parts[0], "%d", &status.Behind)
-			fmt.Sscanf(parts[1], "%d", &status.Ahead)
+			_, _ = fmt.Sscanf(parts[0], "%d", &status.Behind)
+			_, _ = fmt.Sscanf(parts[1], "%d", &status.Ahead)
 		}
 	}
 

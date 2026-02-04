@@ -64,7 +64,7 @@ type falErrorResponse struct {
 
 // parseFalResponse reads and unmarshals a fal.ai API response
 func parseFalResponse[T any](resp *http.Response) (*T, error) {
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {

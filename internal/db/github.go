@@ -155,7 +155,7 @@ func (db *DB) ListGitHubInstallations() ([]*GitHubInstallation, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to list GitHub installations: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var installs []*GitHubInstallation
 	for rows.Next() {

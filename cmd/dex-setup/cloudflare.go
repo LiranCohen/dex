@@ -67,7 +67,7 @@ func (c *CloudflareClient) ValidateToken() error {
 	if err != nil {
 		return fmt.Errorf("failed to verify token: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return ErrInvalidAPIToken
@@ -109,7 +109,7 @@ func (c *CloudflareClient) GetAccountID() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to get accounts: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	var result struct {
 		Success bool `json:"success"`
@@ -150,7 +150,7 @@ func (c *CloudflareClient) GetZones() ([]Zone, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to get zones: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	var result struct {
 		Success bool   `json:"success"`
@@ -201,7 +201,7 @@ func (c *CloudflareClient) CreateTunnel(name string, dataDir string) (*TunnelInf
 	if err != nil {
 		return nil, fmt.Errorf("failed to create tunnel: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	respBody, _ := io.ReadAll(resp.Body)
 
@@ -291,7 +291,7 @@ func (c *CloudflareClient) ConfigureTunnelRoute(tunnelID string, subdomain strin
 	if err != nil {
 		return "", fmt.Errorf("failed to configure tunnel: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
@@ -319,7 +319,7 @@ func (c *CloudflareClient) ConfigureTunnelRoute(tunnelID string, subdomain strin
 	if err != nil {
 		return "", fmt.Errorf("failed to create DNS record: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// DNS record might already exist, that's okay
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
@@ -352,7 +352,7 @@ func (c *CloudflareClient) GetTunnelHealth(tunnelID string) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("failed to get tunnel status: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	var result struct {
 		Success bool `json:"success"`
@@ -397,7 +397,7 @@ func (c *CloudflareClient) DeleteTunnel(tunnelID string) error {
 	if err != nil {
 		return fmt.Errorf("failed to delete tunnel: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)

@@ -19,8 +19,8 @@ func TestProcessLargeResponse_SmallResponse(t *testing.T) {
 
 func TestProcessLargeResponse_LargeResponse(t *testing.T) {
 	// Clean up before and after test
-	CleanupTempResponses()
-	defer CleanupTempResponses()
+	_ = CleanupTempResponses()
+	defer func() { _ = CleanupTempResponses() }()
 
 	// Create a response larger than the threshold
 	input := strings.Repeat("x", LargeResponseThreshold+1000)
@@ -66,8 +66,8 @@ func TestProcessLargeResponse_LargeResponse(t *testing.T) {
 
 func TestProcessLargeResponse_ExactThreshold(t *testing.T) {
 	// Clean up before test
-	CleanupTempResponses()
-	defer CleanupTempResponses()
+	_ = CleanupTempResponses()
+	defer func() { _ = CleanupTempResponses() }()
 
 	// Exactly at threshold should not create temp file
 	input := strings.Repeat("x", LargeResponseThreshold)
@@ -103,10 +103,10 @@ func TestTruncateWithWarning_NoTruncationNeeded(t *testing.T) {
 func TestCleanupTempResponses(t *testing.T) {
 	// Create temp directory and file
 	tempDir := GetTempResponseDir()
-	os.MkdirAll(tempDir, 0755)
+	_ = os.MkdirAll(tempDir, 0755)
 
 	testFile := filepath.Join(tempDir, "test_cleanup.txt")
-	os.WriteFile(testFile, []byte("test"), 0644)
+	_ = os.WriteFile(testFile, []byte("test"), 0644)
 
 	// Verify file exists
 	if _, err := os.Stat(testFile); os.IsNotExist(err) {
@@ -127,20 +127,20 @@ func TestCleanupTempResponses(t *testing.T) {
 func TestCleanupOldTempResponses(t *testing.T) {
 	// Create temp directory
 	tempDir := GetTempResponseDir()
-	os.MkdirAll(tempDir, 0755)
-	defer CleanupTempResponses()
+	_ = os.MkdirAll(tempDir, 0755)
+	defer func() { _ = CleanupTempResponses() }()
 
 	// Create an "old" file (we'll set its modtime to the past)
 	oldFile := filepath.Join(tempDir, "old_file.txt")
-	os.WriteFile(oldFile, []byte("old"), 0644)
+	_ = os.WriteFile(oldFile, []byte("old"), 0644)
 
 	// Set modtime to 2 hours ago
 	oldTime := time.Now().Add(-2 * time.Hour)
-	os.Chtimes(oldFile, oldTime, oldTime)
+	_ = os.Chtimes(oldFile, oldTime, oldTime)
 
 	// Create a "new" file
 	newFile := filepath.Join(tempDir, "new_file.txt")
-	os.WriteFile(newFile, []byte("new"), 0644)
+	_ = os.WriteFile(newFile, []byte("new"), 0644)
 
 	// Cleanup files older than 1 hour
 	if err := CleanupOldTempResponses(1 * time.Hour); err != nil {
@@ -161,7 +161,7 @@ func TestCleanupOldTempResponses(t *testing.T) {
 func TestCleanupTempResponses_NothingToClean(t *testing.T) {
 	// Make sure temp dir doesn't exist
 	tempDir := GetTempResponseDir()
-	os.RemoveAll(tempDir)
+	_ = os.RemoveAll(tempDir)
 
 	// Should not error when nothing to clean
 	if err := CleanupTempResponses(); err != nil {

@@ -62,7 +62,7 @@ func (f *FlyClient) doRequest(ctx context.Context, method, url string, body any)
 
 // parseResponse reads and unmarshals a JSON response body
 func parseResponse[T any](resp *http.Response) (*T, error) {
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -89,7 +89,7 @@ func (f *FlyClient) Ping(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("fly ping failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
@@ -182,7 +182,7 @@ func (f *FlyClient) DeleteApp(ctx context.Context, appName string) error {
 	if err != nil {
 		return fmt.Errorf("failed to delete app: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode >= 400 {
 		body, _ := io.ReadAll(resp.Body)
@@ -355,7 +355,7 @@ func (f *FlyClient) SetSecrets(ctx context.Context, appName string, secrets map[
 	if err != nil {
 		return fmt.Errorf("failed to set secrets: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
@@ -460,7 +460,7 @@ func (f *FlyClient) GetLogs(ctx context.Context, appName string, limit int) ([]F
 	if err != nil {
 		return nil, fmt.Errorf("failed to get logs: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -612,7 +612,7 @@ func (f *FlyClient) updateMachineSize(ctx context.Context, appName, machineID st
 	if err != nil {
 		return fmt.Errorf("failed to update machine: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode >= 400 {
 		body, _ := io.ReadAll(resp.Body)
@@ -656,7 +656,7 @@ func (f *FlyClient) createMachineFromConfig(ctx context.Context, appName, region
 	if err != nil {
 		return fmt.Errorf("failed to create machine: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode >= 400 {
 		body, _ := io.ReadAll(resp.Body)
@@ -674,7 +674,7 @@ func (f *FlyClient) destroyMachine(ctx context.Context, appName, machineID strin
 	if err != nil {
 		return fmt.Errorf("failed to stop machine: %w", err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 
 	// Wait for machine to stop (poll status with timeout)
 	deadline := time.Now().Add(30 * time.Second)
@@ -697,7 +697,7 @@ func (f *FlyClient) destroyMachine(ctx context.Context, appName, machineID strin
 	if err != nil {
 		return fmt.Errorf("failed to destroy machine: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode >= 400 {
 		body, _ := io.ReadAll(resp.Body)

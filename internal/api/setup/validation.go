@@ -26,7 +26,7 @@ func ValidateGitHubToken(ctx context.Context, token string) error {
 	if err != nil {
 		return fmt.Errorf("failed to connect to GitHub: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == http.StatusUnauthorized {
 		return errors.New("invalid token")
@@ -53,7 +53,7 @@ func ValidateAnthropicKey(ctx context.Context, key string) error {
 	if err != nil {
 		return fmt.Errorf("failed to connect to Anthropic: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
 		return errors.New("invalid key")
@@ -109,7 +109,7 @@ func ValidateGitHubOrg(ctx context.Context, orgName string) (*GitHubOrgInfo, err
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to GitHub: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == http.StatusNotFound {
 		// Try checking if it's a user account instead
@@ -155,7 +155,7 @@ func checkGitHubUser(ctx context.Context, username string) (*GitHubOrgInfo, erro
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to GitHub: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == http.StatusNotFound {
 		return nil, errors.New("organization not found")

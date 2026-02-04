@@ -161,7 +161,7 @@ func TestPublishWithHistory(t *testing.T) {
 	defer func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		node.Shutdown(ctx)
+		_ = node.Shutdown(ctx)
 	}()
 
 	// Publish an event - this should succeed even without subscribers

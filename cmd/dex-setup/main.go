@@ -134,7 +134,7 @@ func main() {
 			log.Println("Setup complete, shutting down")
 		}
 
-		httpServer.Close()
+		_ = httpServer.Close()
 	}()
 
 	log.Printf("Setup wizard running on %s", *addr)
@@ -145,7 +145,7 @@ func main() {
 
 func (s *SetupServer) handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("ok"))
+	_, _ = w.Write([]byte("ok"))
 }
 
 func (s *SetupServer) handleGetState(w http.ResponseWriter, r *http.Request) {
@@ -295,7 +295,7 @@ func (s *SetupServer) handleTailscaleAuthURL(w http.ResponseWriter, r *http.Requ
 	var req struct {
 		Hostname string `json:"hostname"`
 	}
-	json.NewDecoder(r.Body).Decode(&req)
+	_ = json.NewDecoder(r.Body).Decode(&req)
 
 	if req.Hostname == "" {
 		req.Hostname = "dex"
@@ -520,7 +520,7 @@ func (s *SetupServer) handleCloudflareSetup(w http.ResponseWriter, r *http.Reque
 	)
 	if err != nil {
 		// Try to clean up the tunnel
-		client.DeleteTunnel(tunnelInfo.ID)
+		_ = client.DeleteTunnel(tunnelInfo.ID)
 		sendJSON(w, http.StatusInternalServerError, map[string]string{
 			"error": "Failed to configure tunnel: " + err.Error(),
 		})
@@ -610,5 +610,5 @@ func (s *SetupServer) handleComplete(w http.ResponseWriter, r *http.Request) {
 func sendJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(v)
+	_ = json.NewEncoder(w).Encode(v)
 }

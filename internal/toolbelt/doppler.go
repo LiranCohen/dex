@@ -65,7 +65,7 @@ type dopplerErrorResponse struct {
 
 // parseDopplerResponse reads and unmarshals a Doppler API response
 func parseDopplerResponse[T any](resp *http.Response) (*T, error) {
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -240,7 +240,7 @@ func (c *DopplerClient) DeleteProject(ctx context.Context, projectSlug string) e
 	if err != nil {
 		return fmt.Errorf("failed to delete project: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode >= 400 {
 		body, _ := io.ReadAll(resp.Body)
@@ -286,7 +286,7 @@ func (c *DopplerClient) GetSecrets(ctx context.Context, project, config string) 
 	if err != nil {
 		return nil, fmt.Errorf("failed to get secrets: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -322,7 +322,7 @@ func (c *DopplerClient) DeleteSecret(ctx context.Context, project, config, name 
 	if err != nil {
 		return fmt.Errorf("failed to delete secret: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode >= 400 {
 		body, _ := io.ReadAll(resp.Body)

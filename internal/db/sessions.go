@@ -94,7 +94,7 @@ func (db *DB) listSessions(whereClause string, args ...any) ([]*Session, error) 
 	if err != nil {
 		return nil, fmt.Errorf("failed to list sessions: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var sessions []*Session
 	for rows.Next() {
@@ -332,7 +332,7 @@ func (db *DB) ListSessionCheckpoints(sessionID string) ([]*SessionCheckpoint, er
 	if err != nil {
 		return nil, fmt.Errorf("failed to list session checkpoints: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var checkpoints []*SessionCheckpoint
 	for rows.Next() {

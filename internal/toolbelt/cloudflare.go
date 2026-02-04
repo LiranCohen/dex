@@ -72,7 +72,7 @@ type cloudflareError struct {
 
 // parseCloudflareResponse reads and unmarshals a Cloudflare API response
 func parseCloudflareResponse[T any](resp *http.Response) (*T, error) {
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -363,7 +363,7 @@ func (c *CloudflareClient) ListR2Buckets(ctx context.Context) ([]R2Bucket, error
 	}
 
 	// R2 bucket list has a different response structure
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response body: %w", err)
@@ -516,7 +516,7 @@ func (c *CloudflareClient) KVGet(ctx context.Context, namespaceID, key string) (
 	if err != nil {
 		return "", fmt.Errorf("failed to get KV value: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == http.StatusNotFound {
 		return "", fmt.Errorf("key not found: %s", key)

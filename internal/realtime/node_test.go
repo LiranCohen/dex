@@ -280,7 +280,7 @@ func TestNodeConfig(t *testing.T) {
 		defer func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			node.Shutdown(ctx)
+			_ = node.Shutdown(ctx)
 		}()
 
 		// Check defaults were applied
@@ -306,7 +306,7 @@ func TestNodeConfig(t *testing.T) {
 		defer func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			node.Shutdown(ctx)
+			_ = node.Shutdown(ctx)
 		}()
 
 		if node.historySize != 50 {
@@ -329,7 +329,7 @@ func TestNodeWebSocketHandler(t *testing.T) {
 	defer func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		node.Shutdown(ctx)
+		_ = node.Shutdown(ctx)
 	}()
 
 	handler := node.WebSocketHandler()
@@ -349,7 +349,7 @@ func TestNodePublish(t *testing.T) {
 	defer func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		node.Shutdown(ctx)
+		_ = node.Shutdown(ctx)
 	}()
 
 	t.Run("publish adds type and timestamp", func(t *testing.T) {

@@ -108,7 +108,7 @@ func containsImpl(s, substr string) bool {
 
 // parseAnthropicResponse reads and unmarshals an Anthropic API response
 func parseAnthropicResponse[T any](resp *http.Response) (*T, error) {
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -413,7 +413,7 @@ func (c *AnthropicClient) ChatStream(ctx context.Context, req *AnthropicChatRequ
 	}
 
 	if resp.StatusCode >= 400 {
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		body, _ := io.ReadAll(resp.Body)
 		var errResp anthropicErrorResponse
 		if err := json.Unmarshal(body, &errResp); err != nil {
@@ -435,7 +435,7 @@ func (c *AnthropicClient) ChatStream(ctx context.Context, req *AnthropicChatRequ
 	// Start goroutine to read SSE events
 	go func() {
 		defer close(events)
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 
 		c.readSSEEvents(ctx, resp.Body, events)
 	}()
@@ -488,7 +488,7 @@ func (c *AnthropicClient) ChatWithStreaming(ctx context.Context, req *AnthropicC
 	if err != nil {
 		return nil, fmt.Errorf("failed to send request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode >= 400 {
 		body, _ := io.ReadAll(resp.Body)

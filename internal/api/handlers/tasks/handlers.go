@@ -134,7 +134,7 @@ func (h *Handler) HandleCreate(c echo.Context) error {
 			_, err := h.deps.Planner.StartPlanning(c.Request().Context(), t.ID, planningPrompt)
 			if err != nil {
 				fmt.Printf("warning: failed to start planning: %v\n", err)
-				h.deps.TaskService.UpdateStatus(t.ID, db.TaskStatusPending)
+				_ = h.deps.TaskService.UpdateStatus(t.ID, db.TaskStatusPending)
 			} else {
 				t.Status = db.TaskStatusPlanning
 			}

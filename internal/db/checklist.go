@@ -135,7 +135,7 @@ func (db *DB) GetChecklistItems(checklistID string) ([]*ChecklistItem, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to get checklist items: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var items []*ChecklistItem
 	for rows.Next() {

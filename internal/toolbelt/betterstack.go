@@ -66,7 +66,7 @@ type betterStackErrorResponse struct {
 
 // parseBetterStackResponse reads and unmarshals a Better Stack API response
 func parseBetterStackResponse[T any](resp *http.Response) (*T, error) {
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -390,7 +390,7 @@ func (c *BetterStackClient) DeleteMonitor(ctx context.Context, monitorID string)
 	if err != nil {
 		return fmt.Errorf("failed to delete monitor: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode >= 400 {
 		body, _ := io.ReadAll(resp.Body)
@@ -587,7 +587,7 @@ func (c *BetterStackClient) DeleteSource(ctx context.Context, sourceID string) e
 	if err != nil {
 		return fmt.Errorf("failed to delete source: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode >= 400 {
 		body, _ := io.ReadAll(resp.Body)

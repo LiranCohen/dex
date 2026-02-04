@@ -97,7 +97,7 @@ func (p *Planner) StartPlanning(ctx context.Context, taskID, prompt string) (*db
 	})
 	if err != nil {
 		// Update session status to indicate error
-		p.db.UpdatePlanningSessionStatus(session.ID, db.PlanningStatusAwaitingResponse)
+		_ = p.db.UpdatePlanningSessionStatus(session.ID, db.PlanningStatusAwaitingResponse)
 		return nil, fmt.Errorf("failed to get planning response: %w", err)
 	}
 

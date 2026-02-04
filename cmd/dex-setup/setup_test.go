@@ -41,7 +41,7 @@ func TestPINVerification(t *testing.T) {
 		}
 
 		var state SetupState
-		json.NewDecoder(w.Body).Decode(&state)
+		_ = json.NewDecoder(w.Body).Decode(&state)
 
 		if state.Phase != PhasePin {
 			t.Errorf("Expected phase pin, got %s", state.Phase)
@@ -83,7 +83,7 @@ func TestPINVerification(t *testing.T) {
 		server.handleGetState(w, req)
 
 		var state SetupState
-		json.NewDecoder(w.Body).Decode(&state)
+		_ = json.NewDecoder(w.Body).Decode(&state)
 
 		if state.Phase != PhaseAccessChoice {
 			t.Errorf("Expected phase access_choice, got %s", state.Phase)
@@ -106,7 +106,7 @@ func TestPINVerification(t *testing.T) {
 		server.handleGetState(w, req)
 
 		var state SetupState
-		json.NewDecoder(w.Body).Decode(&state)
+		_ = json.NewDecoder(w.Body).Decode(&state)
 
 		if state.Phase != PhaseTailscaleSetup {
 			t.Errorf("Expected phase tailscale_setup, got %s", state.Phase)
@@ -185,7 +185,7 @@ func TestPINVerifier(t *testing.T) {
 
 		// Make 3 wrong attempts
 		for i := 0; i < 3; i++ {
-			v.Verify("000000")
+			_ = v.Verify("000000")
 		}
 
 		// Next attempt should be rate limited

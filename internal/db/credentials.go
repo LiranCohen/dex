@@ -54,7 +54,7 @@ func (db *DB) GetWebAuthnCredentialsByUserID(userID string) ([]webauthn.Credenti
 	if err != nil {
 		return nil, fmt.Errorf("failed to query credentials: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var credentials []webauthn.Credential
 	for rows.Next() {

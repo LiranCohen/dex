@@ -84,7 +84,7 @@ func TestExecutor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Create a test file
 	testFile := filepath.Join(tmpDir, "test.txt")
@@ -161,7 +161,7 @@ func TestExecutorWriteMode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	ctx := context.Background()
 	exec := NewExecutor(tmpDir, ReadWriteTools(), false)

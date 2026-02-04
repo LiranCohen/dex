@@ -136,7 +136,7 @@ func (db *DB) listTasks(whereClause string, args ...any) ([]*Task, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to list tasks: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var tasks []*Task
 	for rows.Next() {
@@ -465,7 +465,7 @@ func (db *DB) GetTasksUnblockedBy(completedTaskID string) ([]*Task, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to get unblocked tasks: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var tasks []*Task
 	for rows.Next() {
@@ -515,7 +515,7 @@ func (db *DB) GetIncompleteBlockerIDs(taskID string) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to get incomplete blockers: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var blockerIDs []string
 	for rows.Next() {
@@ -564,7 +564,7 @@ func (db *DB) GetTasksReadyToAutoStart(completedTaskID string) ([]*Task, error) 
 	if err != nil {
 		return nil, fmt.Errorf("failed to get tasks ready to auto-start: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var tasks []*Task
 	for rows.Next() {

@@ -40,7 +40,7 @@ func TestBroadcasterToClientE2E(t *testing.T) {
 	defer func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		node.Shutdown(ctx)
+		_ = node.Shutdown(ctx)
 	}()
 
 	// Create broadcaster
@@ -104,7 +104,7 @@ func TestWebSocketHandlerE2E(t *testing.T) {
 	defer func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		node.Shutdown(ctx)
+		_ = node.Shutdown(ctx)
 	}()
 
 	// Create test server with WebSocket handler
@@ -118,7 +118,7 @@ func TestWebSocketHandlerE2E(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Request failed: %v", err)
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 
 		// Should get 400 Bad Request since we're not doing a proper WebSocket upgrade
 		if resp.StatusCode != http.StatusBadRequest {
@@ -148,7 +148,7 @@ func TestHistoryRecoveryE2E(t *testing.T) {
 	defer func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		node.Shutdown(ctx)
+		_ = node.Shutdown(ctx)
 	}()
 
 	t.Run("publishes multiple events with history", func(t *testing.T) {
@@ -195,7 +195,7 @@ func TestPingRPCE2E(t *testing.T) {
 	defer func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		centrifugeNode.Shutdown(ctx)
+		_ = centrifugeNode.Shutdown(ctx)
 	}()
 
 	t.Run("node configured with ping RPC handler", func(t *testing.T) {

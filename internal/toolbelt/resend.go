@@ -65,7 +65,7 @@ type resendErrorResponse struct {
 
 // parseResendResponse reads and unmarshals a Resend API response
 func parseResendResponse[T any](resp *http.Response) (*T, error) {
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -340,7 +340,7 @@ func (c *ResendClient) DeleteDomain(ctx context.Context, domainID string) error 
 	if err != nil {
 		return fmt.Errorf("failed to delete domain: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode >= 400 {
 		body, _ := io.ReadAll(resp.Body)
@@ -420,7 +420,7 @@ func (c *ResendClient) DeleteAPIKey(ctx context.Context, keyID string) error {
 	if err != nil {
 		return fmt.Errorf("failed to delete API key: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode >= 400 {
 		body, _ := io.ReadAll(resp.Body)

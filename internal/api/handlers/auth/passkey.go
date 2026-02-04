@@ -224,7 +224,7 @@ func (h *PasskeyHandler) HandleRegisterFinish(c echo.Context) error {
 	}
 
 	// Update last login
-	h.deps.DB.UpdateUserLastLogin(dbUser.ID)
+	_ = h.deps.DB.UpdateUserLastLogin(dbUser.ID)
 
 	return c.JSON(http.StatusOK, map[string]any{
 		"token":   token,
@@ -333,7 +333,7 @@ func (h *PasskeyHandler) HandleLoginFinish(c echo.Context) error {
 	}
 
 	// Update credential counter (replay protection)
-	h.deps.DB.UpdateWebAuthnCredentialCounter(credential.ID, credential.Authenticator.SignCount)
+	_ = h.deps.DB.UpdateWebAuthnCredentialCounter(credential.ID, credential.Authenticator.SignCount)
 
 	// Generate JWT token
 	if h.deps.TokenConfig == nil {
@@ -346,7 +346,7 @@ func (h *PasskeyHandler) HandleLoginFinish(c echo.Context) error {
 	}
 
 	// Update last login
-	h.deps.DB.UpdateUserLastLogin(user.ID)
+	_ = h.deps.DB.UpdateUserLastLogin(user.ID)
 
 	return c.JSON(http.StatusOK, map[string]any{
 		"token":   token,

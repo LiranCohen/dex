@@ -200,7 +200,7 @@ func StartTailscaleAuth(hostname string) (authURL string, checkConnected func() 
 
 	// Goroutine to wait on the command and prevent zombies
 	go func() {
-		cmd.Wait()
+		_ = cmd.Wait()
 	}()
 
 	// Wait for URL with timeout
@@ -286,7 +286,7 @@ func ConfigureTailscaleServe(localPort int, httpsPort int) error {
 
 	// Reset any existing serve config first
 	resetCmd := exec.Command("tailscale", "serve", "reset")
-	resetCmd.Run() // Ignore errors, might not have existing config
+	_ = resetCmd.Run() // Ignore errors, might not have existing config
 
 	// Configure serve
 	// tailscale serve --bg --https=443 http://127.0.0.1:8080

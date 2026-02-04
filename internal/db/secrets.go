@@ -64,7 +64,7 @@ func (db *DB) ListSecretKeys() ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to list secrets: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var keys []string
 	for rows.Next() {
@@ -119,7 +119,7 @@ func (db *DB) MigrateSecretsFromFile(dataDir string) (int, error) {
 	// Optionally rename the old file to indicate it's been migrated
 	if count > 0 {
 		backupFile := secretsFile + ".migrated"
-		os.Rename(secretsFile, backupFile)
+		_ = os.Rename(secretsFile, backupFile)
 	}
 
 	return count, nil
@@ -131,7 +131,7 @@ func (db *DB) GetAllSecrets() (map[string]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to get all secrets: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	secrets := make(map[string]string)
 	for rows.Next() {

@@ -23,7 +23,7 @@ func TestLoader_Load_NoFiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	loader := NewLoader(tmpDir)
 	content, err := loader.Load()
@@ -41,7 +41,7 @@ func TestLoader_Load_SingleFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Create a .dexhints file
 	hintsContent := "# Test Hints\n\nSome project hints here."
@@ -69,7 +69,7 @@ func TestLoader_Load_MultipleFiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Create multiple hint files
 	files := map[string]string{
@@ -103,7 +103,7 @@ func TestLoader_ProcessImports_Simple(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Create main hints file with import
 	mainContent := `# Main Hints
@@ -139,7 +139,7 @@ func TestLoader_ProcessImports_MissingFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Create hints file with import to non-existent file
 	mainContent := `# Main Hints
@@ -171,7 +171,7 @@ func TestLoader_ProcessImports_MaxDepth(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Create a chain of imports
 	if err := os.WriteFile(filepath.Join(tmpDir, ".dexhints"), []byte("@level1.md"), 0644); err != nil {
@@ -213,7 +213,7 @@ func TestLoader_SizeLimit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Create a large hints file
 	largeContent := strings.Repeat("x", 100*1024) // 100KB
@@ -249,7 +249,7 @@ func TestLoader_Disabled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Create a hints file
 	if err := os.WriteFile(filepath.Join(tmpDir, ".dexhints"), []byte("Content"), 0644); err != nil {
@@ -276,7 +276,7 @@ func TestFindGitRoot_NoRepo(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	root := findGitRoot(tmpDir)
 	if root != "" {
@@ -289,7 +289,7 @@ func TestFindGitRoot_WithRepo(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Create .git directory
 	gitDir := filepath.Join(tmpDir, ".git")
@@ -314,7 +314,7 @@ func TestLoader_DirectoryChain(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Create .git directory at root
 	if err := os.Mkdir(filepath.Join(tmpDir, ".git"), 0755); err != nil {
@@ -371,7 +371,7 @@ func TestLoader_Validate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Create a valid hints file
 	if err := os.WriteFile(filepath.Join(tmpDir, ".dexhints"), []byte("Valid content"), 0644); err != nil {

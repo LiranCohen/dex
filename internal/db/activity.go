@@ -89,7 +89,7 @@ func (db *DB) ListSessionActivity(sessionID string) ([]*SessionActivity, error) 
 	if err != nil {
 		return nil, fmt.Errorf("failed to list session activity: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var activities []*SessionActivity
 	for rows.Next() {
@@ -125,7 +125,7 @@ func (db *DB) ListTaskActivity(taskID string) ([]*SessionActivity, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to list task activity: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var activities []*SessionActivity
 	for rows.Next() {

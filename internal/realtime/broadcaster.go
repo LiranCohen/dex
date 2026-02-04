@@ -62,7 +62,7 @@ func (b *Broadcaster) Publish(eventType string, payload map[string]any) {
 	}
 
 	if b.node != nil {
-		b.node.Publish(eventType, payload)
+		_ = b.node.Publish(eventType, payload)
 	}
 }
 

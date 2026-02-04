@@ -107,7 +107,7 @@ func (db *DB) listApprovals(whereClause string, args ...any) ([]*Approval, error
 	if err != nil {
 		return nil, fmt.Errorf("failed to list approvals: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var approvals []*Approval
 	for rows.Next() {

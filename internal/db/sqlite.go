@@ -105,7 +105,7 @@ func (db *DB) Migrate() error {
 		"ALTER TABLE tasks ADD COLUMN auto_start BOOLEAN DEFAULT FALSE",
 	}
 	for _, migration := range optionalMigrations {
-		db.Exec(migration) // Ignore errors - column may already exist
+		_, _ = db.Exec(migration) // Ignore errors - column may already exist
 	}
 
 	return nil

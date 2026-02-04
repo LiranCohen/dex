@@ -67,7 +67,7 @@ func (db *DB) GetQuestsByProjectID(projectID string) ([]*Quest, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to get quests: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var quests []*Quest
 	for rows.Next() {
@@ -101,7 +101,7 @@ func (db *DB) GetActiveQuests(projectID string) ([]*Quest, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to get active quests: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var quests []*Quest
 	for rows.Next() {
@@ -309,7 +309,7 @@ func (db *DB) GetQuestMessages(questID string) ([]*QuestMessage, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to get quest messages: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var messages []*QuestMessage
 	for rows.Next() {
@@ -361,7 +361,7 @@ func (db *DB) GetTasksByQuestID(questID string) ([]*Task, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to get tasks by quest: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var tasks []*Task
 	for rows.Next() {

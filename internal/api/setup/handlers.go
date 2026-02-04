@@ -100,7 +100,7 @@ func (h *Handler) HandleStatus(c echo.Context) error {
 
 	// If database step doesn't match actual state, update it
 	if progress.CurrentStep != actualStep && actualStep != "" {
-		h.db.AdvanceToStep(actualStep)
+		_ = h.db.AdvanceToStep(actualStep)
 		progress.CurrentStep = actualStep
 	}
 

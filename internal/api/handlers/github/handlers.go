@@ -327,7 +327,7 @@ func exchangeManifestCode(ctx context.Context, code string) (*github.AppConfig, 
 	if err != nil {
 		return nil, fmt.Errorf("failed to exchange code: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, _ := io.ReadAll(resp.Body)
 
@@ -361,6 +361,6 @@ func exchangeManifestCode(ctx context.Context, code string) (*github.AppConfig, 
 // generateShortID generates a short random ID for the app name.
 func generateShortID() string {
 	b := make([]byte, 4)
-	rand.Read(b)
+	_, _ = rand.Read(b)
 	return fmt.Sprintf("%x", b)
 }

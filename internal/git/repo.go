@@ -76,7 +76,7 @@ func (m *RepoManager) Create(opts CreateOptions) (string, error) {
 	cmd.Dir = repoPath
 	if output, err := cmd.CombinedOutput(); err != nil {
 		// Clean up on failure
-		os.RemoveAll(repoPath)
+		_ = os.RemoveAll(repoPath)
 		return "", fmt.Errorf("failed to initialize git repo: %w\n%s", err, output)
 	}
 
@@ -84,7 +84,7 @@ func (m *RepoManager) Create(opts CreateOptions) (string, error) {
 	if opts.InitialCommit {
 		if err := m.createInitialCommit(repoPath, safeName, opts.Description); err != nil {
 			// Clean up on failure
-			os.RemoveAll(repoPath)
+			_ = os.RemoveAll(repoPath)
 			return "", fmt.Errorf("failed to create initial commit: %w", err)
 		}
 	}

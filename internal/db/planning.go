@@ -197,7 +197,7 @@ func (db *DB) GetPlanningMessages(planningSessionID string) ([]*PlanningMessage,
 	if err != nil {
 		return nil, fmt.Errorf("failed to get planning messages: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var messages []*PlanningMessage
 	for rows.Next() {

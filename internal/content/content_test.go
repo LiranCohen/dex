@@ -30,7 +30,7 @@ func TestManager_WriteAndReadFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	mgr := NewManager(tmpDir)
 
@@ -58,7 +58,7 @@ func TestManager_FileExists(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	mgr := NewManager(tmpDir)
 
@@ -84,7 +84,7 @@ func TestManager_ReadNonexistentFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	mgr := NewManager(tmpDir)
 
@@ -271,7 +271,7 @@ func TestManager_TaskContent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	mgr := NewManager(tmpDir)
 	taskID := "task-test123"
@@ -327,7 +327,7 @@ func TestManager_QuestContent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	mgr := NewManager(tmpDir)
 	questID := "quest-test456"
@@ -435,7 +435,7 @@ func TestManager_AddQuestTask(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	mgr := NewManager(tmpDir)
 	questID := "quest-task-test"
@@ -474,7 +474,7 @@ func TestManager_CompleteQuestContent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	mgr := NewManager(tmpDir)
 	questID := "quest-complete-test"
@@ -520,7 +520,7 @@ func TestManager_WriteQuestTasksList(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	mgr := NewManager(tmpDir)
 	questID := "quest-tasks-list"
@@ -561,7 +561,7 @@ func TestManager_AddQuestTaskWithoutInit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	mgr := NewManager(tmpDir)
 	questID := "quest-no-init"

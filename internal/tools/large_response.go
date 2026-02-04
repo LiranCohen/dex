@@ -114,7 +114,7 @@ func CleanupOldTempResponses(maxAge time.Duration) error {
 
 		if info.ModTime().Before(cutoff) {
 			filePath := filepath.Join(tempDir, entry.Name())
-			os.Remove(filePath) // Ignore errors for individual files
+			_ = os.Remove(filePath) // Ignore errors for individual files
 		}
 	}
 

@@ -76,7 +76,7 @@ func TestGitHubPushE2E(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	repoURL := fmt.Sprintf("https://x-access-token:%s@github.com/%s/%s.git", token, owner, repo)
 	cloneCmd := exec.CommandContext(ctx, "git", "clone", "--depth=1", repoURL, tmpDir)

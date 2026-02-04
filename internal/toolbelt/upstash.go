@@ -104,7 +104,7 @@ type upstashErrorResponse struct {
 
 // parseUpstashResponse reads and unmarshals an Upstash API response
 func parseUpstashResponse[T any](resp *http.Response) (*T, error) {
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -433,7 +433,7 @@ func (c *UpstashClient) DeleteQStashQueue(ctx context.Context, name string) erro
 	if err != nil {
 		return fmt.Errorf("failed to delete qstash queue: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode >= 400 {
 		body, _ := io.ReadAll(resp.Body)
@@ -451,7 +451,7 @@ func (c *UpstashClient) PauseQStashQueue(ctx context.Context, name string) error
 	if err != nil {
 		return fmt.Errorf("failed to pause qstash queue: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode >= 400 {
 		body, _ := io.ReadAll(resp.Body)
@@ -469,7 +469,7 @@ func (c *UpstashClient) ResumeQStashQueue(ctx context.Context, name string) erro
 	if err != nil {
 		return fmt.Errorf("failed to resume qstash queue: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode >= 400 {
 		body, _ := io.ReadAll(resp.Body)

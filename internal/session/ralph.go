@@ -250,7 +250,7 @@ func (r *RalphLoop) SetModel(model string) {
 	}
 	// Persist rates to database
 	if r.db != nil {
-		r.db.SetSessionRates(r.session.ID, r.session.InputRate, r.session.OutputRate)
+		_ = r.db.SetSessionRates(r.session.ID, r.session.InputRate, r.session.OutputRate)
 	}
 }
 
@@ -633,7 +633,7 @@ func (r *RalphLoop) Run(ctx context.Context) error {
 
 		// 2.5. Check loop health
 		if shouldTerminate, reason := r.health.ShouldTerminate(); shouldTerminate {
-			r.activity.RecordLoopHealth(r.session.IterationCount, &LoopHealthData{
+			_ = r.activity.RecordLoopHealth(r.session.IterationCount, &LoopHealthData{
 				Status:              string(r.health.Status()),
 				ConsecutiveFailures: r.health.ConsecutiveFailures,
 				QualityGateAttempts: r.health.QualityGateAttempts,
@@ -649,7 +649,7 @@ func (r *RalphLoop) Run(ctx context.Context) error {
 
 		// Record health status if changed
 		if r.health.StatusChanged() {
-			r.activity.RecordLoopHealth(r.session.IterationCount, &LoopHealthData{
+			_ = r.activity.RecordLoopHealth(r.session.IterationCount, &LoopHealthData{
 				Status:              string(r.health.Status()),
 				ConsecutiveFailures: r.health.ConsecutiveFailures,
 				QualityGateAttempts: r.health.QualityGateAttempts,
@@ -1471,7 +1471,7 @@ func (r *RalphLoop) processChecklistSignals(response string) {
 				fmt.Printf("RalphLoop: warning - failed to update checklist item %s: %v\n", itemID, err)
 			} else {
 				if r.activity != nil {
-					r.activity.RecordChecklistUpdate(r.session.IterationCount, itemID, db.ChecklistItemStatusDone, "")
+					_ = r.activity.RecordChecklistUpdate(r.session.IterationCount, itemID, db.ChecklistItemStatusDone, "")
 				}
 				fmt.Printf("RalphLoop: marked checklist item %s as done\n", itemID)
 				if r.manager != nil {
@@ -1500,7 +1500,7 @@ func (r *RalphLoop) processChecklistSignals(response string) {
 				fmt.Printf("RalphLoop: warning - failed to update checklist item %s: %v\n", itemID, err)
 			} else {
 				if r.activity != nil {
-					r.activity.RecordChecklistUpdate(r.session.IterationCount, itemID, db.ChecklistItemStatusFailed, reason)
+					_ = r.activity.RecordChecklistUpdate(r.session.IterationCount, itemID, db.ChecklistItemStatusFailed, reason)
 				}
 				fmt.Printf("RalphLoop: marked checklist item %s as failed: %s\n", itemID, reason)
 				if r.manager != nil {
@@ -1673,7 +1673,7 @@ func (r *RalphLoop) processMemorySignals(response string) {
 
 		// Record memory creation in activity log
 		if r.activity != nil {
-			r.activity.RecordMemoryCreated(r.session.IterationCount, &MemoryCreatedData{
+			_ = r.activity.RecordMemoryCreated(r.session.IterationCount, &MemoryCreatedData{
 				MemoryID: memory.ID,
 				Type:     string(memory.Type),
 				Title:    memory.Title,
