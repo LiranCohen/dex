@@ -4690,3 +4690,135 @@
 .app-onboarding-workspace-btn {
   width: 100%;
 }
+
+/* Onboarding content sections */
+.app-onboarding-content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  margin-bottom: var(--space-6);
+}
+
+/* Onboarding info box */
+.app-onboarding-box {
+  background-color: var(--bg-tertiary);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+}
+
+.app-onboarding-box--warning {
+  background-color: rgba(242, 138, 15, 0.15);
+  border: 1px solid var(--accent-warm);
+}
+
+.app-onboarding-box__title {
+  font-weight: var(--font-medium);
+  color: var(--text-primary);
+  margin-bottom: var(--space-2);
+}
+
+.app-onboarding-box__text {
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+
+.app-onboarding-box__text--warning {
+  color: var(--accent-warm);
+}
+
+/* Onboarding list */
+.app-onboarding-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+
+.app-onboarding-list__item {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+
+.app-onboarding-list__marker {
+  color: var(--accent-primary);
+  margin-top: 2px;
+  flex-shrink: 0;
+}
+
+.app-onboarding-list__marker--success {
+  color: var(--status-complete);
+}
+
+/* Onboarding button */
+.app-onboarding-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  background-color: var(--accent-primary);
+  color: white;
+  font-weight: var(--font-medium);
+  border: none;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: background-color var(--transition-fast);
+}
+
+.app-onboarding-btn:hover:not(:disabled) {
+  background-color: var(--accent-primary-hover);
+}
+
+.app-onboarding-btn:disabled {
+  background-color: var(--bg-tertiary);
+  cursor: not-allowed;
+}
+
+.app-onboarding-btn__spinner {
+  width: 1.25rem;
+  height: 1.25rem;
+  border: 2px solid transparent;
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+.app-onboarding-btn__icon {
+  width: 1.25rem;
+  height: 1.25rem;
+}
+
+/* Onboarding form elements */
+.app-onboarding-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.app-onboarding-input {
+  width: 100%;
+  padding: var(--space-3);
+  background-color: var(--bg-tertiary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  font-size: var(--text-base);
+}
+
+.app-onboarding-input:focus {
+  outline: none;
+  border-color: var(--accent-primary);
+}
+
+.app-onboarding-input::placeholder {
+  color: var(--text-tertiary);
+}
+
+.app-onboarding-hint {
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+  text-align: center;
+}

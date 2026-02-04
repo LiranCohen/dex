@@ -114,35 +114,35 @@ export function PasskeyStep({ onComplete, error, setError }: PasskeyStepProps) {
       description="Passkeys provide secure, passwordless authentication using your device's biometrics."
       error={error}
     >
-      <div className="space-y-4 mb-6">
-        <div className="bg-gray-700/50 rounded-lg p-4">
-          <h3 className="font-medium text-gray-200 mb-2">What is a passkey?</h3>
-          <p className="text-gray-400 text-sm">
+      <div className="app-onboarding-content">
+        <div className="app-onboarding-box">
+          <h3 className="app-onboarding-box__title">What is a passkey?</h3>
+          <p className="app-onboarding-box__text">
             A passkey is a modern, secure alternative to passwords. It uses your device's
             biometrics (Face ID, Touch ID, or Windows Hello) to authenticate you.
           </p>
         </div>
 
         {!isMobile && (
-          <div className="bg-yellow-900/30 border border-yellow-600 rounded-lg p-4">
-            <p className="text-yellow-300 text-sm">
+          <div className="app-onboarding-box app-onboarding-box--warning">
+            <p className="app-onboarding-box__text app-onboarding-box__text--warning">
               <strong>Tip:</strong> For the best experience, register your passkey on a mobile device.
               You can then use it to authenticate from any device.
             </p>
           </div>
         )}
 
-        <ul className="space-y-2 text-sm text-gray-400">
-          <li className="flex items-start gap-2">
-            <span className="text-green-400 mt-0.5">&#x2713;</span>
+        <ul className="app-onboarding-list">
+          <li className="app-onboarding-list__item">
+            <span className="app-onboarding-list__marker app-onboarding-list__marker--success">&#x2713;</span>
             <span>Secure - your private key never leaves your device</span>
           </li>
-          <li className="flex items-start gap-2">
-            <span className="text-green-400 mt-0.5">&#x2713;</span>
+          <li className="app-onboarding-list__item">
+            <span className="app-onboarding-list__marker app-onboarding-list__marker--success">&#x2713;</span>
             <span>Fast - authenticate instantly with biometrics</span>
           </li>
-          <li className="flex items-start gap-2">
-            <span className="text-green-400 mt-0.5">&#x2713;</span>
+          <li className="app-onboarding-list__item">
+            <span className="app-onboarding-list__marker app-onboarding-list__marker--success">&#x2713;</span>
             <span>Phishing-resistant - bound to this domain only</span>
           </li>
         </ul>
@@ -151,16 +151,16 @@ export function PasskeyStep({ onComplete, error, setError }: PasskeyStepProps) {
       <button
         onClick={handleRegisterPasskey}
         disabled={isLoading}
-        className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-800 disabled:cursor-not-allowed text-white font-medium py-3 px-4 rounded-lg transition-colors flex items-center justify-center gap-2"
+        className="app-onboarding-btn"
       >
         {isLoading ? (
           <>
-            <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white" />
+            <div className="app-onboarding-btn__spinner" />
             <span>Registering...</span>
           </>
         ) : (
           <>
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="app-onboarding-btn__icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path
                 strokeLinecap="round"
                 strokeLinejoin="round"
