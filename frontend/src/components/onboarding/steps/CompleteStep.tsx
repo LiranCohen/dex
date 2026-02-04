@@ -75,18 +75,18 @@ export function CompleteStep({ onComplete, workspaceUrl, error }: CompleteStepPr
         </div>
 
         {workspaceUrl && (
-          <div className="bg-blue-900/30 border border-blue-600 rounded-lg p-4">
-            <p className="text-blue-300 text-sm mb-2">
+          <div className="app-onboarding-workspace">
+            <p className="app-onboarding-workspace-label">
               <strong>Your workspace:</strong>
             </p>
-            <a
-              href={workspaceUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-blue-400 hover:text-blue-300 text-sm break-all"
+            <code className="app-onboarding-workspace-url">{workspaceUrl}</code>
+            <button
+              type="button"
+              className="app-btn app-btn--primary app-onboarding-workspace-btn"
+              onClick={() => window.location.href = workspaceUrl}
             >
-              {workspaceUrl}
-            </a>
+              Go to Workspace
+            </button>
           </div>
         )}
       </div>

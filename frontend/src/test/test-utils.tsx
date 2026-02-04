@@ -1,7 +1,7 @@
 import { render, type RenderOptions } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, type MemoryRouterProps } from 'react-router-dom';
-import { ToastProvider } from '../v2/components/Toast';
+import { ToastProvider } from '../app/components/Toast';
 import type { ReactElement, ReactNode } from 'react';
 
 // Create a fresh query client for each test

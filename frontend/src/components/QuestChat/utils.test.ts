@@ -179,7 +179,7 @@ After text.`;
     const content = `Some text. QUEST_READY:{"drafts":["d1","d2"]} More text.`;
 
     const formatted = formatMessageContent(content);
-    expect(formatted).toBe('Some text.  More text.');
+    expect(formatted).toBe('Some text. More text.');
     expect(formatted).not.toContain('QUEST_READY');
   });
 
@@ -231,7 +231,7 @@ Text after.`;
 
     const stripped = stripSignals(content);
     expect(stripped).not.toContain('QUEST_READY');
-    expect(stripped).toBe('Text.  End.');
+    expect(stripped).toBe('Text. End.');
   });
 
   it('removes all signal types', () => {
@@ -242,7 +242,7 @@ QUEST_READY:{"drafts":[]}
 End.`;
 
     const stripped = stripSignals(content);
-    expect(stripped).toBe('Start.\n\nEnd.');
+    expect(stripped).toBe('Start.\nEnd.');
   });
 
   it('cleans up excessive newlines', () => {

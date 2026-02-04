@@ -186,6 +186,8 @@ export interface ActivityResponse {
   summary: {
     total_iterations: number;
     total_tokens: number;
+    input_tokens?: number;
+    output_tokens?: number;
     total_sessions?: number;
     completion_reason?: string;
   };

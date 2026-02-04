@@ -8,6 +8,7 @@ import { GitHubAppStep } from './steps/GitHubAppStep';
 import { GitHubInstallStep } from './steps/GitHubInstallStep';
 import { AnthropicStep } from './steps/AnthropicStep';
 import { CompleteStep } from './steps/CompleteStep';
+import '../../app/styles/app.css';
 
 interface OnboardingFlowProps {
   onComplete: () => void;
@@ -60,10 +61,10 @@ export function OnboardingFlow({ onComplete }: OnboardingFlowProps) {
   // Render loading state
   if (isLoading && !status) {
     return (
-      <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center p-4">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto mb-4" />
-          <p className="text-gray-400">Checking setup status...</p>
+      <div className="app-root app-onboarding-root">
+        <div className="app-onboarding-loading">
+          <div className="app-spinner" />
+          <p className="app-onboarding-loading-text">Checking setup status...</p>
         </div>
       </div>
     );
@@ -148,7 +149,7 @@ export function OnboardingFlow({ onComplete }: OnboardingFlowProps) {
   };
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white flex flex-col items-center justify-center p-4">
+    <div className="app-root app-onboarding-root">
       {/* Step indicator */}
       {status?.steps && status.steps.length > 0 && (
         <StepIndicator steps={status.steps} currentStep={currentStep} />
@@ -158,7 +159,7 @@ export function OnboardingFlow({ onComplete }: OnboardingFlowProps) {
       {renderStep()}
 
       {/* Footer */}
-      <div className="mt-8 text-center text-sm text-gray-500">
+      <div className="app-onboarding-footer">
         <p>Dex - AI Development Assistant</p>
       </div>
     </div>
