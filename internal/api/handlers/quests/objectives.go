@@ -7,9 +7,9 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/lirancohen/dex/internal/api/core"
-	"github.com/lirancohen/dex/internal/api/websocket"
 	"github.com/lirancohen/dex/internal/db"
 	"github.com/lirancohen/dex/internal/quest"
+	"github.com/lirancohen/dex/internal/realtime"
 	"github.com/lirancohen/dex/internal/security"
 )
 
@@ -121,13 +121,9 @@ func (h *ObjectivesHandler) HandleCreate(c echo.Context) error {
 	acceptMessage := fmt.Sprintf("✓ Accepted objective: **%s**", sanitizedTitle)
 	if msg, err := h.deps.DB.CreateQuestMessage(questID, "user", acceptMessage); err != nil {
 		fmt.Printf("warning: failed to add accept message to quest: %v\n", err)
-	} else if h.deps.Hub != nil {
-		h.deps.Hub.Broadcast(websocket.Message{
-			Type: "quest.message",
-			Payload: map[string]any{
-				"quest_id": questID,
-				"message":  msg,
-			},
+	} else if h.deps.Broadcaster != nil {
+		h.deps.Broadcaster.PublishQuestEvent(realtime.EventQuestMessage, questID, map[string]any{
+			"message": msg,
 		})
 	}
 
@@ -300,13 +296,9 @@ func (h *ObjectivesHandler) HandleCreateBatch(c echo.Context) error {
 	acceptMessage := fmt.Sprintf("✓ Accepted %d objectives in batch", len(createdTasks))
 	if msg, err := h.deps.DB.CreateQuestMessage(questID, "user", acceptMessage); err != nil {
 		fmt.Printf("warning: failed to add accept message to quest: %v\n", err)
-	} else if h.deps.Hub != nil {
-		h.deps.Hub.Broadcast(websocket.Message{
-			Type: "quest.message",
-			Payload: map[string]any{
-				"quest_id": questID,
-				"message":  msg,
-			},
+	} else if h.deps.Broadcaster != nil {
+		h.deps.Broadcaster.PublishQuestEvent(realtime.EventQuestMessage, questID, map[string]any{
+			"message": msg,
 		})
 	}
 

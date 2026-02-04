@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/lirancohen/dex/internal/api/websocket"
 	"github.com/lirancohen/dex/internal/db"
+	"github.com/lirancohen/dex/internal/realtime"
 )
 
 // startTaskResult contains the result of starting a task
@@ -186,14 +186,9 @@ func (s *Server) createAndStartSession(ctx context.Context, taskID string, task 
 
 // broadcastTaskUpdated sends a task.updated WebSocket event
 func (s *Server) broadcastTaskUpdated(taskID, status string) {
-	if s.hub != nil {
-		s.hub.Broadcast(websocket.Message{
-			Type:   websocket.EventTaskUpdated,
-			TaskID: taskID,
-			Payload: map[string]any{
-				"task_id": taskID,
-				"status":  status,
-			},
+	if s.broadcaster != nil {
+		s.broadcaster.PublishTaskEvent(realtime.EventTaskUpdated, taskID, map[string]any{
+			"status": status,
 		})
 	}
 }
@@ -246,15 +241,11 @@ func (s *Server) handleTaskUnblocking(ctx context.Context, completedTaskID strin
 
 	for _, task := range tasksToAutoStart {
 		// Broadcast task unblocked event
-		if s.hub != nil {
-			s.hub.Broadcast(websocket.Message{
-				Type: "task.unblocked",
-				Payload: map[string]any{
-					"task_id":      task.ID,
-					"unblocked_by": completedTaskID,
-					"quest_id":     task.QuestID.String,
-					"title":        task.Title,
-				},
+		if s.broadcaster != nil {
+			s.broadcaster.PublishTaskEvent(realtime.EventTaskUnblocked, task.ID, map[string]any{
+				"unblocked_by": completedTaskID,
+				"quest_id":     task.QuestID.String,
+				"title":        task.Title,
 			})
 		}
 
@@ -266,13 +257,9 @@ func (s *Server) handleTaskUnblocking(ctx context.Context, completedTaskID strin
 			startResult, err := s.startTaskWithInheritance(context.Background(), taskID, inheritedWorktree, handoff)
 			if err != nil {
 				fmt.Printf("handleTaskUnblocking: auto-start failed for task %s: %v\n", taskID, err)
-				if s.hub != nil {
-					s.hub.Broadcast(websocket.Message{
-						Type: "task.auto_start_failed",
-						Payload: map[string]any{
-							"task_id": taskID,
-							"error":   err.Error(),
-						},
+				if s.broadcaster != nil {
+					s.broadcaster.PublishTaskEvent(realtime.EventTaskAutoStartFailed, taskID, map[string]any{
+						"error": err.Error(),
 					})
 				}
 				return
@@ -281,16 +268,12 @@ func (s *Server) handleTaskUnblocking(ctx context.Context, completedTaskID strin
 			fmt.Printf("handleTaskUnblocking: auto-started task %s (session %s) with inherited worktree from %s\n",
 				taskID, startResult.SessionID, completedTaskID)
 
-			if s.hub != nil {
-				s.hub.Broadcast(websocket.Message{
-					Type: "task.auto_started",
-					Payload: map[string]any{
-						"task_id":           taskID,
-						"session_id":        startResult.SessionID,
-						"worktree_path":     startResult.WorktreePath,
-						"inherited_from":    completedTaskID,
-						"predecessor_title": completedTask.Title,
-					},
+			if s.broadcaster != nil {
+				s.broadcaster.PublishTaskEvent(realtime.EventTaskAutoStarted, taskID, map[string]any{
+					"session_id":        startResult.SessionID,
+					"worktree_path":     startResult.WorktreePath,
+					"inherited_from":    completedTaskID,
+					"predecessor_title": completedTask.Title,
 				})
 			}
 		}()

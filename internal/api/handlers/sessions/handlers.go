@@ -7,8 +7,8 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/lirancohen/dex/internal/api/core"
-	"github.com/lirancohen/dex/internal/api/websocket"
 	"github.com/lirancohen/dex/internal/db"
+	"github.com/lirancohen/dex/internal/realtime"
 	"github.com/lirancohen/dex/internal/session"
 )
 
@@ -91,13 +91,11 @@ func (h *Handler) HandleKill(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 
-	h.deps.Hub.Broadcast(websocket.Message{
-		Type: "session.killed",
-		Payload: map[string]any{
+	if h.deps.Broadcaster != nil {
+		h.deps.Broadcaster.PublishTaskEvent(realtime.EventSessionKilled, sess.TaskID, map[string]any{
 			"session_id": sessionID,
-			"task_id":    sess.TaskID,
-		},
-	})
+		})
+	}
 
 	return c.JSON(http.StatusOK, map[string]any{
 		"message":    "session killed",
@@ -124,13 +122,11 @@ func (h *Handler) HandlePauseTask(c echo.Context) error {
 		fmt.Printf("warning: failed to update task status to paused: %v\n", err)
 	}
 
-	h.deps.Hub.Broadcast(websocket.Message{
-		Type: "task.paused",
-		Payload: map[string]any{
-			"task_id":    taskID,
+	if h.deps.Broadcaster != nil {
+		h.deps.Broadcaster.PublishTaskEvent(realtime.EventTaskPaused, taskID, map[string]any{
 			"session_id": sess.ID,
-		},
-	})
+		})
+	}
 
 	return c.JSON(http.StatusOK, map[string]any{
 		"message": "task paused",
@@ -196,13 +192,11 @@ func (h *Handler) HandleResumeTask(c echo.Context) error {
 		fmt.Printf("warning: failed to update task status to running: %v\n", err)
 	}
 
-	h.deps.Hub.Broadcast(websocket.Message{
-		Type: "task.resumed",
-		Payload: map[string]any{
-			"task_id":    taskID,
+	if h.deps.Broadcaster != nil {
+		h.deps.Broadcaster.PublishTaskEvent(realtime.EventTaskResumed, taskID, map[string]any{
 			"session_id": sess.ID,
-		},
-	})
+		})
+	}
 
 	return c.JSON(http.StatusOK, map[string]any{
 		"message": "task resumed",
@@ -228,13 +222,11 @@ func (h *Handler) HandleCancelTask(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 
-	h.deps.Hub.Broadcast(websocket.Message{
-		Type: "task.cancelled",
-		Payload: map[string]any{
-			"task_id":    taskID,
+	if h.deps.Broadcaster != nil {
+		h.deps.Broadcaster.PublishTaskEvent(realtime.EventTaskCancelled, taskID, map[string]any{
 			"session_id": sess.ID,
-		},
-	})
+		})
+	}
 
 	return c.JSON(http.StatusOK, map[string]any{
 		"message": "task cancelled",

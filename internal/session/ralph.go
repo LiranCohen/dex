@@ -14,8 +14,8 @@ import (
 
 	gogithub "github.com/google/go-github/v68/github"
 	"github.com/google/uuid"
-	"github.com/lirancohen/dex/internal/api/websocket"
 	"github.com/lirancohen/dex/internal/db"
+	"github.com/lirancohen/dex/internal/realtime"
 	"github.com/lirancohen/dex/internal/git"
 	"github.com/lirancohen/dex/internal/github"
 	"github.com/lirancohen/dex/internal/hints"
@@ -45,11 +45,11 @@ var (
 
 // RalphLoop orchestrates a session's execution cycle
 type RalphLoop struct {
-	manager  *Manager
-	session  *ActiveSession
-	client   *toolbelt.AnthropicClient
-	hub      *websocket.Hub
-	db       *db.DB
+	manager     *Manager
+	session     *ActiveSession
+	client      *toolbelt.AnthropicClient
+	broadcaster *realtime.Broadcaster
+	db          *db.DB
 
 	// Conversation history for multi-turn chat
 	messages []toolbelt.AnthropicMessage
@@ -93,12 +93,12 @@ type RalphLoop struct {
 }
 
 // NewRalphLoop creates a new RalphLoop for the given session
-func NewRalphLoop(manager *Manager, session *ActiveSession, client *toolbelt.AnthropicClient, hub *websocket.Hub, database *db.DB) *RalphLoop {
+func NewRalphLoop(manager *Manager, session *ActiveSession, client *toolbelt.AnthropicClient, broadcaster *realtime.Broadcaster, database *db.DB) *RalphLoop {
 	return &RalphLoop{
 		manager:            manager,
 		session:            session,
 		client:             client,
-		hub:                hub,
+		broadcaster:        broadcaster,
 		db:                 database,
 		messages:           make([]toolbelt.AnthropicMessage, 0),
 		checkpointInterval: 5,
@@ -470,7 +470,7 @@ Please either:
 		r.postIssueComment(ctx, comment)
 	}
 
-	r.broadcastEvent(websocket.EventSessionCompleted, map[string]any{
+	r.broadcastEvent(realtime.EventSessionCompleted, map[string]any{
 		"session_id":   r.session.ID,
 		"outcome":      outcome,
 		"iterations":   r.session.IterationCount,
@@ -498,7 +498,7 @@ func (r *RalphLoop) handleEventTransition(ctx context.Context, event *Event) boo
 
 	if result.IsTerminal {
 		r.activity.Debug(r.session.IterationCount, fmt.Sprintf("Terminal event: %s", event.Topic))
-		r.broadcastEvent(websocket.EventSessionCompleted, map[string]any{
+		r.broadcastEvent(realtime.EventSessionCompleted, map[string]any{
 			"session_id": r.session.ID,
 			"outcome":    "event_complete",
 			"event":      event.Topic,
@@ -526,7 +526,7 @@ func (r *RalphLoop) handleEventTransition(ctx context.Context, event *Event) boo
 		// Store transition for manager to handle
 		r.session.Hat = nextHat
 		r.activity.SetHat(nextHat)
-		r.broadcastEvent(websocket.EventSessionCompleted, map[string]any{
+		r.broadcastEvent(realtime.EventSessionCompleted, map[string]any{
 			"session_id": r.session.ID,
 			"outcome":    "hat_transition",
 			"next_hat":   nextHat,
@@ -586,7 +586,7 @@ func (r *RalphLoop) Run(ctx context.Context) error {
 	fmt.Printf("RalphLoop.Run: prompt built successfully (%d chars)\n", len(systemPrompt))
 
 	// Broadcast session started event
-	r.broadcastEvent(websocket.EventSessionStarted, map[string]any{
+	r.broadcastEvent(realtime.EventSessionStarted, map[string]any{
 		"session_id":    r.session.ID,
 		"hat":           r.session.Hat,
 		"worktree_path": r.session.WorktreePath,
@@ -624,7 +624,7 @@ func (r *RalphLoop) Run(ctx context.Context) error {
 
 		// 2. Check budget limits
 		if err := r.checkBudget(); err != nil {
-			r.broadcastEvent(websocket.EventApprovalRequired, map[string]any{
+			r.broadcastEvent(realtime.EventApprovalRequired, map[string]any{
 				"session_id": r.session.ID,
 				"reason":     err.Error(),
 			})
@@ -639,7 +639,7 @@ func (r *RalphLoop) Run(ctx context.Context) error {
 				QualityGateAttempts: r.health.QualityGateAttempts,
 				TotalFailures:       r.health.TotalFailures,
 			})
-			r.broadcastEvent(websocket.EventSessionCompleted, map[string]any{
+			r.broadcastEvent(realtime.EventSessionCompleted, map[string]any{
 				"session_id": r.session.ID,
 				"outcome":    string(reason),
 				"iterations": r.session.IterationCount,
@@ -706,7 +706,7 @@ func (r *RalphLoop) Run(ctx context.Context) error {
 			contextStatus := r.contextGuard.GetStatus(r.messages, systemPrompt)
 			iterationPayload["context"] = contextStatus
 		}
-		r.broadcastEvent(websocket.EventSessionIteration, iterationPayload)
+		r.broadcastEvent(realtime.EventSessionIteration, iterationPayload)
 
 		// 5. Handle tool use if requested
 		if response.HasToolUse() {
@@ -1164,17 +1164,15 @@ func (r *RalphLoop) ClearFailureContext() {
 	r.recoveryHint = ""
 }
 
-// broadcastEvent sends an event through the WebSocket hub
+// broadcastEvent sends an event through the realtime broadcaster
 func (r *RalphLoop) broadcastEvent(eventType string, payload map[string]any) {
-	if r.hub == nil {
+	if r.broadcaster == nil {
 		return
 	}
 
-	r.hub.Broadcast(websocket.Message{
-		Type:    eventType,
-		TaskID:  r.session.TaskID,
-		Payload: payload,
-	})
+	// Add task_id to payload for proper channel routing
+	payload["task_id"] = r.session.TaskID
+	r.broadcaster.Publish(eventType, payload)
 }
 
 // getEnvFloat reads a float64 from an environment variable, returning defaultVal if not set or invalid

@@ -7,7 +7,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/lirancohen/dex/internal/api/core"
-	"github.com/lirancohen/dex/internal/api/websocket"
+	"github.com/lirancohen/dex/internal/realtime"
 )
 
 // Handler handles approval-related HTTP requests.
@@ -117,13 +117,12 @@ func (h *Handler) HandleApprove(c echo.Context) error {
 	}
 
 	// Broadcast WebSocket event
-	h.deps.Hub.Broadcast(websocket.Message{
-		Type: "approval.resolved",
-		Payload: map[string]any{
+	if h.deps.Broadcaster != nil {
+		h.deps.Broadcaster.Publish(realtime.EventApprovalResolved, map[string]any{
 			"id":     id,
 			"status": "approved",
-		},
-	})
+		})
+	}
 
 	return c.JSON(http.StatusOK, map[string]any{
 		"message": "approval approved",
@@ -147,13 +146,12 @@ func (h *Handler) HandleReject(c echo.Context) error {
 	}
 
 	// Broadcast WebSocket event
-	h.deps.Hub.Broadcast(websocket.Message{
-		Type: "approval.resolved",
-		Payload: map[string]any{
+	if h.deps.Broadcaster != nil {
+		h.deps.Broadcaster.Publish(realtime.EventApprovalResolved, map[string]any{
 			"id":     id,
 			"status": "rejected",
-		},
-	})
+		})
+	}
 
 	return c.JSON(http.StatusOK, map[string]any{
 		"message": "approval rejected",

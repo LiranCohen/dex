@@ -14,8 +14,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/lirancohen/dex/internal/api/websocket"
 	"github.com/lirancohen/dex/internal/db"
+	"github.com/lirancohen/dex/internal/realtime"
 	"github.com/lirancohen/dex/internal/session"
 	"github.com/lirancohen/dex/internal/toolbelt"
 	"github.com/lirancohen/dex/internal/tools"
@@ -71,18 +71,18 @@ type GitHubClientFetcher func(ctx context.Context, login string) (*toolbelt.GitH
 type Handler struct {
 	db             *db.DB
 	client         *toolbelt.AnthropicClient
-	github         *toolbelt.GitHubClient  // Static client (PAT-based)
-	githubFetcher  GitHubClientFetcher     // Dynamic client fetcher (GitHub App)
-	hub            *websocket.Hub
+	github         *toolbelt.GitHubClient      // Static client (PAT-based)
+	githubFetcher  GitHubClientFetcher         // Dynamic client fetcher (GitHub App)
+	broadcaster    *realtime.Broadcaster       // Realtime event broadcaster
 	promptLoader   *session.PromptLoader
-	githubUsername string        // cached GitHub username
-	toolSet        *tools.Set    // Read-only tools for Quest exploration
+	githubUsername string                      // cached GitHub username
+	toolSet        *tools.Set                  // Read-only tools for Quest exploration
 	readOnlyTools  []toolbelt.AnthropicTool
-	baseDir        string        // Base Dex directory (e.g., /opt/dex) for computing repo paths
+	baseDir        string                      // Base Dex directory (e.g., /opt/dex) for computing repo paths
 }
 
 // NewHandler creates a new Quest handler
-func NewHandler(database *db.DB, client *toolbelt.AnthropicClient, hub *websocket.Hub) *Handler {
+func NewHandler(database *db.DB, client *toolbelt.AnthropicClient, broadcaster *realtime.Broadcaster) *Handler {
 	// Build read-only tools for Quest exploration
 	toolSet := tools.ReadOnlyTools()
 	readOnlyTools := make([]toolbelt.AnthropicTool, 0, len(toolSet.All())+len(QuestTools()))
@@ -99,7 +99,7 @@ func NewHandler(database *db.DB, client *toolbelt.AnthropicClient, hub *websocke
 	return &Handler{
 		db:            database,
 		client:        client,
-		hub:           hub,
+		broadcaster:   broadcaster,
 		toolSet:       toolSet,
 		readOnlyTools: readOnlyTools,
 	}
@@ -255,14 +255,10 @@ func (h *Handler) ProcessMessage(ctx context.Context, questID, content string) (
 		// Streaming callback to broadcast content deltas in real-time
 		onDelta := func(delta string) {
 			streamedContent.WriteString(delta)
-			if h.hub != nil {
-				h.hub.Broadcast(websocket.Message{
-					Type: "quest.content_delta",
-					Payload: map[string]any{
-						"quest_id": questID,
-						"delta":    delta,
-						"content":  streamedContent.String(), // Full content so far
-					},
+			if h.broadcaster != nil {
+				h.broadcaster.PublishQuestEvent(realtime.EventQuestContentDelta, questID, map[string]any{
+					"delta":   delta,
+					"content": streamedContent.String(), // Full content so far
 				})
 			}
 		}
@@ -293,15 +289,11 @@ func (h *Handler) ProcessMessage(ctx context.Context, questID, content string) (
 			var results []toolbelt.ContentBlock
 			for _, block := range toolBlocks {
 				// Broadcast tool call start
-				if h.hub != nil {
-					h.hub.Broadcast(websocket.Message{
-						Type: "quest.tool_call",
-						Payload: map[string]any{
-							"quest_id":  questID,
-							"call_id":   block.ID,
-							"tool_name": block.Name,
-							"status":    "running",
-						},
+				if h.broadcaster != nil {
+					h.broadcaster.PublishQuestEvent(realtime.EventQuestToolCall, questID, map[string]any{
+						"call_id":   block.ID,
+						"tool_name": block.Name,
+						"status":    "running",
 					})
 				}
 
@@ -326,17 +318,13 @@ func (h *Handler) ProcessMessage(ctx context.Context, questID, content string) (
 				allToolCalls = append(allToolCalls, toolCall)
 
 				// Broadcast tool result
-				if h.hub != nil {
-					h.hub.Broadcast(websocket.Message{
-						Type: "quest.tool_result",
-						Payload: map[string]any{
-							"quest_id":    questID,
-							"call_id":     block.ID,
-							"tool_name":   block.Name,
-							"output":      truncateForBroadcast(result.Output, 1000),
-							"is_error":    result.IsError,
-							"duration_ms": durationMs,
-						},
+				if h.broadcaster != nil {
+					h.broadcaster.PublishQuestEvent(realtime.EventQuestToolResult, questID, map[string]any{
+						"call_id":     block.ID,
+						"tool_name":   block.Name,
+						"output":      truncateForBroadcast(result.Output, 1000),
+						"is_error":    result.IsError,
+						"duration_ms": durationMs,
 					})
 				}
 
@@ -372,53 +360,37 @@ func (h *Handler) ProcessMessage(ctx context.Context, questID, content string) (
 		questReady := h.parseQuestReady(assistantContent)
 
 		// Broadcast the assistant message
-		if h.hub != nil {
-			h.hub.Broadcast(websocket.Message{
-				Type: "quest.message",
-				Payload: map[string]any{
-					"quest_id": questID,
-					"message": map[string]any{
-						"id":         assistantMsg.ID,
-						"quest_id":   assistantMsg.QuestID,
-						"role":       assistantMsg.Role,
-						"content":    assistantMsg.Content,
-						"tool_calls": allToolCalls,
-						"created_at": assistantMsg.CreatedAt,
-					},
+		if h.broadcaster != nil {
+			h.broadcaster.PublishQuestEvent(realtime.EventQuestMessage, questID, map[string]any{
+				"message": map[string]any{
+					"id":         assistantMsg.ID,
+					"quest_id":   assistantMsg.QuestID,
+					"role":       assistantMsg.Role,
+					"content":    assistantMsg.Content,
+					"tool_calls": allToolCalls,
+					"created_at": assistantMsg.CreatedAt,
 				},
 			})
 
 			// Broadcast any draft objectives
 			for _, draft := range drafts {
-				h.hub.Broadcast(websocket.Message{
-					Type: "quest.objective_draft",
-					Payload: map[string]any{
-						"quest_id": questID,
-						"draft":    draft,
-					},
+				h.broadcaster.PublishQuestEvent(realtime.EventQuestObjectiveDraft, questID, map[string]any{
+					"draft": draft,
 				})
 			}
 
 			// Broadcast any questions
 			for _, q := range questions {
-				h.hub.Broadcast(websocket.Message{
-					Type: "quest.question",
-					Payload: map[string]any{
-						"quest_id": questID,
-						"question": q,
-					},
+				h.broadcaster.PublishQuestEvent(realtime.EventQuestQuestion, questID, map[string]any{
+					"question": q,
 				})
 			}
 
 			// Broadcast quest ready signal
 			if questReady != nil {
-				h.hub.Broadcast(websocket.Message{
-					Type: "quest.ready",
-					Payload: map[string]any{
-						"quest_id": questID,
-						"drafts":   questReady["drafts"],
-						"summary":  questReady["summary"],
-					},
+				h.broadcaster.PublishQuestEvent(realtime.EventQuestReady, questID, map[string]any{
+					"drafts":  questReady["drafts"],
+					"summary": questReady["summary"],
 				})
 			}
 		}
@@ -926,15 +898,11 @@ func (h *Handler) CreateObjectiveFromDraft(ctx context.Context, questID string, 
 	}
 
 	// Broadcast task created
-	if h.hub != nil {
-		h.hub.Broadcast(websocket.Message{
-			Type: "task.created",
-			Payload: map[string]any{
-				"task_id":   task.ID,
-				"quest_id":  questID,
-				"title":     task.Title,
-				"auto_start": draft.AutoStart,
-			},
+	if h.broadcaster != nil {
+		h.broadcaster.PublishTaskEvent(realtime.EventTaskCreated, task.ID, map[string]any{
+			"quest_id":   questID,
+			"title":      task.Title,
+			"auto_start": draft.AutoStart,
 		})
 	}
 
@@ -1277,14 +1245,10 @@ func (h *Handler) executeCancelObjective(questID, objectiveID, reason string) to
 	}
 
 	// Broadcast cancellation
-	if h.hub != nil {
-		h.hub.Broadcast(websocket.Message{
-			Type: "task.cancelled",
-			Payload: map[string]any{
-				"task_id":  objectiveID,
-				"quest_id": questID,
-				"reason":   reason,
-			},
+	if h.broadcaster != nil {
+		h.broadcaster.PublishTaskEvent(realtime.EventTaskCancelled, objectiveID, map[string]any{
+			"quest_id": questID,
+			"reason":   reason,
 		})
 	}
 

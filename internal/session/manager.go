@@ -8,11 +8,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/lirancohen/dex/internal/api/websocket"
 	"github.com/lirancohen/dex/internal/db"
-	"github.com/lirancohen/dex/internal/realtime"
 	"github.com/lirancohen/dex/internal/git"
 	"github.com/lirancohen/dex/internal/orchestrator"
+	"github.com/lirancohen/dex/internal/realtime"
 	"github.com/lirancohen/dex/internal/toolbelt"
 )
 
@@ -111,8 +110,7 @@ type Manager struct {
 
 	// External dependencies for Ralph loop
 	anthropicClient *toolbelt.AnthropicClient
-	wsHub           *websocket.Hub          // Legacy hub (for RalphLoop)
-	broadcaster     *realtime.Broadcaster   // New broadcaster (dual-publish)
+	broadcaster     *realtime.Broadcaster   // Publishes to both legacy and new systems
 
 	// Git and GitHub for PR creation on completion
 	gitOps              *git.Operations
@@ -189,14 +187,7 @@ func (m *Manager) SetAnthropicClient(client *toolbelt.AnthropicClient) {
 	m.anthropicClient = client
 }
 
-// SetWebSocketHub sets the WebSocket hub for broadcasting events
-func (m *Manager) SetWebSocketHub(hub *websocket.Hub) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.wsHub = hub
-}
-
-// SetBroadcaster sets the broadcaster for dual-publishing to legacy and new systems
+// SetBroadcaster sets the broadcaster for publishing to both legacy and new systems
 func (m *Manager) SetBroadcaster(broadcaster *realtime.Broadcaster) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -284,27 +275,12 @@ func (m *Manager) notifyTaskStatus(taskID string, status string) {
 // broadcastTaskUpdated sends a task.updated WebSocket event
 func (m *Manager) broadcastTaskUpdated(taskID string, status string) {
 	m.mu.RLock()
-	hub := m.wsHub
 	broadcaster := m.broadcaster
 	m.mu.RUnlock()
 
-	// Use broadcaster if available (publishes to both legacy and new systems)
 	if broadcaster != nil {
 		broadcaster.PublishTaskEvent(realtime.EventTaskUpdated, taskID, map[string]any{
 			"status": status,
-		})
-		return
-	}
-
-	// Fall back to legacy hub
-	if hub != nil {
-		hub.Broadcast(websocket.Message{
-			Type:   websocket.EventTaskUpdated,
-			TaskID: taskID,
-			Payload: map[string]any{
-				"task_id": taskID,
-				"status":  status,
-			},
 		})
 	}
 }
@@ -549,7 +525,7 @@ func (m *Manager) runSession(ctx context.Context, session *ActiveSession) {
 	m.mu.Lock()
 	session.State = StateRunning
 	anthropicClient := m.anthropicClient
-	wsHub := m.wsHub
+	broadcaster := m.broadcaster
 	originalHat := session.Hat
 	m.mu.Unlock()
 
@@ -560,7 +536,7 @@ func (m *Manager) runSession(ctx context.Context, session *ActiveSession) {
 	// Run the Ralph loop if we have an Anthropic client
 	if anthropicClient != nil {
 		fmt.Printf("runSession: Anthropic client is configured, starting Ralph loop\n")
-		loop := NewRalphLoop(m, session, anthropicClient, wsHub, m.db)
+		loop := NewRalphLoop(m, session, anthropicClient, broadcaster, m.db)
 
 		// Get or create transition tracker for this task and set up event router
 		m.mu.Lock()

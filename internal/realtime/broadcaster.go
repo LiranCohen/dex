@@ -96,15 +96,19 @@ func (b *Broadcaster) publishToLegacyHub(eventType string, payload map[string]an
 // Event types as constants for consistency
 const (
 	// Task events
-	EventTaskCreated        = "task.created"
-	EventTaskUpdated        = "task.updated"
-	EventTaskCompleted      = "task.completed"
-	EventTaskCancelled      = "task.cancelled"
-	EventTaskUnblocked      = "task.unblocked"
-	EventTaskAutoStarted    = "task.auto_started"
+	EventTaskCreated         = "task.created"
+	EventTaskUpdated         = "task.updated"
+	EventTaskCompleted       = "task.completed"
+	EventTaskCancelled       = "task.cancelled"
+	EventTaskPaused          = "task.paused"
+	EventTaskResumed         = "task.resumed"
+	EventTaskUnblocked       = "task.unblocked"
+	EventTaskAutoStarted     = "task.auto_started"
 	EventTaskAutoStartFailed = "task.auto_start_failed"
 
 	// Session events
+	EventSessionKilled    = "session.killed"
+
 	EventSessionStarted   = "session.started"
 	EventSessionIteration = "session.iteration"
 	EventSessionCompleted = "session.completed"
@@ -113,6 +117,11 @@ const (
 	EventActivityNew = "activity.new"
 
 	// Quest events
+	EventQuestCreated       = "quest.created"
+	EventQuestUpdated       = "quest.updated"
+	EventQuestDeleted       = "quest.deleted"
+	EventQuestCompleted     = "quest.completed"
+	EventQuestReopened      = "quest.reopened"
 	EventQuestContentDelta  = "quest.content_delta"
 	EventQuestToolCall      = "quest.tool_call"
 	EventQuestToolResult    = "quest.tool_result"

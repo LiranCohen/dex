@@ -56,7 +56,8 @@ type Server struct {
 	handlersSyncSvc   *githubsync.SyncService // Handler-level sync service wrapper
 	setupHandler      *setup.Handler
 	hub               *websocket.Hub
-	realtime          *realtime.Node // Centrifuge-based realtime messaging
+	realtime          *realtime.Node         // Centrifuge-based realtime messaging
+	broadcaster       *realtime.Broadcaster  // Dual-publish to legacy and new
 	deps              *core.Deps
 	addr              string
 	certFile          string
@@ -120,6 +121,7 @@ func NewServer(database *db.DB, cfg Config) *Server {
 		taskService: task.NewService(database),
 		hub:         hub,
 		realtime:    rtNode,
+		broadcaster: broadcaster,
 		addr:        cfg.Addr,
 		certFile:    cfg.CertFile,
 		keyFile:     cfg.KeyFile,
@@ -152,10 +154,7 @@ func NewServer(database *db.DB, cfg Config) *Server {
 		sessionMgr.SetGitHubClient(cfg.Toolbelt.GitHub)
 	}
 
-	// Wire up WebSocket hub for real-time updates
-	sessionMgr.SetWebSocketHub(s.hub)
-
-	// Wire up broadcaster for dual-publishing (legacy + new realtime)
+	// Wire up broadcaster for real-time updates (dual-publishes to legacy and new systems)
 	sessionMgr.SetBroadcaster(broadcaster)
 
 	// Wire up Anthropic client for Ralph loop execution
@@ -167,9 +166,9 @@ func NewServer(database *db.DB, cfg Config) *Server {
 
 	// Create planner for task planning phase
 	if cfg.Toolbelt != nil && cfg.Toolbelt.Anthropic != nil {
-		s.planner = planning.NewPlanner(database, cfg.Toolbelt.Anthropic, hub)
+		s.planner = planning.NewPlanner(database, cfg.Toolbelt.Anthropic, broadcaster)
 		s.planner.SetPromptLoader(sessionMgr.GetPromptLoader())
-		s.questHandler = quest.NewHandler(database, cfg.Toolbelt.Anthropic, hub)
+		s.questHandler = quest.NewHandler(database, cfg.Toolbelt.Anthropic, broadcaster)
 		s.questHandler.SetPromptLoader(sessionMgr.GetPromptLoader())
 		s.questHandler.SetBaseDir(cfg.BaseDir)
 		if cfg.Toolbelt.GitHub != nil {

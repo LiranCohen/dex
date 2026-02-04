@@ -7,8 +7,8 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/lirancohen/dex/internal/api/core"
-	"github.com/lirancohen/dex/internal/api/websocket"
 	"github.com/lirancohen/dex/internal/db"
+	"github.com/lirancohen/dex/internal/realtime"
 	"github.com/lirancohen/dex/internal/task"
 )
 
@@ -137,14 +137,12 @@ func (h *ChecklistHandler) HandleUpdateItem(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 
-	h.deps.Hub.Broadcast(websocket.Message{
-		Type: "checklist.updated",
-		Payload: map[string]any{
-			"task_id":      taskID,
+	if h.deps.Broadcaster != nil {
+		h.deps.Broadcaster.PublishTaskEvent(realtime.EventChecklistUpdated, taskID, map[string]any{
 			"checklist_id": checklist.ID,
 			"item":         core.ToChecklistItemResponse(updatedItem),
-		},
-	})
+		})
+	}
 
 	return c.JSON(http.StatusOK, core.ToChecklistItemResponse(updatedItem))
 }
@@ -168,13 +166,11 @@ func (h *ChecklistHandler) HandleAccept(c echo.Context) error {
 		if err := h.deps.TaskService.UpdateStatus(taskID, db.TaskStatusReady); err != nil {
 			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 		}
-		h.deps.Hub.Broadcast(websocket.Message{
-			Type: "task.updated",
-			Payload: map[string]any{
-				"task_id": taskID,
-				"status":  db.TaskStatusReady,
-			},
-		})
+		if h.deps.Broadcaster != nil {
+			h.deps.Broadcaster.PublishTaskEvent(realtime.EventTaskUpdated, taskID, map[string]any{
+				"status": db.TaskStatusReady,
+			})
+		}
 		return c.JSON(http.StatusOK, map[string]any{
 			"message": "plan accepted (no checklist)",
 			"task_id": taskID,
@@ -224,13 +220,11 @@ func (h *ChecklistHandler) HandleAccept(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 
-	h.deps.Hub.Broadcast(websocket.Message{
-		Type: "task.updated",
-		Payload: map[string]any{
-			"task_id": taskID,
-			"status":  db.TaskStatusReady,
-		},
-	})
+	if h.deps.Broadcaster != nil {
+		h.deps.Broadcaster.PublishTaskEvent(realtime.EventTaskUpdated, taskID, map[string]any{
+			"status": db.TaskStatusReady,
+		})
+	}
 
 	return c.JSON(http.StatusOK, map[string]any{
 		"message":      "checklist accepted",

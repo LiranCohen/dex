@@ -9,8 +9,8 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/lirancohen/dex/internal/api/core"
-	"github.com/lirancohen/dex/internal/api/websocket"
 	"github.com/lirancohen/dex/internal/db"
+	"github.com/lirancohen/dex/internal/realtime"
 	"github.com/lirancohen/dex/internal/toolbelt"
 )
 
@@ -141,13 +141,11 @@ func (h *Handler) HandleCreate(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 
-	h.deps.Hub.Broadcast(websocket.Message{
-		Type: "quest.created",
-		Payload: map[string]any{
-			"quest_id":   quest.ID,
+	if h.deps.Broadcaster != nil {
+		h.deps.Broadcaster.PublishQuestEvent(realtime.EventQuestCreated, quest.ID, map[string]any{
 			"project_id": projectID,
-		},
-	})
+		})
+	}
 
 	return c.JSON(http.StatusCreated, core.ToQuestResponse(quest, nil))
 }
@@ -208,13 +206,11 @@ func (h *Handler) HandleDelete(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 
-	h.deps.Hub.Broadcast(websocket.Message{
-		Type: "quest.deleted",
-		Payload: map[string]any{
-			"quest_id":   questID,
+	if h.deps.Broadcaster != nil {
+		h.deps.Broadcaster.PublishQuestEvent(realtime.EventQuestDeleted, questID, map[string]any{
 			"project_id": quest.ProjectID,
-		},
-	})
+		})
+	}
 
 	return c.JSON(http.StatusOK, map[string]string{
 		"message": "quest deleted",
@@ -254,13 +250,11 @@ func (h *Handler) HandleSendMessage(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 
-	h.deps.Hub.Broadcast(websocket.Message{
-		Type: "quest.message",
-		Payload: map[string]any{
-			"quest_id": questID,
-			"message":  core.ToQuestMessageResponse(userMsg),
-		},
-	})
+	if h.deps.Broadcaster != nil {
+		h.deps.Broadcaster.PublishQuestEvent(realtime.EventQuestMessage, questID, map[string]any{
+			"message": core.ToQuestMessageResponse(userMsg),
+		})
+	}
 
 	if h.deps.QuestHandler == nil {
 		return echo.NewHTTPError(http.StatusServiceUnavailable, "quest handler not configured (missing Anthropic API key)")
@@ -325,13 +319,11 @@ func (h *Handler) HandleComplete(c echo.Context) error {
 	quest, _ = h.deps.DB.GetQuestByID(questID)
 	summary, _ := h.deps.DB.GetQuestSummary(questID)
 
-	h.deps.Hub.Broadcast(websocket.Message{
-		Type: "quest.completed",
-		Payload: map[string]any{
-			"quest_id":   questID,
+	if h.deps.Broadcaster != nil {
+		h.deps.Broadcaster.PublishQuestEvent(realtime.EventQuestCompleted, questID, map[string]any{
 			"project_id": quest.ProjectID,
-		},
-	})
+		})
+	}
 
 	// Close GitHub Issue (async)
 	if h.CloseQuestGitHubIssue != nil {
@@ -365,13 +357,11 @@ func (h *Handler) HandleReopen(c echo.Context) error {
 	quest, _ = h.deps.DB.GetQuestByID(questID)
 	summary, _ := h.deps.DB.GetQuestSummary(questID)
 
-	h.deps.Hub.Broadcast(websocket.Message{
-		Type: "quest.reopened",
-		Payload: map[string]any{
-			"quest_id":   questID,
+	if h.deps.Broadcaster != nil {
+		h.deps.Broadcaster.PublishQuestEvent(realtime.EventQuestReopened, questID, map[string]any{
 			"project_id": quest.ProjectID,
-		},
-	})
+		})
+	}
 
 	// Reopen GitHub Issue (async)
 	if h.ReopenQuestGitHubIssue != nil {
@@ -412,13 +402,11 @@ func (h *Handler) HandleUpdateModel(c echo.Context) error {
 	quest, _ = h.deps.DB.GetQuestByID(questID)
 	summary, _ := h.deps.DB.GetQuestSummary(questID)
 
-	h.deps.Hub.Broadcast(websocket.Message{
-		Type: "quest.updated",
-		Payload: map[string]any{
-			"quest_id": questID,
-			"model":    req.Model,
-		},
-	})
+	if h.deps.Broadcaster != nil {
+		h.deps.Broadcaster.PublishQuestEvent(realtime.EventQuestUpdated, questID, map[string]any{
+			"model": req.Model,
+		})
+	}
 
 	return c.JSON(http.StatusOK, core.ToQuestResponse(quest, summary))
 }

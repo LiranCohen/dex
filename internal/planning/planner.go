@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/lirancohen/dex/internal/api/websocket"
 	"github.com/lirancohen/dex/internal/db"
+	"github.com/lirancohen/dex/internal/realtime"
 	"github.com/lirancohen/dex/internal/session"
 	"github.com/lirancohen/dex/internal/toolbelt"
 )
@@ -28,16 +28,16 @@ const (
 type Planner struct {
 	db           *db.DB
 	client       *toolbelt.AnthropicClient
-	hub          *websocket.Hub
+	broadcaster  *realtime.Broadcaster
 	promptLoader *session.PromptLoader
 }
 
 // NewPlanner creates a new Planner instance
-func NewPlanner(database *db.DB, client *toolbelt.AnthropicClient, hub *websocket.Hub) *Planner {
+func NewPlanner(database *db.DB, client *toolbelt.AnthropicClient, broadcaster *realtime.Broadcaster) *Planner {
 	return &Planner{
-		db:     database,
-		client: client,
-		hub:    hub,
+		db:          database,
+		client:      client,
+		broadcaster: broadcaster,
 	}
 }
 
@@ -135,14 +135,10 @@ func (p *Planner) StartPlanning(ctx context.Context, taskID, prompt string) (*db
 	}
 
 	// Broadcast planning event
-	if p.hub != nil {
-		p.hub.Broadcast(websocket.Message{
-			Type: "planning.started",
-			Payload: map[string]any{
-				"task_id":    taskID,
-				"session_id": session.ID,
-				"status":     session.Status,
-			},
+	if p.broadcaster != nil {
+		p.broadcaster.PublishTaskEvent(realtime.EventPlanningStarted, taskID, map[string]any{
+			"session_id": session.ID,
+			"status":     session.Status,
 		})
 	}
 
@@ -234,14 +230,10 @@ func (p *Planner) ProcessResponse(ctx context.Context, sessionID, response strin
 	}
 
 	// Broadcast planning update
-	if p.hub != nil {
-		p.hub.Broadcast(websocket.Message{
-			Type: "planning.updated",
-			Payload: map[string]any{
-				"task_id":    session.TaskID,
-				"session_id": session.ID,
-				"status":     session.Status,
-			},
+	if p.broadcaster != nil {
+		p.broadcaster.PublishTaskEvent(realtime.EventPlanningUpdated, session.TaskID, map[string]any{
+			"session_id": session.ID,
+			"status":     session.Status,
 		})
 	}
 
@@ -300,13 +292,9 @@ func (p *Planner) AcceptPlan(ctx context.Context, sessionID string, selectedOpti
 	}
 
 	// Broadcast planning completed
-	if p.hub != nil {
-		p.hub.Broadcast(websocket.Message{
-			Type: "planning.completed",
-			Payload: map[string]any{
-				"task_id":    session.TaskID,
-				"session_id": session.ID,
-			},
+	if p.broadcaster != nil {
+		p.broadcaster.PublishTaskEvent(realtime.EventPlanningCompleted, session.TaskID, map[string]any{
+			"session_id": session.ID,
 		})
 	}
 
@@ -379,13 +367,9 @@ func (p *Planner) SkipPlanning(ctx context.Context, taskID string) error {
 		}
 
 		// Broadcast planning skipped
-		if p.hub != nil {
-			p.hub.Broadcast(websocket.Message{
-				Type: "planning.skipped",
-				Payload: map[string]any{
-					"task_id":    taskID,
-					"session_id": session.ID,
-				},
+		if p.broadcaster != nil {
+			p.broadcaster.PublishTaskEvent(realtime.EventPlanningSkipped, taskID, map[string]any{
+				"session_id": session.ID,
 			})
 		}
 	}

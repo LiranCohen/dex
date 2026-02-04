@@ -7,9 +7,9 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/lirancohen/dex/internal/api/core"
-	"github.com/lirancohen/dex/internal/api/websocket"
 	"github.com/lirancohen/dex/internal/db"
 	"github.com/lirancohen/dex/internal/planning"
+	"github.com/lirancohen/dex/internal/realtime"
 	"github.com/lirancohen/dex/internal/task"
 )
 
@@ -196,13 +196,11 @@ func (h *Handler) HandleAccept(c echo.Context) error {
 	}
 
 	// Broadcast task updated event
-	h.deps.Hub.Broadcast(websocket.Message{
-		Type: "task.updated",
-		Payload: map[string]any{
-			"task_id": taskID,
-			"status":  db.TaskStatusReady,
-		},
-	})
+	if h.deps.Broadcaster != nil {
+		h.deps.Broadcaster.PublishTaskEvent(realtime.EventTaskUpdated, taskID, map[string]any{
+			"status": db.TaskStatusReady,
+		})
+	}
 
 	return c.JSON(http.StatusOK, map[string]any{
 		"message":        "plan accepted",
@@ -231,13 +229,11 @@ func (h *Handler) HandleSkip(c echo.Context) error {
 	}
 
 	// Broadcast task updated event
-	h.deps.Hub.Broadcast(websocket.Message{
-		Type: "task.updated",
-		Payload: map[string]any{
-			"task_id": taskID,
-			"status":  db.TaskStatusReady,
-		},
-	})
+	if h.deps.Broadcaster != nil {
+		h.deps.Broadcaster.PublishTaskEvent(realtime.EventTaskUpdated, taskID, map[string]any{
+			"status": db.TaskStatusReady,
+		})
+	}
 
 	return c.JSON(http.StatusOK, map[string]any{
 		"message": "planning skipped",

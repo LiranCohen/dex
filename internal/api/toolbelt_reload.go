@@ -67,7 +67,7 @@ func (s *Server) ReloadToolbelt() error {
 
 		// Update planner with new Anthropic client
 		if s.planner == nil {
-			s.planner = planning.NewPlanner(s.db, tb.Anthropic, s.hub)
+			s.planner = planning.NewPlanner(s.db, tb.Anthropic, s.broadcaster)
 			s.planner.SetPromptLoader(s.sessionManager.GetPromptLoader())
 			s.deps.Planner = s.planner
 			fmt.Println("ReloadToolbelt: Planner created")
@@ -75,7 +75,7 @@ func (s *Server) ReloadToolbelt() error {
 
 		// Update quest handler with new Anthropic client
 		if s.questHandler == nil {
-			s.questHandler = quest.NewHandler(s.db, tb.Anthropic, s.hub)
+			s.questHandler = quest.NewHandler(s.db, tb.Anthropic, s.broadcaster)
 			s.questHandler.SetPromptLoader(s.sessionManager.GetPromptLoader())
 			s.questHandler.SetBaseDir(s.getDataDir())
 			s.deps.QuestHandler = s.questHandler
