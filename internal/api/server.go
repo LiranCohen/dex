@@ -26,6 +26,7 @@ import (
 	"github.com/lirancohen/dex/internal/api/setup"
 	"github.com/lirancohen/dex/internal/api/websocket"
 	"github.com/lirancohen/dex/internal/auth"
+	"github.com/lirancohen/dex/internal/realtime"
 	"github.com/lirancohen/dex/internal/db"
 	"github.com/lirancohen/dex/internal/git"
 	"github.com/lirancohen/dex/internal/github"
@@ -55,6 +56,7 @@ type Server struct {
 	handlersSyncSvc   *githubsync.SyncService // Handler-level sync service wrapper
 	setupHandler      *setup.Handler
 	hub               *websocket.Hub
+	realtime          *realtime.Node // Centrifuge-based realtime messaging
 	deps              *core.Deps
 	addr              string
 	certFile          string
@@ -90,9 +92,23 @@ func NewServer(database *db.DB, cfg Config) *Server {
 	e.Use(echomw.Recover())
 	e.Use(echomw.RequestID())
 
-	// Create WebSocket hub
+	// Create WebSocket hub (legacy - will be replaced by realtime)
 	hub := websocket.NewHub()
 	go hub.Run()
+
+	// Create Centrifuge realtime node
+	rtNode, err := realtime.NewNode(realtime.Config{
+		ClientQueueMaxSize: 2 * 1024 * 1024, // 2MB per client
+		ClientChannelLimit: 128,
+	})
+	if err != nil {
+		fmt.Printf("Warning: failed to create realtime node: %v\n", err)
+	} else {
+		if err := rtNode.Run(); err != nil {
+			fmt.Printf("Warning: failed to start realtime node: %v\n", err)
+			rtNode = nil
+		}
+	}
 
 	s := &Server{
 		echo:        e,
@@ -100,6 +116,7 @@ func NewServer(database *db.DB, cfg Config) *Server {
 		toolbelt:    cfg.Toolbelt,
 		taskService: task.NewService(database),
 		hub:         hub,
+		realtime:    rtNode,
 		addr:        cfg.Addr,
 		certFile:    cfg.CertFile,
 		keyFile:     cfg.KeyFile,
@@ -199,6 +216,7 @@ func NewServer(database *db.DB, cfg Config) *Server {
 		Planner:        s.planner,
 		QuestHandler:   s.questHandler,
 		Hub:            hub,
+		Realtime:       rtNode,
 		TokenConfig:    cfg.TokenConfig,
 		BaseDir:        cfg.BaseDir,
 		Challenges:     s.challenges,
@@ -362,10 +380,26 @@ func (s *Server) registerRoutes() {
 	objectivesHandler.RegisterRoutes(protected)
 	templatesHandler.RegisterRoutes(protected)
 
-	// WebSocket endpoint for real-time updates
+	// WebSocket endpoint for real-time updates (legacy hub)
 	protected.GET("/ws", func(c echo.Context) error {
 		return websocket.ServeWS(s.hub, c)
 	})
+
+	// Centrifuge WebSocket endpoint (new realtime system)
+	if s.realtime != nil {
+		wsHandler := s.realtime.WebSocketHandler()
+
+		// Apply auth middleware based on token config
+		if s.tokenConfig != nil {
+			validator := realtime.NewJWTValidator(s.tokenConfig)
+			wsHandler = realtime.AuthMiddleware(validator)(wsHandler)
+		} else {
+			wsHandler = realtime.NoAuthMiddleware()(wsHandler)
+		}
+
+		// Register the Centrifuge WebSocket endpoint
+		v1.GET("/realtime", echo.WrapHandler(wsHandler))
+	}
 }
 
 // handleHealthCheck returns system health status
@@ -427,5 +461,11 @@ func (s *Server) Start() error {
 
 // Shutdown gracefully stops the server
 func (s *Server) Shutdown(ctx context.Context) error {
+	// Shutdown the realtime node first
+	if s.realtime != nil {
+		if err := s.realtime.Shutdown(ctx); err != nil {
+			fmt.Printf("Warning: failed to shutdown realtime node: %v\n", err)
+		}
+	}
 	return s.echo.Shutdown(ctx)
 }
