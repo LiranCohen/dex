@@ -1345,29 +1345,114 @@ func sanitizeMessageContent(content any) any {
 func (r *RalphLoop) buildChecklistPrompt(items []*db.ChecklistItem) string {
 	var sb strings.Builder
 
+	// Count items by status for summary
+	var pending, done, failed int
+	for _, item := range items {
+		switch item.Status {
+		case db.ChecklistItemStatusDone:
+			done++
+		case db.ChecklistItemStatusFailed:
+			failed++
+		default:
+			pending++
+		}
+	}
+
 	sb.WriteString("## Task Checklist\n\n")
-	sb.WriteString("Complete these items and report status for each:\n\n")
+
+	// Show different instructions based on hat and completion state
+	if done > 0 || failed > 0 {
+		sb.WriteString(fmt.Sprintf("Status: %d done, %d pending, %d failed\n\n", done, pending, failed))
+	}
+
+	if pending > 0 {
+		sb.WriteString("Complete the remaining items and report status for each:\n\n")
+	} else {
+		sb.WriteString("All items have been addressed. Review the results:\n\n")
+	}
 
 	for _, item := range items {
-		sb.WriteString(fmt.Sprintf("- [ ] %s (id: %s)\n", item.Description, item.ID))
+		var checkbox string
+		switch item.Status {
+		case db.ChecklistItemStatusDone:
+			checkbox = "[x]"
+		case db.ChecklistItemStatusFailed:
+			checkbox = "[!]"
+		default:
+			checkbox = "[ ]"
+		}
+		sb.WriteString(fmt.Sprintf("- %s %s (id: %s)\n", checkbox, item.Description, item.ID))
 	}
 
 	sb.WriteString("\n---\n\n")
-	sb.WriteString("## Efficiency Guidelines\n\n")
-	sb.WriteString("Work efficiently to minimize iterations:\n")
-	sb.WriteString("- **Batch tool calls**: Execute multiple independent operations in the same message\n")
-	sb.WriteString("- **Group related items**: If checklist items are related, implement them together\n")
-	sb.WriteString("- **Report multiple completions**: You can output multiple CHECKLIST_DONE signals in one message\n")
-	sb.WriteString("- **Plan first**: Review all items, identify what can be batched, then execute\n\n")
 
-	sb.WriteString("## Reporting Checklist Status\n\n")
-	sb.WriteString("IMPORTANT: Only mark an item as done when it is FULLY and SUCCESSFULLY completed.\n\n")
-	sb.WriteString("- CHECKLIST_DONE:<item_id> - Use ONLY when the item succeeded completely\n")
-	sb.WriteString("- CHECKLIST_FAILED:<item_id>:<reason> - Use when an item failed or could not be completed\n\n")
-	sb.WriteString("If a tool returns an error or an operation fails, you MUST use CHECKLIST_FAILED, not CHECKLIST_DONE.\n")
-	sb.WriteString("Do not claim success for items that encountered errors.\n\n")
-	sb.WriteString("When all items are addressed (done or failed), output EVENT:task.complete.\n\n")
-	sb.WriteString("Begin working on the task. Follow your hat instructions and report progress.")
+	// Hat-specific instructions
+	switch r.session.Hat {
+	case "creator":
+		sb.WriteString("## Efficiency Guidelines\n\n")
+		sb.WriteString("Work efficiently to minimize iterations:\n")
+		sb.WriteString("- **Batch tool calls**: Execute multiple independent operations in the same message\n")
+		sb.WriteString("- **Group related items**: If checklist items are related, implement them together\n")
+		sb.WriteString("- **Report multiple completions**: You can output multiple CHECKLIST_DONE signals in one message\n")
+		sb.WriteString("- **Plan first**: Review all items, identify what can be batched, then execute\n\n")
+
+		sb.WriteString("## Reporting Checklist Status\n\n")
+		sb.WriteString("IMPORTANT: Only mark an item as done when it is FULLY and SUCCESSFULLY completed.\n\n")
+		sb.WriteString("- CHECKLIST_DONE:<item_id> - Use ONLY when the item succeeded completely\n")
+		sb.WriteString("- CHECKLIST_FAILED:<item_id>:<reason> - Use when an item failed or could not be completed\n\n")
+		sb.WriteString("If a tool returns an error or an operation fails, you MUST use CHECKLIST_FAILED, not CHECKLIST_DONE.\n")
+		sb.WriteString("Do not claim success for items that encountered errors.\n\n")
+		sb.WriteString("When all items are addressed (done or failed), output EVENT:implementation.done.\n\n")
+		sb.WriteString("Begin working on the task. Follow your hat instructions and report progress.")
+
+	case "critic":
+		if pending == 0 {
+			sb.WriteString("## Review Instructions\n\n")
+			sb.WriteString("The creator has completed all checklist items. Your job is to VERIFY the work, not redo it.\n\n")
+			sb.WriteString("### What to Review\n")
+			sb.WriteString("1. **Verify completed items** - Spot-check that items marked done actually work\n")
+			sb.WriteString("2. **Check for issues** - Look for bugs, security issues, or missing functionality\n")
+			sb.WriteString("3. **Run tests if applicable** - Verify tests pass\n\n")
+			sb.WriteString("### What NOT to Do\n")
+			sb.WriteString("- Do NOT recreate or redo work that's already complete\n")
+			sb.WriteString("- Do NOT mark items as done again (they're already done)\n")
+			sb.WriteString("- Do NOT do extensive verification for simple tasks\n\n")
+			sb.WriteString("### Decision\n")
+			sb.WriteString("- **If work looks good**: `EVENT:review.approved` (moves to editor for PR)\n")
+			sb.WriteString("- **If critical issues found**: `EVENT:review.rejected` with specific feedback\n")
+			sb.WriteString("- **If blocked**: `EVENT:task.blocked:{\"reason\":\"...\"}` \n\n")
+			sb.WriteString("For simple tasks (content creation, config, etc.), a quick verification is sufficient. Approve and move on.")
+		} else {
+			sb.WriteString("## Review Instructions\n\n")
+			sb.WriteString("Some items are still pending. Review the completed work and assess:\n")
+			sb.WriteString("- Are the completed items actually done correctly?\n")
+			sb.WriteString("- Should the pending items be completed or are they optional?\n\n")
+			sb.WriteString("Then decide: `EVENT:review.approved` or `EVENT:review.rejected`")
+		}
+
+	case "editor":
+		sb.WriteString("## Editor Instructions\n\n")
+		sb.WriteString("The work has been REVIEWED AND APPROVED. Your job is to polish and deliver.\n\n")
+		sb.WriteString("### What's Already Done\n")
+		sb.WriteString("- All checklist items have been implemented by the creator\n")
+		sb.WriteString("- The work has passed review by the critic\n\n")
+		sb.WriteString("### Your Tasks\n")
+		sb.WriteString("1. **Verify commits** - Ensure all changes are committed\n")
+		sb.WriteString("2. **Push to remote** - Push the branch if not already pushed\n")
+		sb.WriteString("3. **Create PR** - Open a pull request with a clear description\n")
+		sb.WriteString("4. **Complete** - Output `EVENT:task.complete` with the PR URL\n\n")
+		sb.WriteString("### What NOT to Do\n")
+		sb.WriteString("- Do NOT recreate or redo work that's already complete\n")
+		sb.WriteString("- Do NOT implement checklist items (they're done)\n")
+		sb.WriteString("- Do NOT run extensive verification (critic already did this)\n\n")
+		sb.WriteString("Focus on delivery: commit, push, PR, done.")
+
+	default:
+		sb.WriteString("## Reporting Checklist Status\n\n")
+		sb.WriteString("- CHECKLIST_DONE:<item_id> - Mark item as complete\n")
+		sb.WriteString("- CHECKLIST_FAILED:<item_id>:<reason> - Mark item as failed\n\n")
+		sb.WriteString("When all items are addressed, output the appropriate EVENT signal.")
+	}
 
 	return sb.String()
 }
@@ -1533,8 +1618,9 @@ var hatContinuations = map[string]string{
 - Design complete: EVENT:design.complete`,
 
 	"creator": `Continue implementing. Report progress with CHECKLIST_DONE/FAILED signals.
-When implementation is complete:
-- Ready for review: EVENT:implementation.done
+When all items are complete:
+- Simple task (greenfield, no tests): EVENT:review.approved (skip critic, go to editor)
+- Complex task (existing code, tests): EVENT:implementation.done (triggers critic review)
 If blocked: EVENT:task.blocked:{"reason":"description of blocker"}`,
 
 	"critic": `Continue reviewing. When review is complete:

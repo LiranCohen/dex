@@ -369,6 +369,9 @@ func (m *Manager) Start(ctx context.Context, sessionID string) error {
 	// Notify task started (for GitHub sync)
 	m.notifyTaskStatus(session.TaskID, "running")
 
+	// Broadcast task.updated event for WebSocket clients
+	m.broadcastTaskUpdated(session.TaskID, db.TaskStatusRunning)
+
 	// Launch session in background
 	go m.runSession(sessionCtx, session)
 

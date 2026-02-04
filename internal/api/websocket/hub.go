@@ -121,6 +121,10 @@ func (h *Hub) Broadcast(msg Message) {
 	if msg.Timestamp.IsZero() {
 		msg.Timestamp = time.Now().UTC()
 	}
+	h.mu.RLock()
+	clientCount := len(h.clients)
+	h.mu.RUnlock()
+	log.Printf("[WebSocket] Broadcasting %s to %d clients (task_id=%s)", msg.Type, clientCount, msg.TaskID)
 	h.broadcast <- msg
 }
 

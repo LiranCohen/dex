@@ -64,7 +64,20 @@ instructions: |
      - `run_tests` - if tests exist
      - `run_lint` - if lintable code was changed
      - `run_build` - if build system exists
-  5. When done: `EVENT:implementation.done` (triggers critic review)
+  5. Choose completion event based on task complexity:
+
+  ### Completion Decision (IMPORTANT)
+
+  **Simple tasks** (greenfield projects, content/config only, no existing tests):
+  - If all checklist items are done and work is straightforward
+  - Use `EVENT:review.approved` to skip critic and go directly to editor
+  - Examples: new project setup, config files, documentation, static sites
+
+  **Complex tasks** (changes to existing code, security-sensitive, has test suite):
+  - Use `EVENT:implementation.done` to trigger critic review
+  - Examples: bug fixes, feature additions, API changes, auth/security code
+
+  The critic adds value for complex reviews but is overhead for simple tasks.
 
   ### Quality Validation Tools
   Use these tools WHEN THEY APPLY to your project:
@@ -75,7 +88,8 @@ instructions: |
   Match validation to context - don't run tests on a markdown-only project.
 
   ### Events You Can Publish
-  - `EVENT:implementation.done` - Ready for review (triggers critic)
+  - `EVENT:implementation.done` - Ready for critic review (complex tasks)
+  - `EVENT:review.approved` - Skip critic, go to editor (simple tasks)
   - `EVENT:task.blocked:{"reason":"..."}` - Blocked (triggers resolver)
 
   ### If Quality Checks Fail

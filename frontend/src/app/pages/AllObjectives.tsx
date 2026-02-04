@@ -97,12 +97,18 @@ export function AllObjectives() {
 
   // WebSocket updates
   useEffect(() => {
+    console.log('[AllObjectives] Setting up WebSocket subscription');
     const unsubscribe = subscribe((event: WebSocketEvent) => {
+      console.log('[AllObjectives] Received event:', event.type);
       // Skip if unmounted
-      if (!isMountedRef.current) return;
+      if (!isMountedRef.current) {
+        console.log('[AllObjectives] Skipping - unmounted');
+        return;
+      }
 
       // Listen for both task and session events - session events indicate status changes
       if (event.type.startsWith('task.') || event.type.startsWith('session.')) {
+        console.log('[AllObjectives] Reloading data for event:', event.type);
         loadData();
       }
       if (event.type.startsWith('approval.')) {
@@ -117,7 +123,10 @@ export function AllObjectives() {
           });
       }
     });
-    return unsubscribe;
+    return () => {
+      console.log('[AllObjectives] Cleaning up WebSocket subscription');
+      unsubscribe();
+    };
   }, [subscribe, loadData]);
 
   const filteredTasks = useMemo(() =>

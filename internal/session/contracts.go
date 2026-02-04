@@ -49,7 +49,8 @@ var HatContracts = map[string]*HatContract{
 			TopicResolved,        // Continue after blocker resolved
 		},
 		Publishes: []string{
-			TopicImplementationDone, // Ready for review
+			TopicImplementationDone, // Ready for review (triggers critic)
+			TopicReviewApproved,     // Bypass critic when quality gates pass (triggers editor)
 			TopicTaskBlocked,        // Blocked during implementation
 		},
 	},

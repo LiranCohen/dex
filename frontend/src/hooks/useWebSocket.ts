@@ -94,9 +94,12 @@ export function useWebSocket(): UseWebSocketReturn {
       ws.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data) as WebSocketEvent;
+          console.log('[WebSocket] Received:', data.type, data);
           setLastMessage(data);
 
           // Notify all subscribers
+          const handlerCount = handlersRef.current.size;
+          console.log(`[WebSocket] Notifying ${handlerCount} handlers`);
           handlersRef.current.forEach((handler) => {
             try {
               handler(data);
