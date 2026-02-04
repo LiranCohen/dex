@@ -1282,6 +1282,11 @@
   color: var(--bg-primary);
 }
 
+.app-badge--local {
+  background-color: var(--text-tertiary);
+  color: var(--bg-primary);
+}
+
 /* Inbox card */
 .app-inbox-card {
   display: flex;

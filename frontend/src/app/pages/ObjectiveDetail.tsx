@@ -63,14 +63,32 @@ export function ObjectiveDetail() {
   const hasShownCriticalWarning = useRef(false);
   // Track mount state for safe WebSocket handler updates
   const isMountedRef = useRef(true);
+  // Debounce timer for loadData calls
+  const loadDataTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Track mount state
   useEffect(() => {
     isMountedRef.current = true;
     return () => {
       isMountedRef.current = false;
+      // Clear any pending debounced calls
+      if (loadDataTimeoutRef.current) {
+        clearTimeout(loadDataTimeoutRef.current);
+      }
     };
   }, []);
+
+  // Debounced loadData to avoid excessive API calls from rapid WebSocket events
+  const debouncedLoadData = useCallback(() => {
+    if (loadDataTimeoutRef.current) {
+      clearTimeout(loadDataTimeoutRef.current);
+    }
+    loadDataTimeoutRef.current = setTimeout(() => {
+      if (isMountedRef.current) {
+        loadData();
+      }
+    }, 300); // 300ms debounce
+  }, [loadData]);
 
   // Calculate prev/next objective navigation
   const { prevObjective, nextObjective, objectivePosition } = useMemo(() => {
@@ -264,9 +282,10 @@ export function ObjectiveDetail() {
           // Clear context when session completes
           setContextStatus(undefined);
           hasShownCriticalWarning.current = false; // Reset for next session
-          loadData(); // Refresh data on session completion
+          loadData(); // Immediate refresh on session completion
         } else if (event.type.startsWith('task.') || event.type.startsWith('session.')) {
-          loadData();
+          // Debounce task/session updates to avoid excessive API calls
+          debouncedLoadData();
         }
       }
 
@@ -285,7 +304,7 @@ export function ObjectiveDetail() {
     });
 
     return unsubscribe;
-  }, [id, subscribe, loadData]);
+  }, [id, subscribe, loadData, debouncedLoadData]);
 
   const handlePause = async () => {
     if (!id || actionLoading) return;

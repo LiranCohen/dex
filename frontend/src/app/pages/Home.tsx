@@ -63,9 +63,9 @@ export function Home() {
       ]);
       setQuests(questsData || []);
       setApprovalCount((approvalsData.approvals || []).filter((a: Approval) => a.status === 'pending').length);
-      // Filter out the default project (has no GitHub info and path is ".")
+      // Filter out the default project (path is ".")
       const realProjects = (projectsData.projects || []).filter(
-        (p: Project) => p.GitHubOwner && p.GitHubRepo && p.RepoPath !== '.'
+        (p: Project) => p.RepoPath !== '.'
       );
       setProjects(realProjects);
     } catch (err) {
@@ -210,12 +210,14 @@ export function Home() {
               {projects.map((project) => (
                 <div key={project.ID} className="app-card app-repo-card">
                   <div className="app-repo-card__header">
-                    <span className={`app-badge ${project.RemoteUpstream ? 'app-badge--fork' : 'app-badge--created'}`}>
-                      {project.RemoteUpstream ? 'Fork' : 'Created'}
+                    <span className={`app-badge ${project.RemoteUpstream ? 'app-badge--fork' : project.GitHubOwner ? 'app-badge--created' : 'app-badge--local'}`}>
+                      {project.RemoteUpstream ? 'Fork' : project.GitHubOwner ? 'Created' : 'Local'}
                     </span>
                   </div>
                   <h3 className="app-repo-card__name">
-                    {project.GitHubOwner}/{project.GitHubRepo}
+                    {project.GitHubOwner && project.GitHubRepo
+                      ? `${project.GitHubOwner}/${project.GitHubRepo}`
+                      : project.Name}
                   </h3>
                   <p className="app-repo-card__path">{project.RepoPath}</p>
                   {project.RemoteUpstream && (
