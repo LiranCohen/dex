@@ -1,5 +1,17 @@
 // API response types matching the Go backend
 
+export interface Project {
+  ID: string;
+  Name: string;
+  RepoPath: string;
+  GitHubOwner: string | null;
+  GitHubRepo: string | null;
+  RemoteOrigin: string | null;
+  RemoteUpstream: string | null; // If set, this is a fork
+  DefaultBranch: string;
+  CreatedAt: string;
+}
+
 export interface Task {
   ID: string;
   ProjectID: string;

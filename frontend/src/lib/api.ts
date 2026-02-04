@@ -161,6 +161,11 @@ export async function createRemediation(
   return api.post(`/tasks/${taskId}/remediate`);
 }
 
+// Project API functions
+export async function fetchProjects(): Promise<{ projects: import('./types').Project[]; count: number }> {
+  return api.get('/projects');
+}
+
 // Quest API functions
 export async function fetchQuests(projectId: string): Promise<import('./types').Quest[]> {
   return api.get(`/projects/${projectId}/quests`);

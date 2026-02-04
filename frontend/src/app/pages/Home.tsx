@@ -1,10 +1,10 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Header, StatusBar, KeyboardShortcuts, LoadingState, useToast } from '../components';
-import { fetchQuests, createQuest, fetchApprovals } from '../../lib/api';
+import { fetchQuests, createQuest, fetchApprovals, fetchProjects } from '../../lib/api';
 import { useWebSocket } from '../../hooks/useWebSocket';
 import { useKeyboardNavigation } from '../hooks/useKeyboardNavigation';
-import type { Quest, Approval, WebSocketEvent } from '../../lib/types';
+import type { Quest, Approval, WebSocketEvent, Project } from '../../lib/types';
 
 function getQuestStatus(quest: Quest): 'active' | 'pending' | 'complete' {
   if (quest.status === 'completed') return 'complete';
@@ -28,6 +28,7 @@ function formatProgress(quest: Quest): string {
 
 export function Home() {
   const [quests, setQuests] = useState<Quest[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
   const [approvalCount, setApprovalCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
@@ -55,12 +56,18 @@ export function Home() {
 
   const loadData = useCallback(async () => {
     try {
-      const [questsData, approvalsData] = await Promise.all([
+      const [questsData, approvalsData, projectsData] = await Promise.all([
         fetchQuests('proj_default'),
         fetchApprovals(),
+        fetchProjects(),
       ]);
       setQuests(questsData || []);
       setApprovalCount((approvalsData.approvals || []).filter((a: Approval) => a.status === 'pending').length);
+      // Filter out the default project (has no GitHub info and path is ".")
+      const realProjects = (projectsData.projects || []).filter(
+        (p: Project) => p.GitHubOwner && p.GitHubRepo && p.RepoPath !== '.'
+      );
+      setProjects(realProjects);
     } catch (err) {
       console.error('Failed to load data:', err);
       showToast('Failed to load quests', 'error');
@@ -189,6 +196,36 @@ export function Home() {
                 </div>
               </>
             )}
+          </>
+        )}
+
+        {/* Repositories section */}
+        {projects.length > 0 && (
+          <>
+            <div className="app-divider--text" style={{ marginTop: '2rem' }}>
+              Repositories
+            </div>
+
+            <div className="app-repo-grid">
+              {projects.map((project) => (
+                <div key={project.ID} className="app-card app-repo-card">
+                  <div className="app-repo-card__header">
+                    <span className={`app-badge ${project.RemoteUpstream ? 'app-badge--fork' : 'app-badge--created'}`}>
+                      {project.RemoteUpstream ? 'Fork' : 'Created'}
+                    </span>
+                  </div>
+                  <h3 className="app-repo-card__name">
+                    {project.GitHubOwner}/{project.GitHubRepo}
+                  </h3>
+                  <p className="app-repo-card__path">{project.RepoPath}</p>
+                  {project.RemoteUpstream && (
+                    <p className="app-repo-card__upstream">
+                      upstream: {project.RemoteUpstream}
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
           </>
         )}
       </main>
