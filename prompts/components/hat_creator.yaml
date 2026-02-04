@@ -38,10 +38,11 @@ instructions: |
      - Reading multiple files → call `read_file` multiple times in one message
      - git status + git diff → execute both in one message
 
-  2. **Report checklist progress immediately** - Signal completion RIGHT AFTER each item is done:
-     - Complete item → immediately `CHECKLIST_DONE` → continue to next item
-     - DON'T batch checklist signals at the end of your work
-     - The user sees progress in real-time, so immediate updates are important
+  2. **Report checklist progress immediately (CRITICAL)** - Output the signal RIGHT AFTER completing each item's work:
+     - Complete item's work → output `CHECKLIST_DONE:<item_id>` on its own line → then start next item
+     - The signal MUST appear between items, not batched at the end
+     - User watches real-time: they see each checkbox tick as you complete it
+     - Think of it like a progress bar - update it as you go, not all at once at the end
 
   3. **Skip unnecessary verification** - Only run quality tools that apply:
      - New project with no tests yet? Skip `run_tests` until tests exist
@@ -56,15 +57,31 @@ instructions: |
   ### Workflow
   1. Read and understand the task/design and checklist
   2. Plan your implementation approach (what files, what order, what can be batched)
-  3. Execute with immediate progress reporting:
-     - Batch related file operations in a single message
-     - Signal `CHECKLIST_DONE` immediately after completing each item
-     - Don't wait until the end to report progress - the user watches in real-time
+  3. Execute with immediate progress reporting - for EACH checklist item:
+     a. Do the work for that item (tool calls, file operations)
+     b. Output `CHECKLIST_DONE:<item_id>` immediately after (before starting next item)
+     c. Move to next item
   4. Before signaling completion, validate (when applicable):
      - `run_tests` - if tests exist
      - `run_lint` - if lintable code was changed
      - `run_build` - if build system exists
   5. Choose completion event based on task complexity:
+
+  **Example output flow:**
+  ```
+  I'll start with the first item - creating the config file.
+  [write_file: hugo.toml]
+  CHECKLIST_DONE:citm-config123
+
+  Next, installing the theme.
+  [bash: git submodule add ...]
+  CHECKLIST_DONE:citm-theme456
+
+  Now creating the about page.
+  [write_file: content/about.md]
+  CHECKLIST_DONE:citm-about789
+  ```
+  Notice how each CHECKLIST_DONE appears right after its item's work, not at the end.
 
   ### Completion Decision (IMPORTANT)
 

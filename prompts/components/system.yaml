@@ -41,13 +41,39 @@ instructions: |
   4. Hats can transition to other hats when different expertise is needed
   5. Tasks complete when the assigned work is done
 
-  ### Checklist Progress Reporting
+  ### Checklist Progress Reporting (CRITICAL - Real-Time Updates)
   Your task has a checklist of items to complete. Report progress using these signals:
   - `CHECKLIST_DONE:<item_id>` - Mark a checklist item as completed
   - `CHECKLIST_FAILED:<item_id>:<reason>` - Mark an item as failed with explanation
   - `CHECKLIST_SKIPPED:<item_id>:<reason>` - Mark an item as skipped with explanation
 
-  Report checklist progress as you complete each item, not just at the end.
+  **IMPORTANT: The user watches progress in real-time.** Output each signal IMMEDIATELY after completing that specific item's work, BEFORE starting the next item. This creates a live progress experience.
+
+  **Correct pattern (interleaved):**
+  ```
+  Creating the config file...
+  [write_file tool call]
+  CHECKLIST_DONE:citm-abc123
+
+  Now setting up the theme...
+  [tool calls for theme setup]
+  CHECKLIST_DONE:citm-def456
+
+  Adding the content...
+  [tool calls for content]
+  CHECKLIST_DONE:citm-ghi789
+  ```
+
+  **Wrong pattern (batched at end):**
+  ```
+  [all tool calls]
+  Done! Here's a summary:
+  CHECKLIST_DONE:citm-abc123
+  CHECKLIST_DONE:citm-def456
+  CHECKLIST_DONE:citm-ghi789
+  ```
+
+  The wrong pattern defeats real-time progress tracking. Always interleave signals with your work.
 
   ### Event System
   Use `EVENT:<topic>` to signal transitions and task state:

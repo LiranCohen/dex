@@ -43,6 +43,83 @@ var (
 	ErrNoAnthropicClient = errors.New("anthropic client not configured")
 )
 
+// StreamingSignalDetector processes checklist signals in real-time during streaming
+// It buffers text and fires callbacks when complete signals are detected
+type StreamingSignalDetector struct {
+	buffer        strings.Builder
+	onDone        func(itemID string)
+	onFailed      func(itemID, reason string)
+	processedDone map[string]bool
+}
+
+// NewStreamingSignalDetector creates a new detector with callbacks for signal processing
+func NewStreamingSignalDetector(onDone func(itemID string), onFailed func(itemID, reason string)) *StreamingSignalDetector {
+	return &StreamingSignalDetector{
+		onDone:        onDone,
+		onFailed:      onFailed,
+		processedDone: make(map[string]bool),
+	}
+}
+
+// ProcessDelta handles incoming text deltas and detects complete signals
+func (d *StreamingSignalDetector) ProcessDelta(delta string) {
+	d.buffer.WriteString(delta)
+	d.checkForSignals()
+}
+
+// checkForSignals looks for complete signal lines in the buffer
+func (d *StreamingSignalDetector) checkForSignals() {
+	text := d.buffer.String()
+
+	// Process complete lines only (signals end with newline)
+	for {
+		newlineIdx := strings.Index(text, "\n")
+		if newlineIdx == -1 {
+			break
+		}
+
+		line := text[:newlineIdx]
+		text = text[newlineIdx+1:]
+
+		// Check for CHECKLIST_DONE signal
+		if idx := strings.Index(line, SignalChecklistDone); idx != -1 {
+			itemID := strings.TrimSpace(line[idx+len(SignalChecklistDone):])
+			if itemID != "" && !d.processedDone[itemID] {
+				d.processedDone[itemID] = true
+				if d.onDone != nil {
+					d.onDone(itemID)
+				}
+			}
+		}
+
+		// Check for CHECKLIST_FAILED signal
+		if idx := strings.Index(line, SignalChecklistFailed); idx != -1 {
+			content := strings.TrimSpace(line[idx+len(SignalChecklistFailed):])
+			parts := strings.SplitN(content, ":", 2)
+			itemID := strings.TrimSpace(parts[0])
+			reason := ""
+			if len(parts) > 1 {
+				reason = strings.TrimSpace(parts[1])
+			}
+			if itemID != "" && !d.processedDone[itemID] {
+				d.processedDone[itemID] = true
+				if d.onFailed != nil {
+					d.onFailed(itemID, reason)
+				}
+			}
+		}
+	}
+
+	// Keep unprocessed text in buffer
+	d.buffer.Reset()
+	d.buffer.WriteString(text)
+}
+
+// ProcessedSignals returns the map of signals that were processed during streaming
+func (d *StreamingSignalDetector) ProcessedSignals() map[string]bool {
+	return d.processedDone
+}
+
 // RalphLoop orchestrates a session's execution cycle
 type RalphLoop struct {
 	manager     *Manager
@@ -76,6 +153,10 @@ type RalphLoop struct {
 	// Event routing for hat transitions
 	eventRouter *EventRouter
 
+	// Track checklist signals already processed during streaming
+	// to avoid double-processing after response completes
+	streamProcessedSignals map[string]bool
+
 	// Context management
 	contextGuard     *ContextGuard
 	handoffGen       *HandoffGenerator
@@ -95,15 +176,16 @@ type RalphLoop struct {
 // NewRalphLoop creates a new RalphLoop for the given session
 func NewRalphLoop(manager *Manager, session *ActiveSession, client *toolbelt.AnthropicClient, broadcaster *realtime.Broadcaster, database *db.DB) *RalphLoop {
 	return &RalphLoop{
-		manager:            manager,
-		session:            session,
-		client:             client,
-		broadcaster:        broadcaster,
-		db:                 database,
-		messages:           make([]toolbelt.AnthropicMessage, 0),
-		checkpointInterval: 5,
-		tools:              GetToolDefinitionsForHat(session.Hat),
-		health:             NewLoopHealth(),
+		manager:                manager,
+		session:                session,
+		client:                 client,
+		broadcaster:            broadcaster,
+		db:                     database,
+		messages:               make([]toolbelt.AnthropicMessage, 0),
+		checkpointInterval:     5,
+		tools:                  GetToolDefinitionsForHat(session.Hat),
+		health:                 NewLoopHealth(),
+		streamProcessedSignals: make(map[string]bool),
 	}
 }
 
@@ -1073,7 +1155,8 @@ func (r *RalphLoop) buildPrompt() (string, error) {
 	return r.manager.promptLoader.Get(r.session.Hat, ctx)
 }
 
-// sendMessage sends the current conversation to Claude
+// sendMessage sends the current conversation to Claude using streaming
+// to enable real-time checklist signal detection and broadcasting
 func (r *RalphLoop) sendMessage(ctx context.Context, systemPrompt string) (*toolbelt.AnthropicChatResponse, error) {
 	// Determine model based on task settings
 	model := "claude-sonnet-4-5-20250929" // default
@@ -1089,7 +1172,53 @@ func (r *RalphLoop) sendMessage(ctx context.Context, systemPrompt string) (*tool
 		Tools:     r.tools,
 	}
 
-	return r.client.Chat(ctx, req)
+	// Reset the processed signals map for this request
+	r.streamProcessedSignals = make(map[string]bool)
+
+	// Create a streaming signal detector that processes checklist updates in real-time
+	detector := NewStreamingSignalDetector(
+		// onDone callback - process CHECKLIST_DONE signals immediately
+		func(itemID string) {
+			if err := r.db.UpdateChecklistItemStatus(itemID, db.ChecklistItemStatusDone, ""); err != nil {
+				fmt.Printf("RalphLoop[stream]: warning - failed to update checklist item %s: %v\n", itemID, err)
+				return
+			}
+			fmt.Printf("RalphLoop[stream]: marked checklist item %s as done (real-time)\n", itemID)
+
+			if r.activity != nil {
+				_ = r.activity.RecordChecklistUpdate(r.session.IterationCount+1, itemID, db.ChecklistItemStatusDone, "")
+			}
+			if r.manager != nil {
+				r.manager.NotifyChecklistUpdated(r.session.TaskID)
+			}
+		},
+		// onFailed callback - process CHECKLIST_FAILED signals immediately
+		func(itemID, reason string) {
+			if err := r.db.UpdateChecklistItemStatus(itemID, db.ChecklistItemStatusFailed, reason); err != nil {
+				fmt.Printf("RalphLoop[stream]: warning - failed to update checklist item %s: %v\n", itemID, err)
+				return
+			}
+			fmt.Printf("RalphLoop[stream]: marked checklist item %s as failed (real-time): %s\n", itemID, reason)
+
+			if r.activity != nil {
+				_ = r.activity.RecordChecklistUpdate(r.session.IterationCount+1, itemID, db.ChecklistItemStatusFailed, reason)
+			}
+			if r.manager != nil {
+				r.manager.NotifyChecklistUpdated(r.session.TaskID)
+			}
+		},
+	)
+
+	// Use streaming API with the detector's ProcessDelta as callback
+	response, err := r.client.ChatWithStreaming(ctx, req, detector.ProcessDelta)
+	if err != nil {
+		return nil, err
+	}
+
+	// Store which signals were already processed during streaming
+	r.streamProcessedSignals = detector.ProcessedSignals()
+
+	return response, nil
 }
 
 // detectCompletion checks if the response indicates task completion via EVENT:task.complete
@@ -1392,17 +1521,17 @@ func (r *RalphLoop) buildChecklistPrompt(items []*db.ChecklistItem) string {
 		sb.WriteString("Work efficiently to minimize iterations:\n")
 		sb.WriteString("- **Batch tool calls**: Execute multiple independent operations in the same message\n")
 		sb.WriteString("- **Group related items**: If checklist items are related, implement them together\n")
-		sb.WriteString("- **Report multiple completions**: You can output multiple CHECKLIST_DONE signals in one message\n")
 		sb.WriteString("- **Plan first**: Review all items, identify what can be batched, then execute\n\n")
 
-		sb.WriteString("## Reporting Checklist Status\n\n")
-		sb.WriteString("IMPORTANT: Only mark an item as done when it is FULLY and SUCCESSFULLY completed.\n\n")
-		sb.WriteString("- CHECKLIST_DONE:<item_id> - Use ONLY when the item succeeded completely\n")
-		sb.WriteString("- CHECKLIST_FAILED:<item_id>:<reason> - Use when an item failed or could not be completed\n\n")
-		sb.WriteString("If a tool returns an error or an operation fails, you MUST use CHECKLIST_FAILED, not CHECKLIST_DONE.\n")
-		sb.WriteString("Do not claim success for items that encountered errors.\n\n")
+		sb.WriteString("## Reporting Checklist Status (Real-Time Progress)\n\n")
+		sb.WriteString("The user watches your progress live. Output CHECKLIST signals as you complete each item:\n\n")
+		sb.WriteString("- CHECKLIST_DONE:<item_id> - Output IMMEDIATELY after completing that item's work\n")
+		sb.WriteString("- CHECKLIST_FAILED:<item_id>:<reason> - Output IMMEDIATELY if an item fails\n\n")
+		sb.WriteString("**CRITICAL: Interleave signals with your work.** After completing item A's work, output CHECKLIST_DONE for A, THEN start item B.\n")
+		sb.WriteString("Do NOT batch all signals at the end - this defeats real-time progress tracking.\n\n")
+		sb.WriteString("If a tool returns an error or an operation fails, you MUST use CHECKLIST_FAILED, not CHECKLIST_DONE.\n\n")
 		sb.WriteString("When all items are addressed (done or failed), output EVENT:implementation.done.\n\n")
-		sb.WriteString("Begin working on the task. Follow your hat instructions and report progress.")
+		sb.WriteString("Begin working on the task. Report progress after each item, not all at once at the end.")
 
 	case "critic":
 		if pending == 0 {
@@ -1458,6 +1587,7 @@ func (r *RalphLoop) buildChecklistPrompt(items []*db.ChecklistItem) string {
 
 // processChecklistSignals detects and processes checklist update signals
 // Uses findAllSignals to process all signals in a single pass without reset bugs
+// Skips signals that were already processed during streaming
 func (r *RalphLoop) processChecklistSignals(response string) {
 	// Process all CHECKLIST_DONE signals
 	doneSignals := findAllSignals(response, SignalChecklistDone)
@@ -1466,17 +1596,25 @@ func (r *RalphLoop) processChecklistSignals(response string) {
 	}
 	for _, sig := range doneSignals {
 		itemID := strings.TrimSpace(sig)
-		if itemID != "" {
-			if err := r.db.UpdateChecklistItemStatus(itemID, db.ChecklistItemStatusDone, ""); err != nil {
-				fmt.Printf("RalphLoop: warning - failed to update checklist item %s: %v\n", itemID, err)
-			} else {
-				if r.activity != nil {
-					_ = r.activity.RecordChecklistUpdate(r.session.IterationCount, itemID, db.ChecklistItemStatusDone, "")
-				}
-				fmt.Printf("RalphLoop: marked checklist item %s as done\n", itemID)
-				if r.manager != nil {
-					r.manager.NotifyChecklistUpdated(r.session.TaskID)
-				}
+		if itemID == "" {
+			continue
+		}
+
+		// Skip if already processed during streaming
+		if r.streamProcessedSignals[itemID] {
+			fmt.Printf("RalphLoop: skipping checklist item %s (already processed during streaming)\n", itemID)
+			continue
+		}
+
+		if err := r.db.UpdateChecklistItemStatus(itemID, db.ChecklistItemStatusDone, ""); err != nil {
+			fmt.Printf("RalphLoop: warning - failed to update checklist item %s: %v\n", itemID, err)
+		} else {
+			if r.activity != nil {
+				_ = r.activity.RecordChecklistUpdate(r.session.IterationCount, itemID, db.ChecklistItemStatusDone, "")
+			}
+			fmt.Printf("RalphLoop: marked checklist item %s as done\n", itemID)
+			if r.manager != nil {
+				r.manager.NotifyChecklistUpdated(r.session.TaskID)
 			}
 		}
 	}
@@ -1495,17 +1633,25 @@ func (r *RalphLoop) processChecklistSignals(response string) {
 			reason = strings.TrimSpace(parts[1])
 		}
 
-		if itemID != "" {
-			if err := r.db.UpdateChecklistItemStatus(itemID, db.ChecklistItemStatusFailed, reason); err != nil {
-				fmt.Printf("RalphLoop: warning - failed to update checklist item %s: %v\n", itemID, err)
-			} else {
-				if r.activity != nil {
-					_ = r.activity.RecordChecklistUpdate(r.session.IterationCount, itemID, db.ChecklistItemStatusFailed, reason)
-				}
-				fmt.Printf("RalphLoop: marked checklist item %s as failed: %s\n", itemID, reason)
-				if r.manager != nil {
-					r.manager.NotifyChecklistUpdated(r.session.TaskID)
-				}
+		if itemID == "" {
+			continue
+		}
+
+		// Skip if already processed during streaming
+		if r.streamProcessedSignals[itemID] {
+			fmt.Printf("RalphLoop: skipping checklist item %s (already processed during streaming)\n", itemID)
+			continue
+		}
+
+		if err := r.db.UpdateChecklistItemStatus(itemID, db.ChecklistItemStatusFailed, reason); err != nil {
+			fmt.Printf("RalphLoop: warning - failed to update checklist item %s: %v\n", itemID, err)
+		} else {
+			if r.activity != nil {
+				_ = r.activity.RecordChecklistUpdate(r.session.IterationCount, itemID, db.ChecklistItemStatusFailed, reason)
+			}
+			fmt.Printf("RalphLoop: marked checklist item %s as failed: %s\n", itemID, reason)
+			if r.manager != nil {
+				r.manager.NotifyChecklistUpdated(r.session.TaskID)
 			}
 		}
 	}

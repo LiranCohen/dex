@@ -470,3 +470,146 @@ func TestIsValidHat(t *testing.T) {
 		}
 	}
 }
+
+func TestStreamingSignalDetector_SingleDoneSignal(t *testing.T) {
+	var processedItems []string
+
+	detector := NewStreamingSignalDetector(
+		func(itemID string) { processedItems = append(processedItems, itemID) },
+		func(itemID, reason string) {},
+	)
+
+	// Simulate streaming deltas
+	detector.ProcessDelta("Working on the task...")
+	detector.ProcessDelta("\nCHECKLIST_DONE:")
+	detector.ProcessDelta("item-123\n")
+	detector.ProcessDelta("Moving on...")
+
+	if len(processedItems) != 1 {
+		t.Errorf("expected 1 processed item, got %d", len(processedItems))
+	}
+	if processedItems[0] != "item-123" {
+		t.Errorf("expected item-123, got %s", processedItems[0])
+	}
+}
+
+func TestStreamingSignalDetector_MultipleDoneSignals(t *testing.T) {
+	var processedItems []string
+
+	detector := NewStreamingSignalDetector(
+		func(itemID string) { processedItems = append(processedItems, itemID) },
+		func(itemID, reason string) {},
+	)
+
+	// Simulate streaming multiple checklist completions
+	detector.ProcessDelta("Completing items...\nCHECKLIST_DONE:item-1\n")
+	detector.ProcessDelta("Done with first.\nCHECKLIST_DONE:item-2\n")
+	detector.ProcessDelta("Almost done.\nCHECKLIST_DONE:item-3\n")
+
+	if len(processedItems) != 3 {
+		t.Errorf("expected 3 processed items, got %d", len(processedItems))
+	}
+
+	expected := []string{"item-1", "item-2", "item-3"}
+	for i, exp := range expected {
+		if processedItems[i] != exp {
+			t.Errorf("item %d: expected %s, got %s", i, exp, processedItems[i])
+		}
+	}
+}
+
+func TestStreamingSignalDetector_FailedSignal(t *testing.T) {
+	var failedItems []struct {
+		id     string
+		reason string
+	}
+
+	detector := NewStreamingSignalDetector(
+		func(itemID string) {},
+		func(itemID, reason string) {
+			failedItems = append(failedItems, struct {
+				id     string
+				reason string
+			}{itemID, reason})
+		},
+	)
+
+	detector.ProcessDelta("CHECKLIST_FAILED:item-456:Could not install dependency\n")
+
+	if len(failedItems) != 1 {
+		t.Errorf("expected 1 failed item, got %d", len(failedItems))
+	}
+	if failedItems[0].id != "item-456" {
+		t.Errorf("expected item-456, got %s", failedItems[0].id)
+	}
+	if failedItems[0].reason != "Could not install dependency" {
+		t.Errorf("expected reason 'Could not install dependency', got %s", failedItems[0].reason)
+	}
+}
+
+func TestStreamingSignalDetector_NoDuplicates(t *testing.T) {
+	var processedCount int
+
+	detector := NewStreamingSignalDetector(
+		func(itemID string) { processedCount++ },
+		func(itemID, reason string) {},
+	)
+
+	// Same signal twice (shouldn't process second time)
+	detector.ProcessDelta("CHECKLIST_DONE:item-123\n")
+	detector.ProcessDelta("CHECKLIST_DONE:item-123\n")
+
+	if processedCount != 1 {
+		t.Errorf("expected 1 processed (no duplicates), got %d", processedCount)
+	}
+}
+
+func TestStreamingSignalDetector_IncompleteSignalWaits(t *testing.T) {
+	var processedItems []string
+
+	detector := NewStreamingSignalDetector(
+		func(itemID string) { processedItems = append(processedItems, itemID) },
+		func(itemID, reason string) {},
+	)
+
+	// Signal split across deltas without newline yet
+	detector.ProcessDelta("CHECKLIST_DONE:item-")
+	detector.ProcessDelta("789")
+
+	// Should not process yet (no newline)
+	if len(processedItems) != 0 {
+		t.Errorf("expected 0 processed items before newline, got %d", len(processedItems))
+	}
+
+	// Now send newline
+	detector.ProcessDelta("\n")
+
+	// Now should be processed
+	if len(processedItems) != 1 {
+		t.Errorf("expected 1 processed item after newline, got %d", len(processedItems))
+	}
+	if processedItems[0] != "item-789" {
+		t.Errorf("expected item-789, got %s", processedItems[0])
+	}
+}
+
+func TestStreamingSignalDetector_ProcessedSignalsMap(t *testing.T) {
+	detector := NewStreamingSignalDetector(
+		func(itemID string) {},
+		func(itemID, reason string) {},
+	)
+
+	detector.ProcessDelta("CHECKLIST_DONE:item-a\nCHECKLIST_FAILED:item-b:reason\n")
+
+	processed := detector.ProcessedSignals()
+
+	if !processed["item-a"] {
+		t.Error("expected item-a to be in processed signals")
+	}
+	if !processed["item-b"] {
+		t.Error("expected item-b to be in processed signals")
+	}
+	if processed["item-c"] {
+		t.Error("expected item-c to NOT be in processed signals")
+	}
+}
