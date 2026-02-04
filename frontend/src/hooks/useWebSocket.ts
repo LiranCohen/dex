@@ -45,7 +45,7 @@ export function useWebSocket(): UseWebSocketReturn {
   const subscriptionsRef = useRef<Map<string, Subscription>>(new Map());
   const handlersRef = useRef<Set<MessageHandler>>(new Set());
   const reconnectAttemptsRef = useRef(0);
-  const pingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const pingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const token = useAuthStore((state) => state.token);
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
@@ -113,15 +113,15 @@ export function useWebSocket(): UseWebSocketReturn {
     console.log(`[Centrifuge] Subscribing to ${channel}`);
     const sub = centrifuge.newSubscription(channel, {
       // Enable recovery to receive missed messages on reconnect
-      recover: true,
+      recoverable: true,
     });
 
     sub.on('publication', handlePublication);
 
     sub.on('subscribed', (ctx) => {
       console.log(`[Centrifuge] Subscribed to ${channel}`, ctx.wasRecovering ? '(recovered)' : '');
-      if (ctx.wasRecovering && ctx.recovered) {
-        console.log(`[Centrifuge] Recovered ${ctx.recoveredPublications?.length || 0} missed messages`);
+      if (ctx.wasRecovering && ctx.recovered && ctx.hasRecoveredPublications) {
+        console.log(`[Centrifuge] Recovered missed messages for ${channel}`);
       }
     });
 
@@ -231,7 +231,7 @@ export function useWebSocket(): UseWebSocketReturn {
 
       // Subscribe to the global channel to receive all events
       const globalSub = centrifuge.newSubscription('global', {
-        recover: true,
+        recoverable: true,
       });
 
       globalSub.on('publication', handlePublication);
