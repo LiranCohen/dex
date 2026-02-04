@@ -11,9 +11,25 @@ import (
 	"github.com/centrifugal/centrifuge"
 )
 
-// Node wraps a Centrifuge node for real-time messaging
+// Node wraps a Centrifuge node for real-time messaging.
+//
+// It provides:
+//   - WebSocket connection handling with JWT authentication
+//   - Channel-based pub/sub with automatic routing
+//   - Message history for reconnection recovery
+//   - Latency measurement via ping RPC
+//
+// Connection Flow:
+//  1. Client connects with JWT token (header or query param)
+//  2. AuthMiddleware validates token and sets credentials
+//  3. OnConnecting auto-subscribes to user:<userID> channel
+//  4. Client can then subscribe to additional channels (task:, quest:, etc.)
+//
+// See Broadcaster for the high-level event publishing API.
 type Node struct {
-	node *centrifuge.Node
+	node        *centrifuge.Node
+	historySize int
+	historyTTL  time.Duration
 }
 
 // Config holds configuration for the realtime node
@@ -22,6 +38,10 @@ type Config struct {
 	ClientQueueMaxSize int
 	// ClientChannelLimit is max channels per client (default 128)
 	ClientChannelLimit int
+	// HistorySize is the number of messages to retain per channel for recovery (default 100)
+	HistorySize int
+	// HistoryTTL is how long to retain messages for recovery (default 5 minutes)
+	HistoryTTL time.Duration
 }
 
 // NewNode creates a new Centrifuge node with the given configuration
@@ -31,6 +51,12 @@ func NewNode(cfg Config) (*Node, error) {
 	}
 	if cfg.ClientChannelLimit == 0 {
 		cfg.ClientChannelLimit = 128
+	}
+	if cfg.HistorySize == 0 {
+		cfg.HistorySize = 100 // Default: 100 messages per channel
+	}
+	if cfg.HistoryTTL == 0 {
+		cfg.HistoryTTL = 5 * time.Minute // Default: 5 minutes
 	}
 
 	node, err := centrifuge.New(centrifuge.Config{
@@ -42,7 +68,7 @@ func NewNode(cfg Config) (*Node, error) {
 		return nil, fmt.Errorf("failed to create centrifuge node: %w", err)
 	}
 
-	n := &Node{node: node}
+	n := &Node{node: node, historySize: cfg.HistorySize, historyTTL: cfg.HistoryTTL}
 	n.setupHandlers()
 
 	return n, nil
@@ -83,7 +109,12 @@ func (n *Node) setupHandlers() {
 				return
 			}
 
-			cb(centrifuge.SubscribeReply{}, nil)
+			// Enable recovery so clients can receive missed messages on reconnect
+			cb(centrifuge.SubscribeReply{
+				Options: centrifuge.SubscribeOptions{
+					EnableRecovery: true,
+				},
+			}, nil)
 		})
 
 		// Unsubscribe handler
@@ -94,6 +125,15 @@ func (n *Node) setupHandlers() {
 		// Disconnect handler
 		client.OnDisconnect(func(e centrifuge.DisconnectEvent) {
 			fmt.Printf("[Realtime] Client disconnected: user=%s reason=%s\n", client.UserID(), e.Reason)
+		})
+
+		// RPC handler for latency measurement
+		client.OnRPC(func(e centrifuge.RPCEvent, cb centrifuge.RPCCallback) {
+			if e.Method == "ping" {
+				cb(centrifuge.RPCReply{Data: []byte(`{"pong":true}`)}, nil)
+				return
+			}
+			cb(centrifuge.RPCReply{}, centrifuge.ErrorMethodNotFound)
 		})
 	})
 }
@@ -116,7 +156,7 @@ func (n *Node) WebSocketHandler() http.Handler {
 	})
 }
 
-// Publish sends an event to the appropriate channel(s)
+// Publish sends an event to the appropriate channel(s) with history for recovery
 func (n *Node) Publish(eventType string, payload map[string]any) error {
 	// Add event metadata
 	payload["type"] = eventType
@@ -130,18 +170,13 @@ func (n *Node) Publish(eventType string, payload map[string]any) error {
 	// Route to appropriate channel(s)
 	channels := routeEvent(eventType, payload)
 	for _, channel := range channels {
-		if _, err := n.node.Publish(channel, data); err != nil {
+		// Use WithHistory to enable message recovery on this channel
+		if _, err := n.node.Publish(channel, data, centrifuge.WithHistory(n.historySize, n.historyTTL)); err != nil {
 			fmt.Printf("[Realtime] Failed to publish to %s: %v\n", channel, err)
 		}
 	}
 
 	return nil
-}
-
-// PublishToChannel sends data directly to a specific channel
-func (n *Node) PublishToChannel(channel string, data []byte) error {
-	_, err := n.node.Publish(channel, data)
-	return err
 }
 
 // canSubscribe checks if a user can subscribe to a channel
@@ -202,10 +237,28 @@ func routeEvent(eventType string, payload map[string]any) []string {
 		}
 
 	case strings.HasPrefix(eventType, "approval."):
-		// Approvals also go to system channel
+		// Approvals go to system channel and optionally to user/project/task channels
 		channels = append(channels, "system")
+		if userID, ok := payload["user_id"].(string); ok && userID != "" {
+			channels = append(channels, "user:"+userID)
+		}
+		if projectID, ok := payload["project_id"].(string); ok && projectID != "" {
+			channels = append(channels, "project:"+projectID)
+		}
+		if taskID, ok := payload["task_id"].(string); ok && taskID != "" {
+			channels = append(channels, "task:"+taskID)
+		}
 
 	case strings.HasPrefix(eventType, "project."):
+		if projectID, ok := payload["project_id"].(string); ok && projectID != "" {
+			channels = append(channels, "project:"+projectID)
+		}
+
+	case strings.HasPrefix(eventType, "hat."):
+		// Hat events go to both task and project channels
+		if taskID, ok := payload["task_id"].(string); ok && taskID != "" {
+			channels = append(channels, "task:"+taskID)
+		}
 		if projectID, ok := payload["project_id"].(string); ok && projectID != "" {
 			channels = append(channels, "project:"+projectID)
 		}

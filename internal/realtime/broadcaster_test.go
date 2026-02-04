@@ -219,6 +219,8 @@ func TestEventConstantsAreUnique(t *testing.T) {
 		EventPlanningStarted, EventPlanningUpdated, EventPlanningCompleted, EventPlanningSkipped,
 		EventChecklistUpdated,
 		EventApprovalRequired, EventApprovalResolved,
+		EventHatPlanComplete, EventHatDesignComplete, EventHatImplementationDone,
+		EventHatReviewApproved, EventHatReviewRejected, EventHatTaskBlocked, EventHatResolved,
 	}
 
 	seen := make(map[string]bool)
@@ -227,5 +229,69 @@ func TestEventConstantsAreUnique(t *testing.T) {
 			t.Errorf("Duplicate event constant: %s", event)
 		}
 		seen[event] = true
+	}
+}
+
+func TestBroadcasterPublishHatEvent(t *testing.T) {
+	t.Run("adds session, task, and project IDs to payload", func(t *testing.T) {
+		b := NewBroadcaster(nil)
+
+		payload := map[string]any{"topic": "review"}
+		b.PublishHatEvent(EventHatPlanComplete, "session-1", "task-1", "project-1", payload)
+
+		if payload["session_id"] != "session-1" {
+			t.Errorf("Expected session_id to be 'session-1', got %v", payload["session_id"])
+		}
+		if payload["task_id"] != "task-1" {
+			t.Errorf("Expected task_id to be 'task-1', got %v", payload["task_id"])
+		}
+		if payload["project_id"] != "project-1" {
+			t.Errorf("Expected project_id to be 'project-1', got %v", payload["project_id"])
+		}
+	})
+
+	t.Run("creates payload if nil", func(t *testing.T) {
+		b := NewBroadcaster(nil)
+
+		// This should not panic
+		b.PublishHatEvent(EventHatImplementationDone, "s-1", "t-1", "p-1", nil)
+	})
+
+	t.Run("preserves existing payload fields", func(t *testing.T) {
+		b := NewBroadcaster(nil)
+
+		payload := map[string]any{
+			"source_hat": "developer",
+			"target_hat": "reviewer",
+		}
+		b.PublishHatEvent(EventHatReviewApproved, "s-2", "t-2", "p-2", payload)
+
+		if payload["source_hat"] != "developer" {
+			t.Error("Expected source_hat to be preserved")
+		}
+		if payload["target_hat"] != "reviewer" {
+			t.Error("Expected target_hat to be preserved")
+		}
+	})
+}
+
+func TestHatEventConstants(t *testing.T) {
+	// Verify hat event constants follow the expected naming pattern
+	hatEvents := []string{
+		EventHatPlanComplete,
+		EventHatDesignComplete,
+		EventHatImplementationDone,
+		EventHatReviewApproved,
+		EventHatReviewRejected,
+		EventHatTaskBlocked,
+		EventHatResolved,
+	}
+
+	for _, event := range hatEvents {
+		t.Run(event, func(t *testing.T) {
+			if !strings.HasPrefix(event, "hat.") {
+				t.Errorf("Hat event %q should start with 'hat.'", event)
+			}
+		})
 	}
 }

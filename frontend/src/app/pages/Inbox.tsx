@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Link } from 'react-router-dom';
-import { Header, KeyboardShortcuts, SkeletonList, Button, useToast } from '../components';
+import { Header, KeyboardShortcuts, SkeletonList, Button, ConnectionStatusBanner, useToast } from '../components';
 import { fetchApprovals, approveApproval, rejectApproval } from '../../lib/api';
 import { useWebSocket } from '../../hooks/useWebSocket';
 import { useKeyboardNavigation } from '../hooks/useKeyboardNavigation';
+import { useAuthStore } from '../../stores/auth';
 import type { Approval, WebSocketEvent } from '../../lib/types';
 
 function formatTime(dateStr: string): string {
@@ -37,8 +38,15 @@ export function Inbox() {
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState<Set<string>>(new Set());
   const [showShortcuts, setShowShortcuts] = useState(false);
-  const { subscribe } = useWebSocket();
+  const { subscribe, subscribeToChannel, connectionState, connectionQuality, latency, reconnectAttempts, reconnect } = useWebSocket();
   const { showToast } = useToast();
+  const userId = useAuthStore((state) => state.userId);
+
+  // Subscribe to user-specific channel for approval notifications
+  useEffect(() => {
+    if (!userId) return;
+    return subscribeToChannel(`user:${userId}`);
+  }, [userId, subscribeToChannel]);
 
   // Keyboard navigation items
   const navItems = useMemo(() =>
@@ -155,6 +163,14 @@ export function Inbox() {
   return (
     <div className="app-root">
       <Header backLink={{ to: '/', label: 'Back' }} inboxCount={pendingCount} />
+
+      <ConnectionStatusBanner
+        connectionState={connectionState}
+        connectionQuality={connectionQuality}
+        latency={latency}
+        reconnectAttempts={reconnectAttempts}
+        onReconnect={reconnect}
+      />
 
       <main className="app-content">
         <h1 className="app-page-title">Inbox</h1>

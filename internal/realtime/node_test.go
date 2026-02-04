@@ -122,7 +122,39 @@ func TestRouteEvent(t *testing.T) {
 			name:      "approval event with task_id routes to task and system",
 			eventType: "approval.required",
 			payload:   map[string]any{"task_id": "t-3"},
-			expected:  []string{"global", "system"},
+			expected:  []string{"global", "system", "task:t-3"},
+		},
+		// Hat events
+		{
+			name:      "hat event routes to task and project channels",
+			eventType: "hat.plan_complete",
+			payload:   map[string]any{"task_id": "t-1", "project_id": "p-1"},
+			expected:  []string{"global", "task:t-1", "project:p-1"},
+		},
+		{
+			name:      "hat event with only task_id routes to task channel",
+			eventType: "hat.implementation_done",
+			payload:   map[string]any{"task_id": "t-2"},
+			expected:  []string{"global", "task:t-2"},
+		},
+		{
+			name:      "hat event without ids only routes to global",
+			eventType: "hat.review_approved",
+			payload:   map[string]any{},
+			expected:  []string{"global"},
+		},
+		// User-specific approval routing
+		{
+			name:      "approval event with user_id routes to user channel",
+			eventType: "approval.resolved",
+			payload:   map[string]any{"user_id": "u-1"},
+			expected:  []string{"global", "system", "user:u-1"},
+		},
+		{
+			name:      "approval event with all routing fields",
+			eventType: "approval.required",
+			payload:   map[string]any{"user_id": "u-1", "project_id": "p-1", "task_id": "t-1"},
+			expected:  []string{"global", "system", "user:u-1", "project:p-1", "task:t-1"},
 		},
 	}
 
@@ -231,6 +263,181 @@ func TestCanSubscribe(t *testing.T) {
 			result := canSubscribe(tt.userID, tt.channel)
 			if result != tt.expected {
 				t.Errorf("canSubscribe(%q, %q) = %v, expected %v", tt.userID, tt.channel, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestNodeConfig(t *testing.T) {
+	t.Run("uses default values when not specified", func(t *testing.T) {
+		node, err := NewNode(Config{})
+		if err != nil {
+			t.Fatalf("Failed to create node: %v", err)
+		}
+		if err := node.Run(); err != nil {
+			t.Fatalf("Failed to run node: %v", err)
+		}
+		defer func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			node.Shutdown(ctx)
+		}()
+
+		// Check defaults were applied
+		if node.historySize != 100 {
+			t.Errorf("Expected default historySize=100, got %d", node.historySize)
+		}
+		if node.historyTTL != 5*time.Minute {
+			t.Errorf("Expected default historyTTL=5m, got %v", node.historyTTL)
+		}
+	})
+
+	t.Run("uses custom values when specified", func(t *testing.T) {
+		node, err := NewNode(Config{
+			HistorySize: 50,
+			HistoryTTL:  10 * time.Minute,
+		})
+		if err != nil {
+			t.Fatalf("Failed to create node: %v", err)
+		}
+		if err := node.Run(); err != nil {
+			t.Fatalf("Failed to run node: %v", err)
+		}
+		defer func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			node.Shutdown(ctx)
+		}()
+
+		if node.historySize != 50 {
+			t.Errorf("Expected historySize=50, got %d", node.historySize)
+		}
+		if node.historyTTL != 10*time.Minute {
+			t.Errorf("Expected historyTTL=10m, got %v", node.historyTTL)
+		}
+	})
+}
+
+func TestNodeWebSocketHandler(t *testing.T) {
+	node, err := NewNode(Config{})
+	if err != nil {
+		t.Fatalf("Failed to create node: %v", err)
+	}
+	if err := node.Run(); err != nil {
+		t.Fatalf("Failed to run node: %v", err)
+	}
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		node.Shutdown(ctx)
+	}()
+
+	handler := node.WebSocketHandler()
+	if handler == nil {
+		t.Fatal("Expected WebSocketHandler to return non-nil handler")
+	}
+}
+
+func TestNodePublish(t *testing.T) {
+	node, err := NewNode(Config{})
+	if err != nil {
+		t.Fatalf("Failed to create node: %v", err)
+	}
+	if err := node.Run(); err != nil {
+		t.Fatalf("Failed to run node: %v", err)
+	}
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		node.Shutdown(ctx)
+	}()
+
+	t.Run("publish adds type and timestamp", func(t *testing.T) {
+		payload := map[string]any{"data": "test"}
+
+		err := node.Publish("test.event", payload)
+		if err != nil {
+			t.Fatalf("Publish failed: %v", err)
+		}
+
+		// Payload should have been modified with type and timestamp
+		if payload["type"] != "test.event" {
+			t.Errorf("Expected type='test.event', got %v", payload["type"])
+		}
+		if _, ok := payload["timestamp"]; !ok {
+			t.Error("Expected timestamp to be added")
+		}
+	})
+
+	t.Run("publish handles empty payload", func(t *testing.T) {
+		payload := map[string]any{}
+
+		err := node.Publish("test.empty", payload)
+		if err != nil {
+			t.Fatalf("Publish failed: %v", err)
+		}
+	})
+}
+
+func TestRouteEventEdgeCases(t *testing.T) {
+	// Additional edge cases not covered in the main tests
+	tests := []struct {
+		name      string
+		eventType string
+		payload   map[string]any
+		expected  []string
+	}{
+		{
+			name:      "nil payload values are ignored",
+			eventType: "task.created",
+			payload:   map[string]any{"task_id": nil},
+			expected:  []string{"global"},
+		},
+		{
+			name:      "non-string task_id is ignored",
+			eventType: "task.updated",
+			payload:   map[string]any{"task_id": 123},
+			expected:  []string{"global"},
+		},
+		{
+			name:      "whitespace-only task_id treated as empty",
+			eventType: "task.created",
+			payload:   map[string]any{"task_id": "   "},
+			expected:  []string{"global", "task:   "},
+		},
+		{
+			name:      "case-sensitive event types",
+			eventType: "Task.Created",
+			payload:   map[string]any{"task_id": "123"},
+			expected:  []string{"global"},
+		},
+		{
+			name:      "multiple colons in quest_id",
+			eventType: "quest.message",
+			payload:   map[string]any{"quest_id": "q:123:456"},
+			expected:  []string{"global", "quest:q:123:456"},
+		},
+		{
+			name:      "special characters in IDs are preserved",
+			eventType: "task.updated",
+			payload:   map[string]any{"task_id": "task-abc_123.test"},
+			expected:  []string{"global", "task:task-abc_123.test"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			channels := routeEvent(tt.eventType, tt.payload)
+
+			if len(channels) != len(tt.expected) {
+				t.Errorf("Expected %d channels, got %d: %v", len(tt.expected), len(channels), channels)
+				return
+			}
+
+			for i, expected := range tt.expected {
+				if channels[i] != expected {
+					t.Errorf("Expected channel %q at index %d, got %q", expected, i, channels[i])
+				}
 			}
 		})
 	}

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Link } from 'react-router-dom';
-import { Header, StatusBar, SearchInput, LoadingState, useToast } from '../components';
+import { Header, StatusBar, SearchInput, LoadingState, ConnectionStatusBanner, useToast } from '../components';
 import type { SearchInputRef } from '../components/SearchInput';
 import { api, fetchApprovals } from '../../lib/api';
 import { useWebSocket } from '../../hooks/useWebSocket';
@@ -49,7 +49,7 @@ export function AllObjectives() {
   const [search, setSearch] = useState('');
   const searchInputRef = useRef<SearchInputRef>(null);
   const isMountedRef = useRef(true);
-  const { subscribe } = useWebSocket();
+  const { subscribe, connectionState, connectionQuality, latency, reconnectAttempts, reconnect } = useWebSocket();
   const { showToast } = useToast();
 
   // Track mount state
@@ -180,6 +180,14 @@ export function AllObjectives() {
   return (
     <div className="app-root">
       <Header backLink={{ to: '/', label: 'Back' }} inboxCount={approvalCount} />
+
+      <ConnectionStatusBanner
+        connectionState={connectionState}
+        connectionQuality={connectionQuality}
+        latency={latency}
+        reconnectAttempts={reconnectAttempts}
+        onReconnect={reconnect}
+      />
 
       <main className="app-content">
         <div className="app-all-objectives-header">

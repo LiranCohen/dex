@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Header, StatusBar, KeyboardShortcuts, LoadingState, useToast } from '../components';
+import { Header, StatusBar, KeyboardShortcuts, LoadingState, ConnectionStatusBanner, useToast } from '../components';
 import { fetchQuests, createQuest, fetchApprovals, fetchProjects } from '../../lib/api';
 import { useWebSocket } from '../../hooks/useWebSocket';
 import { useKeyboardNavigation } from '../hooks/useKeyboardNavigation';
@@ -34,7 +34,7 @@ export function Home() {
   const [creating, setCreating] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
   const navigate = useNavigate();
-  const { subscribe } = useWebSocket();
+  const { subscribe, connectionState, connectionQuality, latency, reconnectAttempts, reconnect } = useWebSocket();
   const { showToast } = useToast();
 
   const activeQuests = quests.filter((q) => q.status !== 'completed');
@@ -119,6 +119,14 @@ export function Home() {
   return (
     <div className="app-root">
       <Header inboxCount={approvalCount} />
+
+      <ConnectionStatusBanner
+        connectionState={connectionState}
+        connectionQuality={connectionQuality}
+        latency={latency}
+        reconnectAttempts={reconnectAttempts}
+        onReconnect={reconnect}
+      />
 
       <main className="app-content">
         {/* Page header */}
