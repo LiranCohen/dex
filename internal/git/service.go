@@ -242,3 +242,34 @@ func (s *Service) CommitTaskContent(dir, taskID, message string) (string, error)
 func (s *Service) CommitQuestContent(dir, questID, message string) (string, error) {
 	return s.operations.CommitQuestContent(dir, questID, message)
 }
+
+// IsBranchMerged checks if a task's branch has been merged into the base branch
+func (s *Service) IsBranchMerged(projectPath, branchName, baseBranch string) (bool, error) {
+	return s.worktrees.IsBranchMerged(projectPath, branchName, baseBranch)
+}
+
+// IsTaskBranchMerged checks if a task's branch has been merged into its base branch
+func (s *Service) IsTaskBranchMerged(taskID string) (bool, error) {
+	task, err := s.db.GetTaskByID(taskID)
+	if err != nil {
+		return false, fmt.Errorf("failed to get task: %w", err)
+	}
+	if task == nil {
+		return false, fmt.Errorf("task not found: %s", taskID)
+	}
+
+	if !task.BranchName.Valid || task.BranchName.String == "" {
+		return false, fmt.Errorf("task has no branch: %s", taskID)
+	}
+
+	// Get project to find repo path
+	project, err := s.db.GetProjectByID(task.ProjectID)
+	if err != nil {
+		return false, fmt.Errorf("failed to get project: %w", err)
+	}
+	if project == nil {
+		return false, fmt.Errorf("project not found: %s", task.ProjectID)
+	}
+
+	return s.worktrees.IsBranchMerged(project.RepoPath, task.BranchName.String, task.BaseBranch)
+}

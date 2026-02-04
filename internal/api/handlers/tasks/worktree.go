@@ -57,6 +57,7 @@ func (h *WorktreeHandler) HandleList(c echo.Context) error {
 // HandleListStale returns tasks with worktrees that should be cleaned up.
 // GET /api/v1/worktrees/stale
 // Returns tasks that are completed/cancelled but still have worktrees.
+// Checks git directly to determine if branches have been merged.
 func (h *WorktreeHandler) HandleListStale(c echo.Context) error {
 	tasks, err := h.deps.DB.GetTasksWithStaleWorktrees()
 	if err != nil {
@@ -69,8 +70,9 @@ func (h *WorktreeHandler) HandleListStale(c echo.Context) error {
 		TaskTitle    string  `json:"task_title"`
 		WorktreePath string  `json:"worktree_path"`
 		BranchName   string  `json:"branch_name"`
+		BaseBranch   string  `json:"base_branch"`
 		PRNumber     *int64  `json:"pr_number,omitempty"`
-		PRMerged     bool    `json:"pr_merged"`
+		BranchMerged bool    `json:"branch_merged"`
 		Status       string  `json:"status"`
 		CompletedAt  *string `json:"completed_at,omitempty"`
 	}
@@ -81,7 +83,7 @@ func (h *WorktreeHandler) HandleListStale(c echo.Context) error {
 			TaskID:     t.ID,
 			TaskTitle:  t.Title,
 			Status:     t.Status,
-			PRMerged:   t.PRMergedAt.Valid,
+			BaseBranch: t.BaseBranch,
 		}
 		if t.WorktreePath.Valid {
 			sw.WorktreePath = t.WorktreePath.String
@@ -97,6 +99,15 @@ func (h *WorktreeHandler) HandleListStale(c echo.Context) error {
 			ts := t.CompletedAt.Time.Format("2006-01-02T15:04:05Z")
 			sw.CompletedAt = &ts
 		}
+
+		// Check git merge status if we have branch info and git service
+		if h.deps.GitService != nil && t.BranchName.Valid && t.BranchName.String != "" {
+			merged, err := h.deps.GitService.IsTaskBranchMerged(t.ID)
+			if err == nil {
+				sw.BranchMerged = merged
+			}
+		}
+
 		stale = append(stale, sw)
 	}
 
@@ -150,24 +161,43 @@ func (h *WorktreeHandler) HandleDelete(c echo.Context) error {
 	return c.NoContent(http.StatusNoContent)
 }
 
-// HandleCleanupMerged cleans up all worktrees for tasks with merged PRs.
+// HandleCleanupMerged cleans up all worktrees for tasks whose branches have been merged.
 // POST /api/v1/worktrees/cleanup-merged
-// This is safe to run - it only cleans worktrees where the PR has been merged.
+// This is safe to run - it checks git directly to verify branches are merged before cleanup.
 func (h *WorktreeHandler) HandleCleanupMerged(c echo.Context) error {
 	if h.deps.GitService == nil {
 		return echo.NewHTTPError(http.StatusServiceUnavailable, "git service not configured")
 	}
 
-	tasks, err := h.deps.DB.GetTasksReadyForWorktreeCleanup()
+	// Get all stale worktrees (completed/cancelled tasks with worktrees)
+	tasks, err := h.deps.DB.GetTasksWithStaleWorktrees()
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 
-	var cleaned, failed int
+	var cleaned, skipped, failed int
 	var errors []string
 
 	for _, task := range tasks {
 		if !task.WorktreePath.Valid || task.WorktreePath.String == "" {
+			continue
+		}
+
+		if !task.BranchName.Valid || task.BranchName.String == "" {
+			skipped++
+			continue
+		}
+
+		// Check if branch is merged using git
+		merged, err := h.deps.GitService.IsTaskBranchMerged(task.ID)
+		if err != nil {
+			errors = append(errors, fmt.Sprintf("task %s: failed to check merge status: %v", task.ID, err))
+			failed++
+			continue
+		}
+
+		if !merged {
+			skipped++ // Branch not merged yet, skip
 			continue
 		}
 
@@ -179,7 +209,7 @@ func (h *WorktreeHandler) HandleCleanupMerged(c echo.Context) error {
 			continue
 		}
 
-		// Clean up the worktree (also delete the branch since PR is merged)
+		// Clean up the worktree (also delete the branch since it's merged)
 		if err := h.deps.GitService.CleanupTaskWorktree(project.RepoPath, task.ID, true); err != nil {
 			errors = append(errors, fmt.Sprintf("task %s: %v", task.ID, err))
 			failed++
@@ -196,6 +226,7 @@ func (h *WorktreeHandler) HandleCleanupMerged(c echo.Context) error {
 
 	return c.JSON(http.StatusOK, map[string]any{
 		"cleaned": cleaned,
+		"skipped": skipped,
 		"failed":  failed,
 		"errors":  errors,
 	})
