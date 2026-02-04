@@ -3,293 +3,500 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Poindexter Setup</title>
+    <title>Dex Setup</title>
     <style>
+        /* Design Tokens - matching app design system */
+        :root {
+            --bg-primary: #1a1a1a;
+            --bg-secondary: #242424;
+            --bg-tertiary: #2e2e2e;
+            --text-primary: #e8e4df;
+            --text-secondary: #9a9590;
+            --text-tertiary: #7a7570;
+            --accent-primary: #3F8A8C;
+            --accent-primary-hover: #4a9fa1;
+            --accent-secondary: #0C5679;
+            --accent-warm: #F28A0F;
+            --status-complete: #6b8f71;
+            --status-error: #E5340B;
+            --border-subtle: #333333;
+            --border-primary: #444444;
+            --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            --font-mono: 'JetBrains Mono', 'SF Mono', 'Menlo', monospace;
+            --radius-sm: 4px;
+            --radius-md: 6px;
+            --radius-lg: 8px;
+            --space-1: 0.25rem;
+            --space-2: 0.5rem;
+            --space-3: 0.75rem;
+            --space-4: 1rem;
+            --space-6: 1.5rem;
+            --space-8: 2rem;
+        }
+
         * { box-sizing: border-box; margin: 0; padding: 0; }
+
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            font-family: var(--font-sans);
+            background-color: var(--bg-primary);
             min-height: 100vh;
             min-height: 100dvh;
-            color: #fff;
-            padding: 20px;
+            color: var(--text-primary);
+            padding: var(--space-6);
             padding-bottom: env(safe-area-inset-bottom);
+            line-height: 1.5;
+            -webkit-font-smoothing: antialiased;
         }
+
         .container {
-            max-width: 500px;
+            max-width: 480px;
             margin: 0 auto;
         }
-        h1 {
-            font-size: 28px;
-            margin-bottom: 8px;
+
+        /* Header */
+        .header {
             text-align: center;
+            margin-bottom: var(--space-8);
         }
-        .subtitle {
-            color: #888;
-            text-align: center;
-            margin-bottom: 30px;
-            font-size: 15px;
+
+        .header__logo {
+            font-size: 2rem;
+            font-weight: 600;
+            color: var(--text-primary);
+            letter-spacing: -0.02em;
+            margin-bottom: var(--space-2);
         }
+
+        .header__subtitle {
+            color: var(--text-secondary);
+            font-size: 0.9375rem;
+        }
+
+        /* Screens */
         .screen {
             display: none;
         }
+
         .screen.active {
             display: block;
         }
+
+        /* Cards */
         .card {
-            background: rgba(255,255,255,0.05);
-            border-radius: 16px;
-            padding: 24px;
-            margin-bottom: 20px;
-            backdrop-filter: blur(10px);
+            background-color: var(--bg-secondary);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-lg);
+            padding: var(--space-6);
+            margin-bottom: var(--space-4);
         }
-        .card-title {
-            font-size: 18px;
-            font-weight: 600;
-            margin-bottom: 16px;
+
+        .card__title {
+            font-size: 1.125rem;
+            font-weight: 500;
+            margin-bottom: var(--space-4);
+            color: var(--text-primary);
         }
+
+        /* Form elements */
         label {
             display: block;
-            color: #aaa;
-            font-size: 14px;
-            margin-bottom: 8px;
+            color: var(--text-secondary);
+            font-size: 0.875rem;
+            margin-bottom: var(--space-2);
         }
+
         input[type="text"], input[type="password"], select {
             width: 100%;
-            padding: 16px;
-            border: 2px solid rgba(255,255,255,0.1);
-            border-radius: 12px;
-            background: rgba(0,0,0,0.3);
-            color: #fff;
-            font-size: 16px;
-            margin-bottom: 12px;
-            transition: border-color 0.2s, box-shadow 0.2s;
+            padding: var(--space-3) var(--space-4);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-md);
+            background-color: var(--bg-tertiary);
+            color: var(--text-primary);
+            font-size: 1rem;
+            font-family: inherit;
+            margin-bottom: var(--space-3);
+            transition: border-color 0.15s ease, box-shadow 0.15s ease;
         }
+
         input:focus, select:focus {
             outline: none;
-            border-color: #4CAF50;
-            box-shadow: 0 0 0 3px rgba(76, 175, 80, 0.2);
+            border-color: var(--accent-primary);
+            box-shadow: 0 0 0 2px rgba(63, 138, 140, 0.2);
         }
+
         input::placeholder {
-            color: #555;
+            color: var(--text-tertiary);
         }
+
+        /* PIN input */
         .pin-input {
             display: flex;
-            gap: 8px;
+            gap: var(--space-2);
             justify-content: center;
-            margin: 20px 0;
+            margin: var(--space-6) 0;
         }
+
         .pin-input input {
-            width: 50px;
-            height: 60px;
+            width: 3rem;
+            height: 3.5rem;
             text-align: center;
-            font-size: 24px;
-            font-weight: bold;
+            font-size: 1.5rem;
+            font-weight: 600;
+            font-family: var(--font-mono);
             padding: 0;
+            margin: 0;
         }
+
+        /* Buttons */
         button {
             width: 100%;
-            padding: 18px;
-            background: linear-gradient(135deg, #4CAF50, #45a049);
+            padding: var(--space-3) var(--space-4);
+            background-color: var(--accent-primary);
             color: white;
             border: none;
-            border-radius: 12px;
-            font-size: 18px;
-            font-weight: 600;
+            border-radius: var(--radius-md);
+            font-size: 1rem;
+            font-weight: 500;
+            font-family: inherit;
             cursor: pointer;
-            transition: transform 0.1s, box-shadow 0.2s;
-            box-shadow: 0 4px 15px rgba(76, 175, 80, 0.3);
+            transition: background-color 0.15s ease, transform 0.1s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: var(--space-2);
         }
-        button:hover {
-            transform: translateY(-1px);
-            box-shadow: 0 6px 20px rgba(76, 175, 80, 0.4);
+
+        button:hover:not(:disabled) {
+            background-color: var(--accent-primary-hover);
         }
-        button:active {
-            transform: translateY(0);
+
+        button:active:not(:disabled) {
+            transform: translateY(1px);
         }
+
         button:disabled {
-            background: #333;
+            background-color: var(--bg-tertiary);
+            color: var(--text-tertiary);
             cursor: not-allowed;
-            box-shadow: none;
-            transform: none;
         }
+
         button.secondary {
-            background: rgba(255,255,255,0.1);
-            box-shadow: none;
+            background-color: transparent;
+            border: 1px solid var(--border-primary);
+            color: var(--text-secondary);
         }
-        button.secondary:hover {
-            background: rgba(255,255,255,0.15);
-            box-shadow: none;
+
+        button.secondary:hover:not(:disabled) {
+            background-color: var(--bg-tertiary);
+            color: var(--text-primary);
         }
+
+        /* Choice cards */
         .choice-card {
-            background: rgba(255,255,255,0.05);
-            border: 2px solid rgba(255,255,255,0.1);
-            border-radius: 16px;
-            padding: 20px;
-            margin-bottom: 16px;
+            background-color: var(--bg-secondary);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-lg);
+            padding: var(--space-6);
+            margin-bottom: var(--space-4);
             cursor: pointer;
-            transition: border-color 0.2s, background 0.2s;
+            transition: border-color 0.15s ease, background-color 0.15s ease;
         }
+
         .choice-card:hover {
-            border-color: rgba(76, 175, 80, 0.5);
-            background: rgba(255,255,255,0.08);
+            border-color: var(--accent-primary);
+            background-color: var(--bg-tertiary);
         }
-        .choice-card .icon {
-            font-size: 32px;
-            margin-bottom: 12px;
+
+        .choice-card__icon {
+            font-size: 2rem;
+            margin-bottom: var(--space-3);
         }
-        .choice-card h3 {
-            font-size: 18px;
-            margin-bottom: 8px;
+
+        .choice-card__header {
+            display: flex;
+            align-items: center;
+            gap: var(--space-2);
+            margin-bottom: var(--space-2);
         }
-        .choice-card p {
-            color: #888;
-            font-size: 14px;
+
+        .choice-card__title {
+            font-size: 1.125rem;
+            font-weight: 500;
+        }
+
+        .choice-card__badge {
+            display: inline-block;
+            background-color: rgba(63, 138, 140, 0.2);
+            color: var(--accent-primary);
+            padding: var(--space-1) var(--space-2);
+            border-radius: var(--radius-sm);
+            font-size: 0.75rem;
+            font-weight: 500;
+        }
+
+        .choice-card__desc {
+            color: var(--text-secondary);
+            font-size: 0.875rem;
             line-height: 1.5;
         }
-        .choice-card .badge {
-            display: inline-block;
-            background: rgba(76, 175, 80, 0.2);
-            color: #4CAF50;
-            padding: 4px 8px;
-            border-radius: 4px;
-            font-size: 12px;
-            margin-left: 8px;
-        }
+
+        /* Info boxes */
         .info-box {
-            background: rgba(33, 150, 243, 0.15);
-            border: 1px solid rgba(33, 150, 243, 0.5);
-            border-radius: 12px;
-            padding: 16px;
-            margin: 20px 0;
-            font-size: 14px;
+            background-color: rgba(63, 138, 140, 0.1);
+            border: 1px solid rgba(63, 138, 140, 0.3);
+            border-radius: var(--radius-md);
+            padding: var(--space-4);
+            margin: var(--space-4) 0;
+            font-size: 0.875rem;
             display: flex;
             align-items: flex-start;
-            gap: 12px;
+            gap: var(--space-3);
         }
+
         .info-box.warning {
-            background: rgba(255, 193, 7, 0.15);
-            border-color: rgba(255, 193, 7, 0.5);
+            background-color: rgba(242, 138, 15, 0.1);
+            border-color: rgba(242, 138, 15, 0.3);
         }
+
         .info-box.error {
-            background: rgba(244, 67, 54, 0.15);
-            border-color: rgba(244, 67, 54, 0.5);
+            background-color: rgba(229, 52, 11, 0.1);
+            border-color: rgba(229, 52, 11, 0.3);
         }
-        .info-icon {
-            font-size: 24px;
+
+        .info-box__icon {
+            font-size: 1.25rem;
             flex-shrink: 0;
         }
+
+        .info-box__text {
+            color: var(--text-secondary);
+        }
+
+        .info-box.error .info-box__text {
+            color: var(--status-error);
+        }
+
+        /* Status indicator */
         .status {
             display: flex;
             align-items: center;
-            gap: 8px;
-            padding: 12px 16px;
-            background: rgba(0,0,0,0.2);
-            border-radius: 8px;
-            margin: 16px 0;
+            gap: var(--space-2);
+            padding: var(--space-3) var(--space-4);
+            background-color: var(--bg-tertiary);
+            border-radius: var(--radius-md);
+            margin: var(--space-4) 0;
+            font-size: 0.875rem;
         }
-        .status-dot {
-            width: 10px;
-            height: 10px;
+
+        .status__dot {
+            width: 8px;
+            height: 8px;
             border-radius: 50%;
-            background: #888;
+            background-color: var(--text-tertiary);
         }
-        .status-dot.connected {
-            background: #4CAF50;
+
+        .status__dot--connected {
+            background-color: var(--status-complete);
         }
-        .status-dot.waiting {
-            background: #FFC107;
+
+        .status__dot--waiting {
+            background-color: var(--accent-warm);
             animation: pulse 1.5s infinite;
         }
+
         @keyframes pulse {
             0%, 100% { opacity: 1; }
             50% { opacity: 0.5; }
         }
+
+        /* QR Code */
         .qr-container {
-            background: white;
-            padding: 16px;
-            border-radius: 12px;
+            background-color: white;
+            padding: var(--space-4);
+            border-radius: var(--radius-md);
             display: inline-block;
-            margin: 20px 0;
+            margin: var(--space-4) 0;
         }
+
         .qr-container img {
             display: block;
-            width: 200px;
-            height: 200px;
+            width: 180px;
+            height: 180px;
         }
+
+        /* URL display */
         .url-display {
-            background: rgba(0,0,0,0.3);
-            border-radius: 12px;
-            padding: 16px;
-            margin-top: 20px;
-            font-family: monospace;
-            font-size: 14px;
-            color: #4CAF50;
+            background-color: var(--bg-tertiary);
+            border-radius: var(--radius-md);
+            padding: var(--space-4);
+            margin: var(--space-4) 0;
+            font-family: var(--font-mono);
+            font-size: 0.875rem;
+            color: var(--accent-primary);
             word-break: break-all;
             text-align: center;
         }
+
         .url-display a {
-            color: #4CAF50;
+            color: var(--accent-primary);
             text-decoration: none;
         }
+
         .url-display a:hover {
             text-decoration: underline;
         }
+
+        /* Success state */
         .success-icon {
-            font-size: 64px;
+            font-size: 4rem;
             text-align: center;
-            margin-bottom: 20px;
+            margin-bottom: var(--space-4);
         }
-        .hidden { display: none !important; }
-        .loading {
+
+        .success-title {
+            text-align: center;
+            font-size: 1.25rem;
+            font-weight: 500;
+            margin-bottom: var(--space-2);
+        }
+
+        .success-desc {
+            text-align: center;
+            color: var(--text-secondary);
+            margin-bottom: var(--space-4);
+        }
+
+        /* Instructions */
+        .instructions {
+            background-color: var(--bg-tertiary);
+            border-radius: var(--radius-md);
+            padding: var(--space-4);
+            margin: var(--space-4) 0;
+        }
+
+        .instructions ol {
+            margin-left: var(--space-6);
+            line-height: 1.8;
+            color: var(--text-secondary);
+        }
+
+        .instructions a {
+            color: var(--accent-primary);
+            text-decoration: none;
+        }
+
+        .instructions a:hover {
+            text-decoration: underline;
+        }
+
+        .instructions code {
+            background-color: var(--bg-primary);
+            padding: var(--space-1) var(--space-2);
+            border-radius: var(--radius-sm);
+            font-family: var(--font-mono);
+            font-size: 0.8125rem;
+        }
+
+        /* Loading spinner */
+        .spinner {
             display: inline-block;
-            width: 20px;
-            height: 20px;
-            border: 3px solid rgba(255,255,255,.3);
+            width: 1.25rem;
+            height: 1.25rem;
+            border: 2px solid rgba(255, 255, 255, 0.3);
             border-radius: 50%;
-            border-top-color: #fff;
-            animation: spin 1s ease-in-out infinite;
-            vertical-align: middle;
-            margin-right: 8px;
+            border-top-color: currentColor;
+            animation: spin 0.8s linear infinite;
         }
-        @keyframes spin { to { transform: rotate(360deg); } }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Utility */
+        .hidden { display: none !important; }
+        .text-center { text-align: center; }
+        .mt-4 { margin-top: var(--space-4); }
+        .mb-4 { margin-bottom: var(--space-4); }
+
+        /* Step indicator */
         .steps {
             display: flex;
             justify-content: center;
-            gap: 8px;
-            margin-bottom: 30px;
+            gap: var(--space-2);
+            margin-bottom: var(--space-6);
         }
-        .step-indicator {
-            width: 10px;
-            height: 10px;
+
+        .step-dot {
+            width: 8px;
+            height: 8px;
             border-radius: 50%;
-            background: rgba(255,255,255,0.2);
+            background-color: var(--border-primary);
+            transition: background-color 0.2s ease;
         }
-        .step-indicator.active {
-            background: #4CAF50;
+
+        .step-dot.active,
+        .step-dot.completed {
+            background-color: var(--accent-primary);
         }
-        .step-indicator.completed {
-            background: #4CAF50;
+
+        /* Helper text */
+        .helper-text {
+            font-size: 0.8125rem;
+            color: var(--text-tertiary);
+            margin-bottom: var(--space-4);
         }
-        .help-link {
-            color: #4CAF50;
+
+        .helper-text strong {
+            color: var(--text-secondary);
+        }
+
+        /* Validation states */
+        .input-wrapper {
+            position: relative;
+        }
+
+        .input-wrapper input {
+            padding-right: 2.5rem;
+        }
+
+        .input-icon {
+            position: absolute;
+            right: var(--space-3);
+            top: 50%;
+            transform: translateY(-75%);
+            font-size: 1.25rem;
+        }
+
+        .input--error {
+            border-color: var(--status-error) !important;
+        }
+
+        .input--success {
+            border-color: var(--status-complete) !important;
+        }
+
+        /* External link button */
+        .external-link {
+            display: inline-flex;
+            align-items: center;
+            gap: var(--space-2);
+            background-color: var(--accent-secondary);
+            color: white;
+            padding: var(--space-2) var(--space-4);
+            border-radius: var(--radius-md);
+            font-size: 0.875rem;
+            font-weight: 500;
             text-decoration: none;
+            transition: background-color 0.15s ease;
         }
-        .help-link:hover {
-            text-decoration: underline;
+
+        .external-link:hover {
+            background-color: #0e6a94;
         }
-        .instructions {
-            background: rgba(0,0,0,0.2);
-            border-radius: 12px;
-            padding: 16px;
-            margin: 16px 0;
-        }
-        .instructions ol {
-            margin-left: 20px;
-            line-height: 1.8;
-        }
-        .instructions a {
-            color: #4CAF50;
+
+        .external-link svg {
+            width: 1rem;
+            height: 1rem;
         }
     </style>
 </head>
@@ -297,8 +504,10 @@
     <div class="container">
         <!-- Screen 1: PIN Entry -->
         <div id="screen-pin" class="screen active">
-            <h1>Poindexter</h1>
-            <p class="subtitle">Enter the PIN shown in your terminal</p>
+            <div class="header">
+                <h1 class="header__logo">Dex</h1>
+                <p class="header__subtitle">Enter the PIN shown in your terminal</p>
+            </div>
 
             <div class="card">
                 <div class="pin-input">
@@ -311,47 +520,56 @@
                 </div>
 
                 <div id="pin-error" class="info-box error hidden">
-                    <span class="info-icon">!</span>
-                    <div id="pin-error-text">Invalid PIN</div>
+                    <span class="info-box__icon">!</span>
+                    <div class="info-box__text" id="pin-error-text">Invalid PIN</div>
                 </div>
 
                 <button id="btn-verify-pin" onclick="verifyPIN()">Continue</button>
             </div>
 
             <div class="info-box">
-                <span class="info-icon">&#x1F4BB;</span>
-                <div>Check your terminal for the 6-digit PIN. It was displayed when you ran the install script.</div>
+                <span class="info-box__icon">&#x1F4BB;</span>
+                <div class="info-box__text">Check your terminal for the 6-digit PIN. It was displayed when you ran the install script.</div>
             </div>
         </div>
 
         <!-- Screen 2: Access Choice -->
         <div id="screen-choice" class="screen">
-            <h1>Choose Access Method</h1>
-            <p class="subtitle">How do you want to connect to Poindexter?</p>
+            <div class="header">
+                <h1 class="header__logo">Choose Access Method</h1>
+                <p class="header__subtitle">How do you want to connect to Dex?</p>
+            </div>
 
             <div class="choice-card" onclick="chooseTailscale()">
-                <div class="icon">&#x1F512;</div>
-                <h3>Tailscale <span class="badge">Recommended</span></h3>
-                <p>Private network access. Only you can connect. Requires installing the Tailscale app on your devices.</p>
+                <div class="choice-card__icon">&#x1F512;</div>
+                <div class="choice-card__header">
+                    <span class="choice-card__title">Tailscale</span>
+                    <span class="choice-card__badge">Recommended</span>
+                </div>
+                <p class="choice-card__desc">Private network access. Only you can connect. Requires installing the Tailscale app on your devices.</p>
             </div>
 
             <div class="choice-card" onclick="chooseCloudflare()">
-                <div class="icon">&#x1F310;</div>
-                <h3>Cloudflare</h3>
-                <p>Public URL access. Connect from anywhere without installing apps. Requires a Cloudflare account and API token.</p>
+                <div class="choice-card__icon">&#x1F310;</div>
+                <div class="choice-card__header">
+                    <span class="choice-card__title">Cloudflare</span>
+                </div>
+                <p class="choice-card__desc">Public URL access. Connect from anywhere without installing apps. Requires a Cloudflare account and API token.</p>
             </div>
         </div>
 
         <!-- Screen 3a: Tailscale Setup -->
         <div id="screen-tailscale" class="screen">
-            <h1>Tailscale Setup</h1>
-            <p class="subtitle">Connect your device to your tailnet</p>
+            <div class="header">
+                <h1 class="header__logo">Tailscale Setup</h1>
+                <p class="header__subtitle">Connect your device to your tailnet</p>
+            </div>
 
             <div class="card">
                 <div id="ts-not-installed" class="hidden">
                     <div class="info-box warning">
-                        <span class="info-icon">&#x26A0;</span>
-                        <div>Tailscale is not installed on the server. Please install it first.</div>
+                        <span class="info-box__icon">&#x26A0;</span>
+                        <div class="info-box__text">Tailscale is not installed on the server. Please install it first.</div>
                     </div>
                     <div class="instructions">
                         <ol>
@@ -363,33 +581,33 @@
                 </div>
 
                 <div id="ts-need-auth" class="hidden">
-                    <p style="margin-bottom: 16px;">Install the Tailscale app on your phone or computer, then scan this QR code to connect:</p>
+                    <p class="helper-text">Install the Tailscale app on your phone or computer, then scan this QR code to connect:</p>
 
-                    <div style="text-align: center;">
+                    <div class="text-center">
                         <div class="qr-container">
                             <img id="ts-qr" src="" alt="Tailscale Auth QR">
                         </div>
                     </div>
 
-                    <p style="text-align: center; margin-bottom: 16px; font-size: 14px; color: #888;">Or open this URL:</p>
+                    <p class="helper-text text-center">Or open this URL:</p>
                     <div class="url-display">
                         <a id="ts-auth-url" href="#" target="_blank"></a>
                     </div>
 
                     <div class="status">
-                        <div class="status-dot waiting"></div>
+                        <div class="status__dot status__dot--waiting"></div>
                         <span id="ts-status-text">Waiting for connection...</span>
                     </div>
                 </div>
 
                 <div id="ts-connected" class="hidden">
                     <div class="success-icon">&#x2705;</div>
-                    <h3 style="text-align: center; margin-bottom: 16px;">Connected!</h3>
-                    <p style="text-align: center; color: #888; margin-bottom: 20px;">Your permanent URL:</p>
+                    <h3 class="success-title">Connected!</h3>
+                    <p class="success-desc">Your permanent URL:</p>
                     <div class="url-display">
                         <a id="ts-permanent-url" href="#" target="_blank"></a>
                     </div>
-                    <button style="margin-top: 20px;" onclick="configureTailscale()">Continue</button>
+                    <button class="mt-4" onclick="configureTailscale()">Continue</button>
                 </div>
             </div>
 
@@ -398,12 +616,14 @@
 
         <!-- Screen 3b: Cloudflare Setup -->
         <div id="screen-cloudflare" class="screen">
-            <h1>Cloudflare Setup</h1>
-            <p class="subtitle">Create a permanent tunnel</p>
+            <div class="header">
+                <h1 class="header__logo">Cloudflare Setup</h1>
+                <p class="header__subtitle">Create a permanent tunnel</p>
+            </div>
 
             <div class="card">
                 <div id="cf-step-token">
-                    <div class="card-title">Step 1: Enter API Token</div>
+                    <div class="card__title">Step 1: Enter API Token</div>
 
                     <div class="instructions">
                         <ol>
@@ -418,15 +638,15 @@
                     <input type="password" id="cf-token" placeholder="Enter your Cloudflare API token">
 
                     <div id="cf-token-error" class="info-box error hidden">
-                        <span class="info-icon">!</span>
-                        <div id="cf-token-error-text">Invalid token</div>
+                        <span class="info-box__icon">!</span>
+                        <div class="info-box__text" id="cf-token-error-text">Invalid token</div>
                     </div>
 
                     <button id="btn-validate-token" onclick="validateCloudflareToken()">Validate Token</button>
                 </div>
 
                 <div id="cf-step-zone" class="hidden">
-                    <div class="card-title">Step 2: Choose Domain</div>
+                    <div class="card__title">Step 2: Choose Domain</div>
 
                     <label for="cf-zone">Domain</label>
                     <select id="cf-zone">
@@ -436,7 +656,7 @@
                     <label for="cf-subdomain">Subdomain</label>
                     <input type="text" id="cf-subdomain" placeholder="dex" value="dex">
 
-                    <p style="color: #888; font-size: 13px; margin-bottom: 16px;">
+                    <p class="helper-text">
                         Your URL will be: <strong id="cf-preview-url">https://dex.example.com</strong>
                     </p>
 
@@ -445,12 +665,12 @@
 
                 <div id="cf-step-complete" class="hidden">
                     <div class="success-icon">&#x2705;</div>
-                    <h3 style="text-align: center; margin-bottom: 16px;">Tunnel Created!</h3>
-                    <p style="text-align: center; color: #888; margin-bottom: 20px;">Your permanent URL:</p>
+                    <h3 class="success-title">Tunnel Created!</h3>
+                    <p class="success-desc">Your permanent URL:</p>
                     <div class="url-display">
                         <a id="cf-permanent-url" href="#" target="_blank"></a>
                     </div>
-                    <button style="margin-top: 20px;" onclick="completeSetup()">Continue to Setup</button>
+                    <button class="mt-4" onclick="completeSetup()">Continue to Setup</button>
                 </div>
             </div>
 
@@ -459,17 +679,17 @@
 
         <!-- Screen 4: Complete -->
         <div id="screen-complete" class="screen">
-            <div class="card" style="text-align: center;">
+            <div class="card text-center">
                 <div class="success-icon">&#x1F389;</div>
-                <h2 style="margin-bottom: 16px;">Access Configured!</h2>
-                <p style="color: #888; margin-bottom: 20px;">
+                <h2 class="success-title">Access Configured!</h2>
+                <p class="success-desc">
                     Redirecting you to your permanent URL to complete setup...
                 </p>
                 <div class="url-display">
                     <a id="final-url" href="#" target="_blank"></a>
                 </div>
                 <div class="status" style="justify-content: center;">
-                    <div class="loading"></div>
+                    <span class="spinner"></span>
                     <span>Redirecting...</span>
                 </div>
             </div>
@@ -487,10 +707,7 @@
         // Initialize
         document.addEventListener('DOMContentLoaded', () => {
             setupPINInputs();
-            // Check for PIN in URL hash (e.g., #123456) and auto-fill
             checkURLHashForPIN();
-            // Always start on PIN screen - require PIN each time
-            // Don't call fetchState() to auto-advance based on saved state
         });
 
         function checkURLHashForPIN() {
@@ -501,9 +718,7 @@
                 pin.split('').forEach((digit, i) => {
                     if (inputs[i]) inputs[i].value = digit;
                 });
-                // Clear hash from URL to avoid confusion
                 history.replaceState(null, '', window.location.pathname + window.location.search);
-                // Auto-verify after a brief delay
                 setTimeout(() => verifyPIN(), 100);
             }
         }
@@ -537,32 +752,6 @@
             });
         }
 
-        async function fetchState() {
-            try {
-                const resp = await fetch('/api/state');
-                const state = await resp.json();
-
-                if (state.phase === 'access_choice') {
-                    showScreen('choice');
-                } else if (state.phase === 'tailscale_setup') {
-                    accessMethod = 'tailscale';
-                    showScreen('tailscale');
-                    checkTailscaleStatus();
-                } else if (state.phase === 'cloudflare_setup') {
-                    accessMethod = 'cloudflare';
-                    showScreen('cloudflare');
-                } else if (state.phase === 'complete') {
-                    permanentURL = state.permanent_url;
-                    showScreen('complete');
-                    setTimeout(() => {
-                        window.location.href = permanentURL;
-                    }, 2000);
-                }
-            } catch (e) {
-                console.error('Failed to fetch state:', e);
-            }
-        }
-
         function showScreen(screen) {
             document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
             document.getElementById('screen-' + screen).classList.add('active');
@@ -580,7 +769,7 @@
 
             const btn = document.getElementById('btn-verify-pin');
             btn.disabled = true;
-            btn.innerHTML = '<span class="loading"></span>Verifying...';
+            btn.innerHTML = '<span class="spinner"></span>Verifying...';
 
             try {
                 const resp = await fetch('/api/verify-pin', {
@@ -595,7 +784,6 @@
                     document.getElementById('pin-error').classList.remove('hidden');
                     document.getElementById('pin-error-text').textContent =
                         data.error + (data.attempts_remaining ? ` (${data.attempts_remaining} attempts left)` : '');
-                    // Clear inputs
                     document.querySelectorAll('.pin-input input').forEach(i => i.value = '');
                     document.querySelector('.pin-input input').focus();
                 } else {
@@ -635,7 +823,6 @@
             try {
                 const resp = await fetch('/api/tailscale/status');
                 const status = await resp.json();
-                console.log('Tailscale status:', status);
 
                 if (!status.installed) {
                     document.getElementById('ts-not-installed').classList.remove('hidden');
@@ -644,19 +831,16 @@
                     return;
                 }
 
-                // Update status text with backend state for debugging
                 const statusText = document.getElementById('ts-status-text');
                 if (statusText && status.backend_state) {
                     statusText.textContent = `Status: ${status.backend_state}`;
                 }
 
                 if (status.connected) {
-                    console.log('Tailscale connected! serve_url:', status.serve_url);
                     document.getElementById('ts-not-installed').classList.add('hidden');
                     document.getElementById('ts-need-auth').classList.add('hidden');
                     document.getElementById('ts-connected').classList.remove('hidden');
 
-                    // Use serve_url or construct from dns_name
                     const serveUrl = status.serve_url || (status.dns_name ? 'https://' + status.dns_name : '');
                     if (serveUrl) {
                         document.getElementById('ts-permanent-url').textContent = serveUrl;
@@ -666,36 +850,29 @@
                         document.getElementById('ts-permanent-url').textContent = 'URL will be available after configuration';
                     }
 
-                    // Stop polling
                     if (tsCheckInterval) {
                         clearInterval(tsCheckInterval);
                         tsCheckInterval = null;
                     }
                 } else {
-                    // Need to authenticate
                     document.getElementById('ts-not-installed').classList.add('hidden');
                     document.getElementById('ts-need-auth').classList.remove('hidden');
                     document.getElementById('ts-connected').classList.add('hidden');
 
-                    // Only get auth URL if we don't already have one displayed
                     const currentAuthUrl = document.getElementById('ts-auth-url').textContent;
                     if (!currentAuthUrl || currentAuthUrl.startsWith('Error:') || currentAuthUrl.startsWith('Run') || currentAuthUrl === '') {
-                        // Get auth URL (only once, not on every poll)
                         const authResp = await fetch('/api/tailscale/auth-url', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ hostname: 'dex' })
                         });
                         const authData = await authResp.json();
-                        console.log('Tailscale auth response:', authData);
 
                         if (authData.error) {
-                            // Show error message
                             document.getElementById('ts-auth-url').textContent = 'Error: ' + authData.error;
                             document.getElementById('ts-auth-url').removeAttribute('href');
                             document.getElementById('ts-qr').style.display = 'none';
                         } else if (authData.already_connected) {
-                            console.log('Already connected via auth-url check');
                             document.getElementById('ts-need-auth').classList.add('hidden');
                             document.getElementById('ts-connected').classList.remove('hidden');
                             const url = authData.serve_url || '';
@@ -712,19 +889,16 @@
                             document.getElementById('ts-auth-url').textContent = authData.auth_url;
                             document.getElementById('ts-auth-url').href = authData.auth_url;
                             document.getElementById('ts-qr').style.display = 'block';
-                            // Generate QR code using external service
                             document.getElementById('ts-qr').src =
                                 'https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=' +
                                 encodeURIComponent(authData.auth_url);
                         } else {
-                            // No auth URL returned - show manual instructions
                             document.getElementById('ts-auth-url').textContent = 'Run "tailscale up" in terminal to authenticate';
                             document.getElementById('ts-auth-url').removeAttribute('href');
                             document.getElementById('ts-qr').style.display = 'none';
                         }
                     }
 
-                    // Start polling for connection (only once)
                     if (!tsCheckInterval) {
                         tsCheckInterval = setInterval(checkTailscaleStatus, 3000);
                     }
@@ -737,7 +911,7 @@
         async function configureTailscale() {
             const btn = document.querySelector('#ts-connected button');
             btn.disabled = true;
-            btn.innerHTML = '<span class="loading"></span>Configuring...';
+            btn.innerHTML = '<span class="spinner"></span>Configuring...';
 
             try {
                 const resp = await fetch('/api/tailscale/configure', { method: 'POST' });
@@ -769,7 +943,7 @@
 
             const btn = document.getElementById('btn-validate-token');
             btn.disabled = true;
-            btn.innerHTML = '<span class="loading"></span>Validating...';
+            btn.innerHTML = '<span class="spinner"></span>Validating...';
 
             try {
                 const resp = await fetch('/api/cloudflare/validate', {
@@ -788,7 +962,6 @@
                     return;
                 }
 
-                // Token valid, get zones
                 const zonesResp = await fetch('/api/cloudflare/zones');
                 const zonesData = await zonesResp.json();
 
@@ -844,7 +1017,7 @@
 
             const btn = document.getElementById('btn-create-tunnel');
             btn.disabled = true;
-            btn.innerHTML = '<span class="loading"></span>Creating tunnel...';
+            btn.innerHTML = '<span class="spinner"></span>Creating tunnel...';
 
             try {
                 const resp = await fetch('/api/cloudflare/setup', {
@@ -893,7 +1066,6 @@
                 document.getElementById('final-url').href = permanentURL;
                 showScreen('complete');
 
-                // Redirect after a short delay
                 setTimeout(() => {
                     window.location.href = permanentURL;
                 }, 3000);
