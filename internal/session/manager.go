@@ -115,6 +115,7 @@ type Manager struct {
 
 	// Git and GitHub for PR creation on completion
 	gitOps              *git.Operations
+	gitService          *git.Service           // For worktree cleanup after merge
 	repoManager         *git.RepoManager       // For cloning repos to permanent location
 	githubClient        *toolbelt.GitHubClient // Static client (PAT-based)
 	githubClientFetcher GitHubClientFetcher    // Dynamic client fetcher (GitHub App)
@@ -209,6 +210,13 @@ func (m *Manager) SetRepoManager(rm *git.RepoManager) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.repoManager = rm
+}
+
+// SetGitService sets the git service for worktree cleanup after merge
+func (m *Manager) SetGitService(svc *git.Service) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.gitService = svc
 }
 
 // SetGitHubClient sets the GitHub client for creating PRs
@@ -1063,19 +1071,73 @@ func (m *Manager) createPRForTask(taskID, worktreePath string) {
 	}
 
 	// Update task with PR number
-	if pr.Number != nil {
-		if err := m.db.UpdateTaskPRNumber(taskID, *pr.Number); err != nil {
-			fmt.Printf("createPRForTask: failed to update task %s with PR number: %v\n", taskID, err)
-			return
-		}
-		fmt.Printf("createPRForTask: created PR #%d for task %s\n", *pr.Number, taskID)
-
-		// Notify PR created (for GitHub sync)
-		m.mu.RLock()
-		onPRCreated := m.onPRCreated
-		m.mu.RUnlock()
-		if onPRCreated != nil {
-			onPRCreated(taskID, *pr.Number)
-		}
+	if pr.Number == nil {
+		fmt.Printf("createPRForTask: PR created but no number returned for task %s\n", taskID)
+		return
 	}
+
+	prNumber := *pr.Number
+	if err := m.db.UpdateTaskPRNumber(taskID, prNumber); err != nil {
+		fmt.Printf("createPRForTask: failed to update task %s with PR number: %v\n", taskID, err)
+		return
+	}
+	fmt.Printf("createPRForTask: created PR #%d for task %s\n", prNumber, taskID)
+
+	// Notify PR created (for GitHub sync)
+	m.mu.RLock()
+	onPRCreated := m.onPRCreated
+	m.mu.RUnlock()
+	if onPRCreated != nil {
+		onPRCreated(taskID, prNumber)
+	}
+
+	// Auto-merge the PR unless autonomy_level is 0 (requires manual approval)
+	if task.AutonomyLevel == 0 {
+		fmt.Printf("createPRForTask: autonomy_level=0 for task %s, skipping auto-merge (manual approval required)\n", taskID)
+		return
+	}
+
+	// Merge the PR
+	mergeOpts := toolbelt.MergePROptions{
+		Owner:       owner,
+		Repo:        repo,
+		PRNumber:    prNumber,
+		MergeMethod: "squash",
+		CommitTitle: fmt.Sprintf("%s (#%d)", task.Title, prNumber),
+	}
+
+	mergeResult, err := githubClient.MergePR(ctx, mergeOpts)
+	if err != nil {
+		fmt.Printf("createPRForTask: failed to merge PR #%d for task %s: %v (PR left open for manual merge)\n", prNumber, taskID, err)
+		return
+	}
+
+	if mergeResult.GetMerged() {
+		fmt.Printf("createPRForTask: merged PR #%d for task %s (sha: %s)\n", prNumber, taskID, mergeResult.GetSHA())
+	} else {
+		fmt.Printf("createPRForTask: merge returned but not merged for PR #%d task %s: %s\n", prNumber, taskID, mergeResult.GetMessage())
+		return
+	}
+
+	// Cleanup worktree after successful merge
+	m.mu.RLock()
+	gitService := m.gitService
+	m.mu.RUnlock()
+
+	if gitService == nil {
+		fmt.Printf("createPRForTask: no git service configured, skipping worktree cleanup for task %s\n", taskID)
+		return
+	}
+
+	if err := gitService.CleanupTaskWorktree(project.RepoPath, taskID, true); err != nil {
+		fmt.Printf("createPRForTask: failed to cleanup worktree for task %s: %v\n", taskID, err)
+		return
+	}
+
+	// Mark worktree as cleaned in DB
+	if err := m.db.MarkTaskWorktreeCleaned(taskID); err != nil {
+		fmt.Printf("createPRForTask: failed to mark worktree cleaned for task %s: %v\n", taskID, err)
+	}
+
+	fmt.Printf("createPRForTask: cleaned up worktree for task %s after merge\n", taskID)
 }

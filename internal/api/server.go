@@ -147,6 +147,7 @@ func NewServer(database *db.DB, cfg Config) *Server {
 	if s.gitService != nil {
 		sessionMgr.SetGitOperations(s.gitService.Operations())
 		sessionMgr.SetRepoManager(s.gitService.RepoManager())
+		sessionMgr.SetGitService(s.gitService) // For worktree cleanup after merge
 	}
 
 	// Wire up GitHub client if toolbelt has it configured
