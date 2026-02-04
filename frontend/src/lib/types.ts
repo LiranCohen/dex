@@ -341,6 +341,10 @@ export interface ObjectiveDraft {
   complexity?: 'simple' | 'complex'; // determines AI model: simple=Sonnet, complex=Opus
   estimated_iterations?: number;
   estimated_budget?: number; // estimated cost in dollars
+  // Repository targeting - for creating/cloning repos
+  github_owner?: string; // GitHub owner/org for new or cloned repo
+  github_repo?: string;  // GitHub repo name
+  clone_url?: string;    // URL to clone (if cloning existing repo)
 }
 
 // Pre-flight check result

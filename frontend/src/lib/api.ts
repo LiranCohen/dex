@@ -260,6 +260,10 @@ export async function createObjectivesBatch(
       blocked_by: draft.blocked_by || [],
       complexity: draft.complexity,
       estimated_iterations: draft.estimated_iterations,
+      // Repository targeting
+      github_owner: draft.github_owner,
+      github_repo: draft.github_repo,
+      clone_url: draft.clone_url,
     })),
   };
   console.log('createObjectivesBatch API call:', { questId, payload });

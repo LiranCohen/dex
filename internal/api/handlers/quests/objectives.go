@@ -62,6 +62,10 @@ func (h *ObjectivesHandler) HandleCreate(c echo.Context) error {
 		SelectedOptional []int    `json:"selected_optional"`
 		AutoStart        bool     `json:"auto_start"`
 		BlockedBy        []string `json:"blocked_by"`
+		// Repository targeting
+		GitHubOwner string `json:"github_owner"`
+		GitHubRepo  string `json:"github_repo"`
+		CloneURL    string `json:"clone_url"`
 	}
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
@@ -84,7 +88,10 @@ func (h *ObjectivesHandler) HandleCreate(c echo.Context) error {
 			MustHave: req.MustHave,
 			Optional: req.Optional,
 		},
-		AutoStart: req.AutoStart,
+		AutoStart:   req.AutoStart,
+		GitHubOwner: req.GitHubOwner,
+		GitHubRepo:  req.GitHubRepo,
+		CloneURL:    req.CloneURL,
 	}
 
 	createdTask, err := h.deps.QuestHandler.CreateObjectiveFromDraft(c.Request().Context(), questID, draft, req.SelectedOptional)
@@ -179,6 +186,10 @@ func (h *ObjectivesHandler) HandleCreateBatch(c echo.Context) error {
 			BlockedBy           []string `json:"blocked_by"`
 			Complexity          string   `json:"complexity,omitempty"`
 			EstimatedIterations int      `json:"estimated_iterations,omitempty"`
+			// Repository targeting
+			GitHubOwner string `json:"github_owner"`
+			GitHubRepo  string `json:"github_repo"`
+			CloneURL    string `json:"clone_url"`
 		} `json:"drafts"`
 	}
 	if err := c.Bind(&req); err != nil {
@@ -211,6 +222,9 @@ func (h *ObjectivesHandler) HandleCreateBatch(c echo.Context) error {
 			AutoStart:           draft.AutoStart,
 			Complexity:          draft.Complexity,
 			EstimatedIterations: draft.EstimatedIterations,
+			GitHubOwner:         draft.GitHubOwner,
+			GitHubRepo:          draft.GitHubRepo,
+			CloneURL:            draft.CloneURL,
 		}
 
 		task, err := h.deps.QuestHandler.CreateObjectiveFromDraft(c.Request().Context(), questID, questDraft, draft.SelectedOptional)
