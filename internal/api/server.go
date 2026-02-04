@@ -155,6 +155,9 @@ func NewServer(database *db.DB, cfg Config) *Server {
 	// Wire up WebSocket hub for real-time updates
 	sessionMgr.SetWebSocketHub(s.hub)
 
+	// Wire up broadcaster for dual-publishing (legacy + new realtime)
+	sessionMgr.SetBroadcaster(broadcaster)
+
 	// Wire up Anthropic client for Ralph loop execution
 	if cfg.Toolbelt != nil && cfg.Toolbelt.Anthropic != nil {
 		sessionMgr.SetAnthropicClient(cfg.Toolbelt.Anthropic)

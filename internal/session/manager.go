@@ -10,6 +10,7 @@ import (
 
 	"github.com/lirancohen/dex/internal/api/websocket"
 	"github.com/lirancohen/dex/internal/db"
+	"github.com/lirancohen/dex/internal/realtime"
 	"github.com/lirancohen/dex/internal/git"
 	"github.com/lirancohen/dex/internal/orchestrator"
 	"github.com/lirancohen/dex/internal/toolbelt"
@@ -110,7 +111,8 @@ type Manager struct {
 
 	// External dependencies for Ralph loop
 	anthropicClient *toolbelt.AnthropicClient
-	wsHub           *websocket.Hub
+	wsHub           *websocket.Hub          // Legacy hub (for RalphLoop)
+	broadcaster     *realtime.Broadcaster   // New broadcaster (dual-publish)
 
 	// Git and GitHub for PR creation on completion
 	gitOps              *git.Operations
@@ -192,6 +194,13 @@ func (m *Manager) SetWebSocketHub(hub *websocket.Hub) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.wsHub = hub
+}
+
+// SetBroadcaster sets the broadcaster for dual-publishing to legacy and new systems
+func (m *Manager) SetBroadcaster(broadcaster *realtime.Broadcaster) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.broadcaster = broadcaster
 }
 
 
@@ -276,8 +285,18 @@ func (m *Manager) notifyTaskStatus(taskID string, status string) {
 func (m *Manager) broadcastTaskUpdated(taskID string, status string) {
 	m.mu.RLock()
 	hub := m.wsHub
+	broadcaster := m.broadcaster
 	m.mu.RUnlock()
 
+	// Use broadcaster if available (publishes to both legacy and new systems)
+	if broadcaster != nil {
+		broadcaster.PublishTaskEvent(realtime.EventTaskUpdated, taskID, map[string]any{
+			"status": status,
+		})
+		return
+	}
+
+	// Fall back to legacy hub
 	if hub != nil {
 		hub.Broadcast(websocket.Message{
 			Type:   websocket.EventTaskUpdated,
