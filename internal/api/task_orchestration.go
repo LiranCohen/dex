@@ -82,6 +82,10 @@ func (s *Server) startTaskInternal(ctx context.Context, taskID string, baseBranc
 				return nil, fmt.Errorf("failed to create task directory: %w", err)
 			}
 		}
+		// Save worktree path to database so it can be inherited by dependent tasks
+		if err := s.db.UpdateTaskWorktree(taskID, worktreePath, ""); err != nil {
+			return nil, fmt.Errorf("failed to save worktree path: %w", err)
+		}
 	}
 
 	// Transition through ready to running status
@@ -170,6 +174,10 @@ func (s *Server) startTaskWithInheritance(ctx context.Context, taskID string, in
 		if _, err := os.Stat(inheritedWorktree); err == nil {
 			worktreePath = inheritedWorktree
 			fmt.Printf("startTaskWithInheritance: task %s inheriting worktree %s\n", taskID, worktreePath)
+			// Save inherited worktree path to this task's record
+			if err := s.db.UpdateTaskWorktree(taskID, worktreePath, ""); err != nil {
+				return nil, fmt.Errorf("failed to save inherited worktree path: %w", err)
+			}
 		} else {
 			fmt.Printf("startTaskWithInheritance: inherited worktree %s no longer exists, creating new\n", inheritedWorktree)
 		}
@@ -196,6 +204,10 @@ func (s *Server) startTaskWithInheritance(ctx context.Context, taskID string, in
 			if err := os.MkdirAll(worktreePath, 0755); err != nil {
 				return nil, fmt.Errorf("failed to create project directory: %w", err)
 			}
+			// Save worktree path to database so it can be inherited by dependent tasks
+			if err := s.db.UpdateTaskWorktree(taskID, worktreePath, ""); err != nil {
+				return nil, fmt.Errorf("failed to save worktree path: %w", err)
+			}
 		} else {
 			if s.baseDir != "" {
 				worktreePath = filepath.Join(s.baseDir, "worktrees", "task-"+taskID)
@@ -204,6 +216,10 @@ func (s *Server) startTaskWithInheritance(ctx context.Context, taskID string, in
 			}
 			if err := os.MkdirAll(worktreePath, 0755); err != nil {
 				return nil, fmt.Errorf("failed to create task directory: %w", err)
+			}
+			// Save worktree path to database so it can be inherited by dependent tasks
+			if err := s.db.UpdateTaskWorktree(taskID, worktreePath, ""); err != nil {
+				return nil, fmt.Errorf("failed to save worktree path: %w", err)
 			}
 		}
 	}
