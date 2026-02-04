@@ -257,3 +257,81 @@ func (db *DB) GetProjectByRepoPath(repoPath string) (*Project, error) {
 
 	return project, nil
 }
+
+// GetProjectByGitHub retrieves a project by its GitHub owner and repo name
+func (db *DB) GetProjectByGitHub(owner, repo string) (*Project, error) {
+	project := &Project{}
+	var servicesJSON sql.NullString
+
+	err := db.QueryRow(
+		`SELECT id, name, repo_path, github_owner, github_repo, remote_origin, remote_upstream, default_branch, services, created_at
+		 FROM projects WHERE github_owner = ? AND github_repo = ?`,
+		owner, repo,
+	).Scan(
+		&project.ID, &project.Name, &project.RepoPath,
+		&project.GitHubOwner, &project.GitHubRepo,
+		&project.RemoteOrigin, &project.RemoteUpstream,
+		&project.DefaultBranch, &servicesJSON, &project.CreatedAt,
+	)
+
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get project by github: %w", err)
+	}
+
+	if servicesJSON.Valid && servicesJSON.String != "" {
+		if err := json.Unmarshal([]byte(servicesJSON.String), &project.Services); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal services: %w", err)
+		}
+	}
+
+	return project, nil
+}
+
+// GetOrCreateProjectByGitHub finds an existing project by GitHub owner/repo or creates a new one
+// The repoPath should be the full path where the repo will live (e.g., /opt/dex/repos/owner/repo)
+func (db *DB) GetOrCreateProjectByGitHub(owner, repo, repoPath string) (*Project, error) {
+	// First try to find by GitHub owner/repo
+	project, err := db.GetProjectByGitHub(owner, repo)
+	if err != nil {
+		return nil, err
+	}
+	if project != nil {
+		return project, nil
+	}
+
+	// Also check by repo path in case it exists with different github fields
+	project, err = db.GetProjectByRepoPath(repoPath)
+	if err != nil {
+		return nil, err
+	}
+	if project != nil {
+		// Update the GitHub fields if they're not set
+		if !project.GitHubOwner.Valid || project.GitHubOwner.String == "" {
+			if err := db.UpdateProjectGitHub(project.ID, owner, repo); err != nil {
+				return nil, fmt.Errorf("failed to update project github info: %w", err)
+			}
+			project.GitHubOwner = sql.NullString{String: owner, Valid: true}
+			project.GitHubRepo = sql.NullString{String: repo, Valid: true}
+		}
+		return project, nil
+	}
+
+	// Create new project with GitHub info
+	projectName := fmt.Sprintf("%s/%s", owner, repo)
+	project, err = db.CreateProject(projectName, repoPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create project: %w", err)
+	}
+
+	// Set GitHub fields
+	if err := db.UpdateProjectGitHub(project.ID, owner, repo); err != nil {
+		return nil, fmt.Errorf("failed to set project github info: %w", err)
+	}
+	project.GitHubOwner = sql.NullString{String: owner, Valid: true}
+	project.GitHubRepo = sql.NullString{String: repo, Valid: true}
+
+	return project, nil
+}

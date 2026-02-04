@@ -148,6 +148,7 @@ func NewServer(database *db.DB, cfg Config) *Server {
 		s.planner.SetPromptLoader(sessionMgr.GetPromptLoader())
 		s.questHandler = quest.NewHandler(database, cfg.Toolbelt.Anthropic, hub)
 		s.questHandler.SetPromptLoader(sessionMgr.GetPromptLoader())
+		s.questHandler.SetBaseDir(cfg.BaseDir)
 		if cfg.Toolbelt.GitHub != nil {
 			s.questHandler.SetGitHubClient(cfg.Toolbelt.GitHub)
 		}

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -38,6 +39,10 @@ type ObjectiveDraft struct {
 	Complexity          string    `json:"complexity,omitempty"`          // "simple" or "complex" - determines AI model
 	EstimatedIterations int       `json:"estimated_iterations,omitempty"`
 	EstimatedBudget     float64   `json:"estimated_budget,omitempty"` // estimated cost in dollars
+	// Repository targeting - used for creating proper projects
+	GitHubOwner string `json:"github_owner,omitempty"` // GitHub owner/org for new or cloned repo
+	GitHubRepo  string `json:"github_repo,omitempty"`  // GitHub repo name
+	CloneURL    string `json:"clone_url,omitempty"`    // URL to clone (if cloning existing repo)
 }
 
 // Checklist represents must-have and optional items for an objective
@@ -73,6 +78,7 @@ type Handler struct {
 	githubUsername string        // cached GitHub username
 	toolSet        *tools.Set    // Read-only tools for Quest exploration
 	readOnlyTools  []toolbelt.AnthropicTool
+	baseDir        string        // Base Dex directory (e.g., /opt/dex) for computing repo paths
 }
 
 // NewHandler creates a new Quest handler
@@ -112,6 +118,11 @@ func (h *Handler) SetGitHubClientFetcher(fetcher GitHubClientFetcher) {
 // SetPromptLoader sets the prompt loader for the handler
 func (h *Handler) SetPromptLoader(loader *session.PromptLoader) {
 	h.promptLoader = loader
+}
+
+// SetBaseDir sets the base directory for computing repo paths
+func (h *Handler) SetBaseDir(baseDir string) {
+	h.baseDir = baseDir
 }
 
 // getGitHubUsername returns the cached GitHub username/org, fetching it if needed
@@ -802,6 +813,24 @@ func complexityToPriority(complexity string, estimatedIterations int) int {
 // validStartingHats defines hats that can be used as starting hats for tasks
 var validStartingHats = []string{"explorer", "planner", "creator", "designer"}
 
+// resolveProjectForDraft finds or creates a project for a draft with GitHub owner/repo
+func (h *Handler) resolveProjectForDraft(draft ObjectiveDraft) (*db.Project, error) {
+	if draft.GitHubOwner == "" || draft.GitHubRepo == "" {
+		return nil, fmt.Errorf("draft must have both github_owner and github_repo")
+	}
+
+	// Compute the repo path: {baseDir}/repos/{owner}/{repo}
+	// Default to /opt/dex if baseDir not set
+	baseDir := h.baseDir
+	if baseDir == "" {
+		baseDir = "/opt/dex"
+	}
+	repoPath := filepath.Join(baseDir, "repos", draft.GitHubOwner, draft.GitHubRepo)
+
+	// Find or create the project
+	return h.db.GetOrCreateProjectByGitHub(draft.GitHubOwner, draft.GitHubRepo, repoPath)
+}
+
 // CreateObjectiveFromDraft creates a task from an accepted draft
 func (h *Handler) CreateObjectiveFromDraft(ctx context.Context, questID string, draft ObjectiveDraft, selectedOptional []int) (*db.Task, error) {
 	// Validate hat
@@ -830,6 +859,18 @@ func (h *Handler) CreateObjectiveFromDraft(ctx context.Context, questID string, 
 		return nil, fmt.Errorf("quest not found: %s", questID)
 	}
 
+	// Determine the project ID for this task
+	// If draft specifies a GitHub owner/repo, find or create a proper project for it
+	projectID := quest.ProjectID
+	if draft.GitHubOwner != "" && draft.GitHubRepo != "" {
+		project, err := h.resolveProjectForDraft(draft)
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve project for draft: %w", err)
+		}
+		projectID = project.ID
+		fmt.Printf("CreateObjectiveFromDraft: using project %s (%s) for task %s\n", project.ID, project.RepoPath, draft.Title)
+	}
+
 	// Determine model based on complexity
 	model := db.TaskModelSonnet
 	if draft.Complexity == "complex" {
@@ -842,7 +883,7 @@ func (h *Handler) CreateObjectiveFromDraft(ctx context.Context, questID string, 
 	// Create the task with auto_start preference
 	task, err := h.db.CreateTaskForQuestWithStatus(
 		questID,
-		quest.ProjectID,
+		projectID,
 		draft.Title,
 		draft.Description,
 		draft.Hat,

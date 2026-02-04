@@ -77,6 +77,7 @@ func (s *Server) ReloadToolbelt() error {
 		if s.questHandler == nil {
 			s.questHandler = quest.NewHandler(s.db, tb.Anthropic, s.hub)
 			s.questHandler.SetPromptLoader(s.sessionManager.GetPromptLoader())
+			s.questHandler.SetBaseDir(s.getDataDir())
 			s.deps.QuestHandler = s.questHandler
 			fmt.Println("ReloadToolbelt: Quest handler created")
 		}

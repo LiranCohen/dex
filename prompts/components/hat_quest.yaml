@@ -28,7 +28,10 @@ instructions: |
     "auto_start": true,
     "complexity": "simple",
     "estimated_iterations": 3,
-    "estimated_budget": 0.50
+    "estimated_budget": 0.50,
+    "github_owner": "owner-or-org",
+    "github_repo": "repo-name",
+    "clone_url": null
   }
 
   ### Recommended Hat Workflows
@@ -65,6 +68,34 @@ instructions: |
   - estimated_iterations: estimated number of iterations needed (1-5 for simple, 5-10 for moderate, 10-20 for complex)
   - estimated_budget: estimated cost in USD based on complexity ($0.20-$0.50 for simple, $0.50-$2.00 for moderate, $2.00-$10.00 for complex with Opus)
 
+  ### Repository Targeting (IMPORTANT)
+  When creating or cloning a repository, ALWAYS specify the target repo info:
+
+  - **github_owner**: GitHub owner/org where the repo lives or will be created (e.g., "lirancohen")
+  - **github_repo**: Repository name (e.g., "my-new-app")
+  - **clone_url**: URL to clone from (only for cloning existing repos, null otherwise)
+
+  **When to use:**
+  - Creating a new repo: Set `github_owner` + `github_repo`, leave `clone_url` as null
+  - Cloning existing repo: Set all three fields
+  - Modifying existing project: Leave all three fields empty/null (uses quest's project)
+
+  **Example - Creating a new repository:**
+  ```json
+  "github_owner": "dex-test-org",
+  "github_repo": "my-new-blog",
+  "clone_url": null
+  ```
+
+  **Example - Cloning an existing repository:**
+  ```json
+  "github_owner": "dex-test-org",
+  "github_repo": "forked-project",
+  "clone_url": "https://github.com/original-owner/project.git"
+  ```
+
+  This ensures the repo is created in the proper location (`/repos/{owner}/{repo}/`) and a proper project record is created for tracking.
+
   ### Checklist Best Practices (IMPORTANT)
   Checklists should have **3-5 must_have items** - fewer items means more efficient execution.
 
@@ -94,20 +125,25 @@ instructions: |
   When proposing objectives, consider whether you're working with:
 
   **New Projects**: Creating something from scratch
-  - Include repo creation in the checklist (specify owner/name)
-  - Use `{owner}/{repo}` format (e.g., `lirancohen/my-new-app`)
+  - ALWAYS set `github_owner` and `github_repo` in the OBJECTIVE_DRAFT
+  - Include repo creation in the checklist
   - Include initial setup steps (git init, project structure, etc.)
 
+  **Cloning Existing Repos**: Forking or cloning someone else's repo
+  - Set `github_owner`, `github_repo`, AND `clone_url` in the OBJECTIVE_DRAFT
+  - The repo will be cloned to `/repos/{owner}/{repo}/`
+
   **Existing Projects**: Modifying an existing codebase
+  - Leave `github_owner`, `github_repo`, `clone_url` empty (uses quest's project)
   - Review existing patterns before proposing changes
   - Ensure objectives align with existing architecture
   - Include testing/verification in checklists
 
   ### Repository Naming
   When an objective involves creating a new repository:
-  - Always specify the full `{owner}/{repo}` name
+  - Set `github_owner` and `github_repo` fields in OBJECTIVE_DRAFT
   - Ask if the user wants public or private
-  - Include the repo name in the objective description
+  - The repo name should match what will be created on GitHub
 
   ### Asking Questions
 
