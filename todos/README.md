@@ -50,6 +50,7 @@ The quest-specific tools (`list_objectives`, `get_objective_details`, `cancel_ob
 | 8 | [Project Hints](./08-project-hints-system.md) | Medium | Low | Medium | Load .dexhints, AGENTS.md from project hierarchy |
 | 9 | [Unicode Sanitization](./09-security-unicode-sanitization.md) | High | Low | High | Security: remove dangerous unicode from inputs |
 | 10 | [Quest Chat UI](./10-quest-chat-ui.md) | High | Medium | High | Chat components, tool visualization, decision UI |
+| 11 | [Real-Time Activity System](./11-realtime-activity-system.md) | High | Medium | High | WebSocket activity feed fixes: tool pairing, performance, security |
 
 ## Recommended Implementation Order
 
@@ -283,6 +284,7 @@ Summary of what exists vs what needs to be built for each TODO:
 | **06: Subagent System** | Pending | spawn_subagent tool, SubagentExecutor, context isolation |
 | **07: Structured Output** | Pending | OutputSchema field, task_output tool, JSON Schema validation |
 | **10: Quest Chat UI** | ✅ Complete | All 5 phases done - Core chat, tool activity, decision UI, objective management, polish |
+| **11: Real-Time Activity** | Pending | Tool pairing fix, performance optimizations, security improvements |
 
 ### Phase 1 Completion Details
 
