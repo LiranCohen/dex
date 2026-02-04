@@ -52,9 +52,9 @@ export function useWebSocket(): UseWebSocketReturn {
 
   const connectionQuality = getConnectionQuality(latency, connected);
 
-  // Measure latency via ping RPC
+  // Measure latency via ping RPC - use ref to avoid recreating connect
   const measureLatency = useCallback(async () => {
-    if (!centrifugeRef.current || connectionState !== 'connected') return;
+    if (!centrifugeRef.current) return;
 
     try {
       const start = performance.now();
@@ -64,7 +64,7 @@ export function useWebSocket(): UseWebSocketReturn {
     } catch (err) {
       console.warn('[Centrifuge] Ping failed:', err);
     }
-  }, [connectionState]);
+  }, []); // No dependencies - uses ref
 
   // Handle publication from any subscription
   const handlePublication = useCallback((ctx: PublicationContext) => {
@@ -255,7 +255,7 @@ export function useWebSocket(): UseWebSocketReturn {
       console.error('[Centrifuge] Failed to connect:', err);
       setConnectionState('failed');
     }
-  }, [isAuthenticated, token, handlePublication, measureLatency]);
+  }, [isAuthenticated, token, handlePublication]); // measureLatency excluded - stable ref
 
   // Connect/disconnect based on auth state
   useEffect(() => {
