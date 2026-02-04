@@ -20,16 +20,17 @@ import (
 //   - Latency measurement via ping RPC
 //
 // Connection Flow:
-//  1. Client connects with JWT token (header or query param)
-//  2. AuthMiddleware validates token and sets credentials
+//  1. Client connects via WebSocket with JWT token in Centrifuge protocol
+//  2. OnConnecting validates token and sets credentials
 //  3. OnConnecting auto-subscribes to user:<userID> channel
 //  4. Client can then subscribe to additional channels (task:, quest:, etc.)
 //
 // See Broadcaster for the high-level event publishing API.
 type Node struct {
-	node        *centrifuge.Node
-	historySize int
-	historyTTL  time.Duration
+	node           *centrifuge.Node
+	historySize    int
+	historyTTL     time.Duration
+	tokenValidator TokenValidator
 }
 
 // Config holds configuration for the realtime node
@@ -42,6 +43,8 @@ type Config struct {
 	HistorySize int
 	// HistoryTTL is how long to retain messages for recovery (default 5 minutes)
 	HistoryTTL time.Duration
+	// TokenValidator validates JWT tokens during connection. If nil, anonymous access is allowed.
+	TokenValidator TokenValidator
 }
 
 // NewNode creates a new Centrifuge node with the given configuration
@@ -68,7 +71,12 @@ func NewNode(cfg Config) (*Node, error) {
 		return nil, fmt.Errorf("failed to create centrifuge node: %w", err)
 	}
 
-	n := &Node{node: node, historySize: cfg.HistorySize, historyTTL: cfg.HistoryTTL}
+	n := &Node{
+		node:           node,
+		historySize:    cfg.HistorySize,
+		historyTTL:     cfg.HistoryTTL,
+		tokenValidator: cfg.TokenValidator,
+	}
 	n.setupHandlers()
 
 	return n, nil
@@ -77,20 +85,39 @@ func NewNode(cfg Config) (*Node, error) {
 // setupHandlers configures the Centrifuge event handlers
 func (n *Node) setupHandlers() {
 	// OnConnecting is called before the client is fully connected
-	// Credentials are set via HTTP middleware context before this
+	// We validate the JWT token here and set credentials
 	n.node.OnConnecting(func(ctx context.Context, e centrifuge.ConnectEvent) (centrifuge.ConnectReply, error) {
-		cred, ok := centrifuge.GetCredentials(ctx)
-		if !ok {
-			return centrifuge.ConnectReply{}, centrifuge.ErrorUnauthorized
+		var userID string
+
+		if n.tokenValidator != nil {
+			// Validate the token sent by client
+			if e.Token == "" {
+				fmt.Printf("[Realtime] Client connecting without token\n")
+				return centrifuge.ConnectReply{}, centrifuge.ErrorUnauthorized
+			}
+
+			user, err := n.tokenValidator.ValidateToken(ctx, e.Token)
+			if err != nil {
+				fmt.Printf("[Realtime] Invalid token: %v\n", err)
+				return centrifuge.ConnectReply{}, centrifuge.ErrorUnauthorized
+			}
+			userID = user.ID
+		} else {
+			// No validator configured - allow anonymous access (development mode)
+			userID = "anonymous"
 		}
 
-		fmt.Printf("[Realtime] Client connecting: user=%s\n", cred.UserID)
+		fmt.Printf("[Realtime] Client connecting: user=%s\n", userID)
+
+		cred := &centrifuge.Credentials{
+			UserID: userID,
+		}
 
 		// Return credentials and auto-subscribe to user's personal channel
 		return centrifuge.ConnectReply{
 			Credentials: cred,
 			Subscriptions: map[string]centrifuge.SubscribeOptions{
-				"user:" + cred.UserID: {},
+				"user:" + userID: {},
 			},
 		}, nil
 	})

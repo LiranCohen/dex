@@ -91,10 +91,16 @@ func NewServer(database *db.DB, cfg Config) *Server {
 	e.Use(echomw.Recover())
 	e.Use(echomw.RequestID())
 
-	// Create Centrifuge realtime node
+	// Create Centrifuge realtime node with JWT validation if configured
+	var tokenValidator realtime.TokenValidator
+	if cfg.TokenConfig != nil {
+		tokenValidator = realtime.NewJWTValidator(cfg.TokenConfig)
+	}
+
 	rtNode, err := realtime.NewNode(realtime.Config{
 		ClientQueueMaxSize: 2 * 1024 * 1024, // 2MB per client
 		ClientChannelLimit: 128,
+		TokenValidator:     tokenValidator,
 	})
 	if err != nil {
 		fmt.Printf("Warning: failed to create realtime node: %v\n", err)
@@ -379,19 +385,9 @@ func (s *Server) registerRoutes() {
 	templatesHandler.RegisterRoutes(protected)
 
 	// Centrifuge WebSocket endpoint for real-time updates
+	// Auth is handled via Centrifuge protocol in Node.OnConnecting, not HTTP middleware
 	if s.realtime != nil {
-		wsHandler := s.realtime.WebSocketHandler()
-
-		// Apply auth middleware based on token config
-		if s.tokenConfig != nil {
-			validator := realtime.NewJWTValidator(s.tokenConfig)
-			wsHandler = realtime.AuthMiddleware(validator)(wsHandler)
-		} else {
-			wsHandler = realtime.NoAuthMiddleware()(wsHandler)
-		}
-
-		// Register the Centrifuge WebSocket endpoint
-		v1.GET("/realtime", echo.WrapHandler(wsHandler))
+		v1.GET("/realtime", echo.WrapHandler(s.realtime.WebSocketHandler()))
 	}
 }
 
