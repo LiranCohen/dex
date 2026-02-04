@@ -188,9 +188,34 @@ export function ObjectiveDetail() {
       if (!id || !isMountedRef.current) return;
 
       const payload = event.payload as Record<string, unknown>;
-      const taskId = payload?.task_id;
+      // Check both top-level task_id (for session events) and payload.task_id (for activity/checklist)
+      const taskId = event.task_id || (payload?.task_id as string);
       if (taskId === id) {
-        if (event.type === 'checklist.updated') {
+        if (event.type === 'activity.new') {
+          // Add new activity item directly from WebSocket payload for instant feedback
+          const activityData = payload?.activity as Activity | undefined;
+          if (activityData && activityData.id) {
+            setActivity((prevActivity) => {
+              // Avoid duplicates
+              if (prevActivity.some((a) => a.id === activityData.id)) {
+                return prevActivity;
+              }
+              return [...prevActivity, activityData];
+            });
+            // Update summary token counts if available
+            if (activityData.tokens_input || activityData.tokens_output) {
+              setActivitySummary((prevSummary) => {
+                if (!prevSummary) return prevSummary;
+                return {
+                  ...prevSummary,
+                  total_tokens: (prevSummary.total_tokens || 0) + (activityData.tokens_input || 0) + (activityData.tokens_output || 0),
+                  input_tokens: (prevSummary.input_tokens || 0) + (activityData.tokens_input || 0),
+                  output_tokens: (prevSummary.output_tokens || 0) + (activityData.tokens_output || 0),
+                };
+              });
+            }
+          }
+        } else if (event.type === 'checklist.updated') {
           // Update checklist item directly from WebSocket payload for instant feedback
           const itemData = payload?.item as Record<string, unknown> | undefined;
           if (itemData && typeof itemData.id === 'string' && typeof itemData.status === 'string') {
@@ -223,27 +248,26 @@ export function ObjectiveDetail() {
               return updatedSummary;
             });
           }
+        } else if (event.type === 'session.iteration') {
+          // Capture context status from session.iteration events
+          if (isContextStatus(payload?.context)) {
+            const ctx = payload.context;
+            setContextStatus(ctx);
+
+            // Show warning toast when context usage becomes critical (only once per session)
+            if (ctx.status === 'critical' && !hasShownCriticalWarning.current) {
+              hasShownCriticalWarning.current = true;
+              showToast('Context usage is critical - task may need to summarize soon', 'info');
+            }
+          }
+        } else if (event.type === 'session.completed') {
+          // Clear context when session completes
+          setContextStatus(undefined);
+          hasShownCriticalWarning.current = false; // Reset for next session
+          loadData(); // Refresh data on session completion
         } else if (event.type.startsWith('task.') || event.type.startsWith('session.')) {
           loadData();
         }
-      }
-
-      // Capture context status from session.iteration events
-      if (event.type === 'session.iteration' && isContextStatus(payload?.context)) {
-        const ctx = payload.context;
-        setContextStatus(ctx);
-
-        // Show warning toast when context usage becomes critical (only once per session)
-        if (ctx.status === 'critical' && !hasShownCriticalWarning.current) {
-          hasShownCriticalWarning.current = true;
-          showToast('Context usage is critical - task may need to summarize soon', 'info');
-        }
-      }
-
-      // Clear context when session completes
-      if (event.type === 'session.completed') {
-        setContextStatus(undefined);
-        hasShownCriticalWarning.current = false; // Reset for next session
       }
 
       if (event.type.startsWith('approval.')) {

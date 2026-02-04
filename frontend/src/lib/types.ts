@@ -116,6 +116,8 @@ export interface WebSocketEvent {
   type: string;
   payload: unknown;
   timestamp: string;
+  task_id?: string;    // Top-level task ID from websocket.Message
+  project_id?: string; // Top-level project ID from websocket.Message
 }
 
 export interface TaskEvent extends WebSocketEvent {
