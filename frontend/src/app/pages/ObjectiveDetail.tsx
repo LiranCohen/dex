@@ -211,13 +211,13 @@ export function ObjectiveDetail() {
       // Skip state updates if component is unmounted
       if (!id || !isMountedRef.current) return;
 
-      const payload = event.payload as Record<string, unknown>;
-      // Check both top-level task_id (for session events) and payload.task_id (for activity/checklist)
-      const taskId = event.task_id || (payload?.task_id as string);
+      // Event data is flat (task_id, activity, item, etc. are top-level properties)
+      const eventData = event as unknown as Record<string, unknown>;
+      const taskId = eventData.task_id as string | undefined;
       if (taskId === id) {
         if (event.type === 'activity.new') {
           // Add new activity item directly from WebSocket payload for instant feedback
-          const activityData = payload?.activity as Activity | undefined;
+          const activityData = eventData.activity as Activity | undefined;
           if (activityData && activityData.id) {
             setActivity((prevActivity) => {
               // Avoid duplicates
@@ -241,7 +241,7 @@ export function ObjectiveDetail() {
           }
         } else if (event.type === 'checklist.updated') {
           // Update checklist item directly from WebSocket payload for instant feedback
-          const itemData = payload?.item as Record<string, unknown> | undefined;
+          const itemData = eventData.item as Record<string, unknown> | undefined;
           if (itemData && typeof itemData.id === 'string' && typeof itemData.status === 'string') {
             setChecklist((prevItems) =>
               prevItems.map((item) =>
@@ -274,8 +274,8 @@ export function ObjectiveDetail() {
           }
         } else if (event.type === 'session.iteration') {
           // Capture context status from session.iteration events
-          if (isContextStatus(payload?.context)) {
-            const ctx = payload.context;
+          if (isContextStatus(eventData.context)) {
+            const ctx = eventData.context;
             setContextStatus(ctx);
 
             // Show warning toast when context usage becomes critical (only once per session)
