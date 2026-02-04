@@ -2,15 +2,18 @@
 package session
 
 import (
+	"encoding/json"
 	"fmt"
 
 	"github.com/lirancohen/dex/internal/db"
+	"github.com/lirancohen/dex/internal/realtime"
 )
 
 // EventRouter routes events to appropriate hats based on contracts
 type EventRouter struct {
-	db      *db.DB
-	tracker *TransitionTracker
+	db          *db.DB
+	tracker     *TransitionTracker
+	broadcaster *realtime.Broadcaster
 }
 
 // RouteResult contains the result of routing an event
@@ -21,10 +24,11 @@ type RouteResult struct {
 }
 
 // NewEventRouter creates a new event router
-func NewEventRouter(database *db.DB, tracker *TransitionTracker) *EventRouter {
+func NewEventRouter(database *db.DB, tracker *TransitionTracker, broadcaster *realtime.Broadcaster) *EventRouter {
 	return &EventRouter{
-		db:      database,
-		tracker: tracker,
+		db:          database,
+		tracker:     tracker,
+		broadcaster: broadcaster,
 	}
 }
 
@@ -81,14 +85,58 @@ func (r *EventRouter) Persist(event *Event) error {
 }
 
 // RouteAndPersist routes an event and persists it in one operation
-func (r *EventRouter) RouteAndPersist(event *Event, currentHat string) *RouteResult {
+// taskID and projectID are provided for Centrifuge channel routing
+func (r *EventRouter) RouteAndPersist(event *Event, currentHat, taskID, projectID string) *RouteResult {
 	// Persist first (even if routing fails, we want the event recorded)
 	if err := r.Persist(event); err != nil {
 		// Log but don't fail - persistence is secondary to routing
 		fmt.Printf("EventRouter: warning - failed to persist event: %v\n", err)
 	}
 
+	// Broadcast hat event to Centrifuge for real-time updates
+	if r.broadcaster != nil {
+		hatEventType := topicToHatEvent(event.Topic)
+		if hatEventType != "" {
+			payload := map[string]any{
+				"topic":      event.Topic,
+				"source_hat": event.SourceHat,
+			}
+			// Parse and merge event payload if present
+			if event.Payload != "" {
+				var payloadData map[string]any
+				if err := json.Unmarshal([]byte(event.Payload), &payloadData); err == nil {
+					for k, v := range payloadData {
+						payload[k] = v
+					}
+				}
+			}
+			r.broadcaster.PublishHatEvent(hatEventType, event.SessionID, taskID, projectID, payload)
+		}
+	}
+
 	return r.Route(event, currentHat)
+}
+
+// topicToHatEvent maps internal event topics to hat event types for broadcasting
+func topicToHatEvent(topic string) string {
+	switch topic {
+	case TopicPlanComplete:
+		return realtime.EventHatPlanComplete
+	case TopicDesignComplete:
+		return realtime.EventHatDesignComplete
+	case TopicImplementationDone:
+		return realtime.EventHatImplementationDone
+	case TopicReviewApproved:
+		return realtime.EventHatReviewApproved
+	case TopicReviewRejected:
+		return realtime.EventHatReviewRejected
+	case TopicTaskBlocked:
+		return realtime.EventHatTaskBlocked
+	case TopicResolved:
+		return realtime.EventHatResolved
+	default:
+		return ""
+	}
 }
 
 // GetEventHistory returns the event history for a session

@@ -3980,6 +3980,55 @@
   }
 }
 
+.app-connection-banner--info {
+  background-color: rgba(52, 211, 153, 0.05);
+  border-color: rgba(52, 211, 153, 0.2);
+}
+
+/* Connection quality indicator */
+.app-connection-quality {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+.app-connection-quality__bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 16px;
+}
+
+.app-connection-quality__bar {
+  width: 4px;
+  background-color: var(--surface-tertiary);
+  border-radius: 1px;
+  transition: background-color var(--transition-fast);
+}
+
+.app-connection-quality__bar:nth-child(1) {
+  height: 6px;
+}
+
+.app-connection-quality__bar:nth-child(2) {
+  height: 10px;
+}
+
+.app-connection-quality__bar:nth-child(3) {
+  height: 14px;
+}
+
+.app-connection-quality__bar--active {
+  background-color: var(--color-success);
+}
+
+.app-connection-quality__latency {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
 @media (max-width: 640px) {
   .app-connection-banner {
     flex-wrap: wrap;

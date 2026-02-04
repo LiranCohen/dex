@@ -147,6 +147,27 @@ export interface ApprovalEvent extends WebSocketEvent {
   };
 }
 
+// Hat workflow events (from Centrifuge)
+export type HatEventType =
+  | 'hat.plan_complete'
+  | 'hat.design_complete'
+  | 'hat.implementation_done'
+  | 'hat.review_approved'
+  | 'hat.review_rejected'
+  | 'hat.task_blocked'
+  | 'hat.resolved';
+
+export interface HatEvent extends WebSocketEvent {
+  type: HatEventType;
+  payload: {
+    session_id: string;
+    task_id: string;
+    project_id: string;
+    topic: string;
+    source_hat: string;
+  };
+}
+
 // Activity event types
 export type ActivityEventType =
   | 'user_message'

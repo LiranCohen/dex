@@ -158,4 +158,24 @@ export const handlers = [
       database: 'connected',
     });
   }),
+
+  // Projects
+  http.get(`${API_BASE}/projects`, () => {
+    return HttpResponse.json({
+      projects: [
+        {
+          ID: 'proj_default',
+          Name: 'Default Project',
+          RepoPath: '.',
+          GitHubOwner: null,
+          GitHubRepo: null,
+          RemoteOrigin: null,
+          RemoteUpstream: null,
+          DefaultBranch: 'main',
+          CreatedAt: '2024-01-01T00:00:00Z',
+        },
+      ],
+      count: 1,
+    });
+  }),
 ];

@@ -106,6 +106,15 @@ func (h *Handler) HandleGet(c echo.Context) error {
 func (h *Handler) HandleApprove(c echo.Context) error {
 	id := c.Param("id")
 
+	// Get approval first to include routing info in broadcast
+	approval, err := h.deps.DB.GetApprovalByID(id)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	if approval == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "approval not found")
+	}
+
 	if err := h.deps.DB.ApproveApproval(id); err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			return echo.NewHTTPError(http.StatusNotFound, "approval not found")
@@ -116,12 +125,25 @@ func (h *Handler) HandleApprove(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 
-	// Broadcast WebSocket event
+	// Broadcast WebSocket event with routing info
 	if h.deps.Broadcaster != nil {
-		h.deps.Broadcaster.Publish(realtime.EventApprovalResolved, map[string]any{
+		payload := map[string]any{
 			"id":     id,
 			"status": "approved",
-		})
+		}
+		// Include task_id for channel routing
+		if approval.TaskID.Valid {
+			payload["task_id"] = approval.TaskID.String
+			// Also fetch project_id from task
+			if task, err := h.deps.DB.GetTaskByID(approval.TaskID.String); err == nil && task != nil {
+				payload["project_id"] = task.ProjectID
+			}
+		}
+		// Include user_id from auth context
+		if userID := c.Get("user_id"); userID != nil {
+			payload["user_id"] = userID
+		}
+		h.deps.Broadcaster.Publish(realtime.EventApprovalResolved, payload)
 	}
 
 	return c.JSON(http.StatusOK, map[string]any{
@@ -135,6 +157,15 @@ func (h *Handler) HandleApprove(c echo.Context) error {
 func (h *Handler) HandleReject(c echo.Context) error {
 	id := c.Param("id")
 
+	// Get approval first to include routing info in broadcast
+	approval, err := h.deps.DB.GetApprovalByID(id)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	if approval == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "approval not found")
+	}
+
 	if err := h.deps.DB.RejectApproval(id); err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			return echo.NewHTTPError(http.StatusNotFound, "approval not found")
@@ -145,12 +176,25 @@ func (h *Handler) HandleReject(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 
-	// Broadcast WebSocket event
+	// Broadcast WebSocket event with routing info
 	if h.deps.Broadcaster != nil {
-		h.deps.Broadcaster.Publish(realtime.EventApprovalResolved, map[string]any{
+		payload := map[string]any{
 			"id":     id,
 			"status": "rejected",
-		})
+		}
+		// Include task_id for channel routing
+		if approval.TaskID.Valid {
+			payload["task_id"] = approval.TaskID.String
+			// Also fetch project_id from task
+			if task, err := h.deps.DB.GetTaskByID(approval.TaskID.String); err == nil && task != nil {
+				payload["project_id"] = task.ProjectID
+			}
+		}
+		// Include user_id from auth context
+		if userID := c.Get("user_id"); userID != nil {
+			payload["user_id"] = userID
+		}
+		h.deps.Broadcaster.Publish(realtime.EventApprovalResolved, payload)
 	}
 
 	return c.JSON(http.StatusOK, map[string]any{

@@ -9,8 +9,15 @@ import { http, HttpResponse } from 'msw';
 vi.mock('../../hooks/useWebSocket', () => ({
   useWebSocket: () => ({
     connected: true,
+    connectionState: 'connected',
+    connectionQuality: 'excellent',
+    latency: 50,
+    reconnectAttempts: 0,
     subscribe: vi.fn(() => vi.fn()),
+    subscribeToChannel: vi.fn(() => vi.fn()),
+    subscribedChannels: new Set(),
     lastMessage: null,
+    reconnect: vi.fn(),
   }),
 }));
 

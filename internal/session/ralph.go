@@ -488,7 +488,7 @@ func (r *RalphLoop) handleEventTransition(ctx context.Context, event *Event) boo
 		return false
 	}
 
-	result := r.eventRouter.RouteAndPersist(event, r.session.Hat)
+	result := r.eventRouter.RouteAndPersist(event, r.session.Hat, r.session.TaskID, r.session.ProjectID)
 
 	if result.Error != nil {
 		fmt.Printf("RalphLoop.Run: event routing error: %v\n", result.Error)
@@ -1170,8 +1170,9 @@ func (r *RalphLoop) broadcastEvent(eventType string, payload map[string]any) {
 		return
 	}
 
-	// Add task_id to payload for proper channel routing
+	// Add task_id and project_id to payload for proper channel routing
 	payload["task_id"] = r.session.TaskID
+	payload["project_id"] = r.session.ProjectID
 	r.broadcaster.Publish(eventType, payload)
 }
 

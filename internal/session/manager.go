@@ -33,6 +33,7 @@ const (
 type ActiveSession struct {
 	ID           string
 	TaskID       string
+	ProjectID    string
 	Hat          string
 	State        SessionState
 	WorktreePath string
@@ -311,6 +312,15 @@ func (m *Manager) CreateSession(taskID, hat, worktreePath string) (*ActiveSessio
 		return nil, fmt.Errorf("task %s already has session %s", taskID, existingID)
 	}
 
+	// Get task to retrieve project_id for channel routing
+	task, err := m.db.GetTaskByID(taskID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get task: %w", err)
+	}
+	if task == nil {
+		return nil, fmt.Errorf("task not found: %s", taskID)
+	}
+
 	// Create session record in DB
 	dbSession, err := m.db.CreateSession(taskID, hat, worktreePath)
 	if err != nil {
@@ -321,6 +331,7 @@ func (m *Manager) CreateSession(taskID, hat, worktreePath string) (*ActiveSessio
 	session := &ActiveSession{
 		ID:            dbSession.ID,
 		TaskID:        taskID,
+		ProjectID:     task.ProjectID,
 		Hat:           hat,
 		State:         StateCreated,
 		WorktreePath:  worktreePath,
@@ -495,6 +506,7 @@ func (m *Manager) copySession(s *ActiveSession) *ActiveSession {
 	copy := &ActiveSession{
 		ID:                  s.ID,
 		TaskID:              s.TaskID,
+		ProjectID:           s.ProjectID,
 		Hat:                 s.Hat,
 		State:               s.State,
 		WorktreePath:        s.WorktreePath,
@@ -551,7 +563,7 @@ func (m *Manager) runSession(ctx context.Context, session *ActiveSession) {
 			m.transitionTrackers[session.TaskID] = tracker
 		}
 		m.mu.Unlock()
-		loop.SetEventRouter(NewEventRouter(m.db, tracker))
+		loop.SetEventRouter(NewEventRouter(m.db, tracker, broadcaster))
 
 		// Get task and project for tool executor context
 		task, err := m.db.GetTaskByID(session.TaskID)
@@ -883,9 +895,16 @@ func (m *Manager) LoadActiveSessions() error {
 			terminationReason = dbSession.TerminationReason.String
 		}
 
+		// Get task to populate project_id for channel routing
+		var projectID string
+		if task, err := m.db.GetTaskByID(dbSession.TaskID); err == nil && task != nil {
+			projectID = task.ProjectID
+		}
+
 		session := &ActiveSession{
 			ID:                  dbSession.ID,
 			TaskID:              dbSession.TaskID,
+			ProjectID:           projectID,
 			Hat:                 dbSession.Hat,
 			State:               state,
 			WorktreePath:        dbSession.WorktreePath,

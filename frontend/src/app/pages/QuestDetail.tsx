@@ -73,7 +73,13 @@ export function QuestDetail() {
   const [searchQuery, setSearchQuery] = useState('');
   const [showSearch, setShowSearch] = useState(false);
   const searchInputRef = useRef<SearchInputRef>(null);
-  const { subscribe, connected: isConnected, connectionState, reconnectAttempts, reconnect } = useWebSocket();
+  const { subscribe, subscribeToChannel, connected: isConnected, connectionState, connectionQuality, latency, reconnectAttempts, reconnect } = useWebSocket();
+
+  // Subscribe to quest-specific channel for targeted updates
+  useEffect(() => {
+    if (!id) return;
+    return subscribeToChannel(`quest:${id}`);
+  }, [id, subscribeToChannel]);
   const { showToast } = useToast();
 
   // Refs for synchronous access to latest state (avoids race conditions)
@@ -875,6 +881,8 @@ export function QuestDetail() {
         {/* Connection status banner */}
         <ConnectionStatusBanner
           connectionState={connectionState}
+          connectionQuality={connectionQuality}
+          latency={latency}
           reconnectAttempts={reconnectAttempts}
           onReconnect={reconnect}
         />

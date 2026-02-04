@@ -56,7 +56,13 @@ export function ObjectiveDetail() {
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
-  const { subscribe } = useWebSocket();
+  const { subscribe, subscribeToChannel } = useWebSocket();
+
+  // Subscribe to task-specific channel for targeted updates
+  useEffect(() => {
+    if (!id) return;
+    return subscribeToChannel(`task:${id}`);
+  }, [id, subscribeToChannel]);
   const { showToast } = useToast();
 
   // Track if we've already shown the critical context warning

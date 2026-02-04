@@ -33,15 +33,13 @@ type TransitionEvent struct {
 
 // StateMachine manages task status transitions with validation and event emission
 type StateMachine struct {
-	db        *db.DB
-	eventChan chan TransitionEvent // For future WebSocket integration
+	db *db.DB
 }
 
 // NewStateMachine creates a new state machine instance
 func NewStateMachine(database *db.DB) *StateMachine {
 	return &StateMachine{
-		db:        database,
-		eventChan: nil, // Will be set when WebSocket integration is added
+		db: database,
 	}
 }
 
@@ -99,22 +97,6 @@ func (sm *StateMachine) Transition(taskID, targetStatus string) error {
 			return fmt.Errorf("concurrent status change detected, retry transition: %w", err)
 		}
 		return fmt.Errorf("failed to update task status: %w", err)
-	}
-
-	// Emit event if channel is configured
-	if sm.eventChan != nil {
-		event := TransitionEvent{
-			TaskID:    taskID,
-			From:      currentStatus,
-			To:        targetStatus,
-			Timestamp: time.Now(),
-		}
-		// Non-blocking send to avoid deadlock
-		select {
-		case sm.eventChan <- event:
-		default:
-			// Channel full or closed, log would go here in production
-		}
 	}
 
 	return nil
