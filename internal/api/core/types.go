@@ -278,6 +278,53 @@ func ToChecklistItemResponse(item *db.ChecklistItem) ChecklistItemResponse {
 	return resp
 }
 
+// ProjectResponse is the JSON response format for projects.
+// This properly handles sql.Null* types for JSON serialization.
+type ProjectResponse struct {
+	ID             string  `json:"ID"`
+	Name           string  `json:"Name"`
+	RepoPath       string  `json:"RepoPath"`
+	GitHubOwner    *string `json:"GitHubOwner"`
+	GitHubRepo     *string `json:"GitHubRepo"`
+	RemoteOrigin   *string `json:"RemoteOrigin"`
+	RemoteUpstream *string `json:"RemoteUpstream"`
+	DefaultBranch  string  `json:"DefaultBranch"`
+	CreatedAt      string  `json:"CreatedAt"`
+}
+
+// ToProjectResponse converts a db.Project to ProjectResponse for clean JSON.
+func ToProjectResponse(p *db.Project) ProjectResponse {
+	resp := ProjectResponse{
+		ID:            p.ID,
+		Name:          p.Name,
+		RepoPath:      p.RepoPath,
+		DefaultBranch: p.DefaultBranch,
+		CreatedAt:     p.CreatedAt.Format(time.RFC3339),
+	}
+	if p.GitHubOwner.Valid {
+		resp.GitHubOwner = &p.GitHubOwner.String
+	}
+	if p.GitHubRepo.Valid {
+		resp.GitHubRepo = &p.GitHubRepo.String
+	}
+	if p.RemoteOrigin.Valid {
+		resp.RemoteOrigin = &p.RemoteOrigin.String
+	}
+	if p.RemoteUpstream.Valid {
+		resp.RemoteUpstream = &p.RemoteUpstream.String
+	}
+	return resp
+}
+
+// ToProjectResponses converts a slice of db.Project to ProjectResponse slice.
+func ToProjectResponses(projects []*db.Project) []ProjectResponse {
+	responses := make([]ProjectResponse, len(projects))
+	for i, p := range projects {
+		responses[i] = ToProjectResponse(p)
+	}
+	return responses
+}
+
 // QuestResponse is the JSON response format for quests.
 type QuestResponse struct {
 	ID               string               `json:"id"`

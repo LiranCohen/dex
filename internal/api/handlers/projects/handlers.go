@@ -46,7 +46,7 @@ func (h *Handler) HandleList(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, map[string]any{
-		"projects": projects,
+		"projects": core.ToProjectResponses(projects),
 		"count":    len(projects),
 	})
 }
@@ -139,7 +139,7 @@ func (h *Handler) HandleCreate(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 
-	return c.JSON(http.StatusCreated, project)
+	return c.JSON(http.StatusCreated, core.ToProjectResponse(project))
 }
 
 // HandleGet returns a single project by ID.
@@ -155,7 +155,7 @@ func (h *Handler) HandleGet(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusNotFound, "project not found")
 	}
 
-	return c.JSON(http.StatusOK, project)
+	return c.JSON(http.StatusOK, core.ToProjectResponse(project))
 }
 
 // HandleUpdate updates a project.
@@ -236,7 +236,7 @@ func (h *Handler) HandleUpdate(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 
-	return c.JSON(http.StatusOK, updated)
+	return c.JSON(http.StatusOK, core.ToProjectResponse(updated))
 }
 
 // HandleDelete removes a project.
