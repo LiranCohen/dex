@@ -22,6 +22,15 @@ func NewChecklistHandler(deps *core.Deps) *ChecklistHandler {
 	return &ChecklistHandler{deps: deps}
 }
 
+// getTaskProjectID looks up a task's project_id for event routing.
+func (h *ChecklistHandler) getTaskProjectID(taskID string) string {
+	task, err := h.deps.DB.GetTaskByID(taskID)
+	if err != nil || task == nil {
+		return ""
+	}
+	return task.ProjectID
+}
+
 // RegisterRoutes registers all checklist routes on the given group.
 // All routes require authentication.
 //   - GET /tasks/:id/checklist
@@ -141,6 +150,7 @@ func (h *ChecklistHandler) HandleUpdateItem(c echo.Context) error {
 		h.deps.Broadcaster.PublishTaskEvent(realtime.EventChecklistUpdated, taskID, map[string]any{
 			"checklist_id": checklist.ID,
 			"item":         core.ToChecklistItemResponse(updatedItem),
+			"project_id":   h.getTaskProjectID(taskID),
 		})
 	}
 
@@ -168,7 +178,8 @@ func (h *ChecklistHandler) HandleAccept(c echo.Context) error {
 		}
 		if h.deps.Broadcaster != nil {
 			h.deps.Broadcaster.PublishTaskEvent(realtime.EventTaskUpdated, taskID, map[string]any{
-				"status": db.TaskStatusReady,
+				"status":     db.TaskStatusReady,
+				"project_id": h.getTaskProjectID(taskID),
 			})
 		}
 		return c.JSON(http.StatusOK, map[string]any{
@@ -222,7 +233,8 @@ func (h *ChecklistHandler) HandleAccept(c echo.Context) error {
 
 	if h.deps.Broadcaster != nil {
 		h.deps.Broadcaster.PublishTaskEvent(realtime.EventTaskUpdated, taskID, map[string]any{
-			"status": db.TaskStatusReady,
+			"status":     db.TaskStatusReady,
+			"project_id": h.getTaskProjectID(taskID),
 		})
 	}
 

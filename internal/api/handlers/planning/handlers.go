@@ -46,6 +46,15 @@ func (h *Handler) taskService() *task.Service {
 	return h.deps.TaskService
 }
 
+// getTaskProjectID looks up a task's project_id for event routing.
+func (h *Handler) getTaskProjectID(taskID string) string {
+	task, err := h.deps.DB.GetTaskByID(taskID)
+	if err != nil || task == nil {
+		return ""
+	}
+	return task.ProjectID
+}
+
 // HandleGet returns the planning session and messages for a task.
 // GET /api/v1/tasks/:id/planning
 func (h *Handler) HandleGet(c echo.Context) error {
@@ -198,7 +207,8 @@ func (h *Handler) HandleAccept(c echo.Context) error {
 	// Broadcast task updated event
 	if h.deps.Broadcaster != nil {
 		h.deps.Broadcaster.PublishTaskEvent(realtime.EventTaskUpdated, taskID, map[string]any{
-			"status": db.TaskStatusReady,
+			"status":     db.TaskStatusReady,
+			"project_id": h.getTaskProjectID(taskID),
 		})
 	}
 
@@ -231,7 +241,8 @@ func (h *Handler) HandleSkip(c echo.Context) error {
 	// Broadcast task updated event
 	if h.deps.Broadcaster != nil {
 		h.deps.Broadcaster.PublishTaskEvent(realtime.EventTaskUpdated, taskID, map[string]any{
-			"status": db.TaskStatusReady,
+			"status":     db.TaskStatusReady,
+			"project_id": h.getTaskProjectID(taskID),
 		})
 	}
 

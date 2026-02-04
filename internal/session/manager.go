@@ -279,9 +279,14 @@ func (m *Manager) broadcastTaskUpdated(taskID string, status string) {
 	m.mu.RUnlock()
 
 	if broadcaster != nil {
-		broadcaster.PublishTaskEvent(realtime.EventTaskUpdated, taskID, map[string]any{
+		payload := map[string]any{
 			"status": status,
-		})
+		}
+		// Include project_id for channel routing
+		if task, err := m.db.GetTaskByID(taskID); err == nil && task != nil {
+			payload["project_id"] = task.ProjectID
+		}
+		broadcaster.PublishTaskEvent(realtime.EventTaskUpdated, taskID, payload)
 	}
 }
 

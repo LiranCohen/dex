@@ -187,9 +187,14 @@ func (s *Server) createAndStartSession(ctx context.Context, taskID string, task 
 // broadcastTaskUpdated sends a task.updated WebSocket event
 func (s *Server) broadcastTaskUpdated(taskID, status string) {
 	if s.broadcaster != nil {
-		s.broadcaster.PublishTaskEvent(realtime.EventTaskUpdated, taskID, map[string]any{
+		payload := map[string]any{
 			"status": status,
-		})
+		}
+		// Include project_id for channel routing
+		if task, err := s.db.GetTaskByID(taskID); err == nil && task != nil {
+			payload["project_id"] = task.ProjectID
+		}
+		s.broadcaster.PublishTaskEvent(realtime.EventTaskUpdated, taskID, payload)
 	}
 }
 
@@ -246,11 +251,13 @@ func (s *Server) handleTaskUnblocking(ctx context.Context, completedTaskID strin
 				"unblocked_by": completedTaskID,
 				"quest_id":     task.QuestID.String,
 				"title":        task.Title,
+				"project_id":   task.ProjectID,
 			})
 		}
 
 		// Auto-start the task in a goroutine, inheriting predecessor's worktree
 		taskID := task.ID
+		projectID := task.ProjectID
 		inheritedWorktree := completedTask.GetWorktreePath()
 		handoff := predecessorHandoff
 		go func() {
@@ -259,7 +266,8 @@ func (s *Server) handleTaskUnblocking(ctx context.Context, completedTaskID strin
 				fmt.Printf("handleTaskUnblocking: auto-start failed for task %s: %v\n", taskID, err)
 				if s.broadcaster != nil {
 					s.broadcaster.PublishTaskEvent(realtime.EventTaskAutoStartFailed, taskID, map[string]any{
-						"error": err.Error(),
+						"error":      err.Error(),
+						"project_id": projectID,
 					})
 				}
 				return
@@ -274,6 +282,7 @@ func (s *Server) handleTaskUnblocking(ctx context.Context, completedTaskID strin
 					"worktree_path":     startResult.WorktreePath,
 					"inherited_from":    completedTaskID,
 					"predecessor_title": completedTask.Title,
+					"project_id":        projectID,
 				})
 			}
 		}()

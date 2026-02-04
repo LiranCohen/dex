@@ -312,12 +312,14 @@ func (s *SyncService) handleTaskUnblocking(ctx context.Context, completedTaskID 
 				"unblocked_by": completedTaskID,
 				"quest_id":     task.QuestID.String,
 				"title":        task.Title,
+				"project_id":   task.ProjectID,
 			})
 		}
 
 		// Auto-start the task
 		if s.deps.StartTaskWithInheritance != nil {
 			taskID := task.ID
+			projectID := task.ProjectID
 			inheritedWorktree := completedTask.GetWorktreePath()
 			handoff := predecessorHandoff
 			broadcaster := s.deps.Broadcaster
@@ -327,7 +329,8 @@ func (s *SyncService) handleTaskUnblocking(ctx context.Context, completedTaskID 
 					fmt.Printf("handleTaskUnblocking: auto-start failed for task %s: %v\n", taskID, err)
 					if broadcaster != nil {
 						broadcaster.PublishTaskEvent(realtime.EventTaskAutoStartFailed, taskID, map[string]any{
-							"error": err.Error(),
+							"error":      err.Error(),
+							"project_id": projectID,
 						})
 					}
 					return
@@ -342,6 +345,7 @@ func (s *SyncService) handleTaskUnblocking(ctx context.Context, completedTaskID 
 						"worktree_path":     startResult.WorktreePath,
 						"inherited_from":    completedTaskID,
 						"predecessor_title": completedTask.Title,
+						"project_id":        projectID,
 					})
 				}
 			}()

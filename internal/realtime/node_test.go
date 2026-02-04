@@ -87,6 +87,43 @@ func TestRouteEvent(t *testing.T) {
 			payload:   map[string]any{"project_id": "p-1"},
 			expected:  []string{"global", "project:p-1"},
 		},
+		// Edge cases
+		{
+			name:      "task event without task_id only routes to global",
+			eventType: "task.updated",
+			payload:   map[string]any{"status": "running"},
+			expected:  []string{"global"},
+		},
+		{
+			name:      "quest event without quest_id only routes to global",
+			eventType: "quest.message",
+			payload:   map[string]any{"content": "hello"},
+			expected:  []string{"global"},
+		},
+		{
+			name:      "unknown event type only routes to global",
+			eventType: "unknown.event",
+			payload:   map[string]any{"data": "test"},
+			expected:  []string{"global"},
+		},
+		{
+			name:      "session event with project_id routes to task and project channels",
+			eventType: "session.completed",
+			payload:   map[string]any{"task_id": "t-1", "project_id": "p-1"},
+			expected:  []string{"global", "task:t-1"},
+		},
+		{
+			name:      "empty string task_id is ignored",
+			eventType: "task.created",
+			payload:   map[string]any{"task_id": ""},
+			expected:  []string{"global"},
+		},
+		{
+			name:      "approval event with task_id routes to task and system",
+			eventType: "approval.required",
+			payload:   map[string]any{"task_id": "t-3"},
+			expected:  []string{"global", "system"},
+		},
 	}
 
 	for _, tt := range tests {
@@ -161,6 +198,31 @@ func TestCanSubscribe(t *testing.T) {
 			userID:   "user-1",
 			channel:  "invalidchannel",
 			expected: false,
+		},
+		// Edge cases
+		{
+			name:     "unknown channel type rejected",
+			userID:   "user-1",
+			channel:  "unknown:something",
+			expected: false,
+		},
+		{
+			name:     "empty channel rejected",
+			userID:   "user-1",
+			channel:  "",
+			expected: false,
+		},
+		{
+			name:     "channel with only colon rejected",
+			userID:   "user-1",
+			channel:  ":",
+			expected: false,
+		},
+		{
+			name:     "anonymous user can subscribe to global",
+			userID:   "anonymous",
+			channel:  "global",
+			expected: true,
 		},
 	}
 

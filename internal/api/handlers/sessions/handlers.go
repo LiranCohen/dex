@@ -22,6 +22,16 @@ func New(deps *core.Deps) *Handler {
 	return &Handler{deps: deps}
 }
 
+// getTaskProjectID looks up a task's project_id for event routing.
+// Returns empty string if task not found (event will still route to task channel).
+func (h *Handler) getTaskProjectID(taskID string) string {
+	task, err := h.deps.DB.GetTaskByID(taskID)
+	if err != nil || task == nil {
+		return ""
+	}
+	return task.ProjectID
+}
+
 // RegisterRoutes registers all session routes on the given group.
 // All routes require authentication.
 //   - GET /sessions
@@ -94,6 +104,7 @@ func (h *Handler) HandleKill(c echo.Context) error {
 	if h.deps.Broadcaster != nil {
 		h.deps.Broadcaster.PublishTaskEvent(realtime.EventSessionKilled, sess.TaskID, map[string]any{
 			"session_id": sessionID,
+			"project_id": h.getTaskProjectID(sess.TaskID),
 		})
 	}
 
@@ -125,6 +136,7 @@ func (h *Handler) HandlePauseTask(c echo.Context) error {
 	if h.deps.Broadcaster != nil {
 		h.deps.Broadcaster.PublishTaskEvent(realtime.EventTaskPaused, taskID, map[string]any{
 			"session_id": sess.ID,
+			"project_id": h.getTaskProjectID(taskID),
 		})
 	}
 
@@ -195,6 +207,7 @@ func (h *Handler) HandleResumeTask(c echo.Context) error {
 	if h.deps.Broadcaster != nil {
 		h.deps.Broadcaster.PublishTaskEvent(realtime.EventTaskResumed, taskID, map[string]any{
 			"session_id": sess.ID,
+			"project_id": h.getTaskProjectID(taskID),
 		})
 	}
 
@@ -225,6 +238,7 @@ func (h *Handler) HandleCancelTask(c echo.Context) error {
 	if h.deps.Broadcaster != nil {
 		h.deps.Broadcaster.PublishTaskEvent(realtime.EventTaskCancelled, taskID, map[string]any{
 			"session_id": sess.ID,
+			"project_id": h.getTaskProjectID(taskID),
 		})
 	}
 
