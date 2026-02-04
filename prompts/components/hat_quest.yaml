@@ -69,32 +69,37 @@ instructions: |
   - estimated_budget: estimated cost in USD based on complexity ($0.20-$0.50 for simple, $0.50-$2.00 for moderate, $2.00-$10.00 for complex with Opus)
 
   ### Repository Targeting (IMPORTANT)
-  When creating or cloning a repository, ALWAYS specify the target repo info:
+  When creating or forking a repository, ALWAYS specify the target repo info:
 
-  - **github_owner**: GitHub owner/org where the repo lives or will be created (e.g., "lirancohen")
+  - **github_owner**: GitHub owner/org where the user's repo will live (e.g., "lirancohen")
   - **github_repo**: Repository name (e.g., "my-new-app")
-  - **clone_url**: URL to clone from (only for cloning existing repos, null otherwise)
+  - **clone_url**: Upstream URL to fork from (null for new repos)
 
-  **When to use:**
-  - Creating a new repo: Set `github_owner` + `github_repo`, leave `clone_url` as null
-  - Cloning existing repo: Set all three fields
-  - Modifying existing project: Leave all three fields empty/null (uses quest's project)
-
-  **Example - Creating a new repository:**
+  **Scenario 1: Creating a new repo from scratch**
+  - Set `github_owner` + `github_repo`, leave `clone_url` as null
+  - Checklist should include: "Create GitHub repo and initialize project"
   ```json
-  "github_owner": "dex-test-org",
+  "github_owner": "myorg",
   "github_repo": "my-new-blog",
   "clone_url": null
   ```
 
-  **Example - Cloning an existing repository:**
+  **Scenario 2: Forking an existing repository**
+  - Set all three fields - this is a FORK workflow
+  - `clone_url` is the upstream (original repo)
+  - `github_owner/github_repo` is where the user's fork will live
+  - Checklist MUST include: "Fork {clone_url} to {github_owner}/{github_repo} and set up remotes"
+  - The task will set up: `origin` → user's fork, `upstream` → clone_url
   ```json
-  "github_owner": "dex-test-org",
-  "github_repo": "forked-project",
-  "clone_url": "https://github.com/original-owner/project.git"
+  "github_owner": "myorg",
+  "github_repo": "cool-project",
+  "clone_url": "https://github.com/original-owner/cool-project.git"
   ```
 
-  This ensures the repo is created in the proper location (`/repos/{owner}/{repo}/`) and a proper project record is created for tracking.
+  **Scenario 3: Modifying an existing project**
+  - Leave all three fields empty/null (uses quest's existing project)
+
+  This ensures repos are created in `/repos/{owner}/{repo}/` with proper project tracking.
 
   ### Checklist Best Practices (IMPORTANT)
   Checklists should have **3-5 must_have items** - fewer items means more efficient execution.
@@ -126,24 +131,18 @@ instructions: |
 
   **New Projects**: Creating something from scratch
   - ALWAYS set `github_owner` and `github_repo` in the OBJECTIVE_DRAFT
-  - Include repo creation in the checklist
-  - Include initial setup steps (git init, project structure, etc.)
+  - Checklist must include repo creation step
+  - Example checklist item: "Create GitHub repo and initialize project structure"
 
-  **Cloning Existing Repos**: Forking or cloning someone else's repo
+  **Forking Existing Repos**: Working on someone else's repo
   - Set `github_owner`, `github_repo`, AND `clone_url` in the OBJECTIVE_DRAFT
-  - The repo will be cloned to `/repos/{owner}/{repo}/`
+  - Checklist MUST include fork setup: "Fork {clone_url} to {github_owner}/{github_repo}"
+  - The task will: fork on GitHub, clone locally, set up origin (fork) and upstream (original)
 
   **Existing Projects**: Modifying an existing codebase
   - Leave `github_owner`, `github_repo`, `clone_url` empty (uses quest's project)
   - Review existing patterns before proposing changes
   - Ensure objectives align with existing architecture
-  - Include testing/verification in checklists
-
-  ### Repository Naming
-  When an objective involves creating a new repository:
-  - Set `github_owner` and `github_repo` fields in OBJECTIVE_DRAFT
-  - Ask if the user wants public or private
-  - The repo name should match what will be created on GitHub
 
   ### Asking Questions
 

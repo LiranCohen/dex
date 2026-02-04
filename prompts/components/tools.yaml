@@ -37,6 +37,14 @@ instructions: |
   5. Use `git_remote_add` with the clone URL from step 4
   6. Use `git_push` with set_upstream: true to push to GitHub
 
+  ### Workflow for FORKING Projects
+  When forking an existing repository (checklist mentions forking from a URL):
+  1. Fork on GitHub: `bash` with `gh repo fork {upstream-url} --org={owner} --fork-name={repo} --clone=false`
+  2. Clone your fork: `bash` with `git clone git@github.com:{owner}/{repo}.git .`
+  3. Add upstream: `git_remote_add` with name="upstream", url={upstream-url}
+  4. Make changes, commit, push to origin (your fork)
+  5. Create PR to upstream with `github_create_pr` using base_repo option
+
   ### Workflow for EXISTING Projects
   When working on existing code in a worktree:
   1. Read and understand existing code with `read_file` / `list_files`
