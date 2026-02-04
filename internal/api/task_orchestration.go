@@ -18,136 +18,17 @@ type startTaskResult struct {
 	SessionID    string
 }
 
-// startTaskInternal starts a task by ID with an optional base branch
-// This is a shared helper used by handleStartTask and auto-start logic
-func (s *Server) startTaskInternal(ctx context.Context, taskID string, baseBranch string) (*startTaskResult, error) {
-	// Get the task first
-	t, err := s.taskService.Get(taskID)
-	if err != nil {
-		return nil, fmt.Errorf("task not found: %w", err)
-	}
-
-	// Get the project to find repo_path
-	project, err := s.db.GetProjectByID(t.ProjectID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get project: %w", err)
-	}
-	if project == nil {
-		return nil, fmt.Errorf("project not found")
-	}
-
-	projectPath := project.RepoPath
-	if baseBranch == "" {
-		baseBranch = project.DefaultBranch
-		if baseBranch == "" {
-			baseBranch = "main"
-		}
-	}
-
-	// Check if already has a worktree
-	if t.WorktreePath.Valid && t.WorktreePath.String != "" {
-		return nil, fmt.Errorf("task already has a worktree")
-	}
-
-	// Check if project has a valid git repository that's appropriate for this project
-	// For new projects (creating repos), we start without a worktree
-	var worktreePath string
-	hasGitRepo := s.isValidGitRepo(projectPath)
-	isValidProjectPath := s.isValidProjectPath(projectPath)
-
-	if hasGitRepo && isValidProjectPath && s.gitService != nil {
-		// Project has a valid git repo - create worktree as usual
-		worktreePath, err = s.gitService.SetupTaskWorktree(projectPath, taskID, baseBranch)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create worktree: %w", err)
-		}
-	} else {
-		// No valid git repo yet - create a task-specific directory
-		// This happens for new projects or when project path is invalid/system path
-		if isValidProjectPath && projectPath != "" {
-			// Use the project path - the objective will create the repo here
-			worktreePath = projectPath
-			if err := os.MkdirAll(worktreePath, 0755); err != nil {
-				return nil, fmt.Errorf("failed to create project directory: %w", err)
-			}
-		} else {
-			// Project path is empty or invalid (e.g., system directory)
-			// Create a task-specific directory in the worktrees directory
-			if s.baseDir != "" {
-				worktreePath = filepath.Join(s.baseDir, "worktrees", "task-"+taskID)
-			} else {
-				worktreePath = filepath.Join(os.TempDir(), "dex-task-"+taskID)
-			}
-			if err := os.MkdirAll(worktreePath, 0755); err != nil {
-				return nil, fmt.Errorf("failed to create task directory: %w", err)
-			}
-		}
-		// Save worktree path to database so it can be inherited by dependent tasks
-		if err := s.db.UpdateTaskWorktree(taskID, worktreePath, ""); err != nil {
-			return nil, fmt.Errorf("failed to save worktree path: %w", err)
-		}
-	}
-
-	// Transition through ready to running status
-	// First: pending -> ready
-	if t.Status == "pending" {
-		if err := s.taskService.UpdateStatus(taskID, "ready"); err != nil {
-			if hasGitRepo && s.gitService != nil {
-				_ = s.gitService.CleanupTaskWorktree(projectPath, taskID, true)
-			}
-			return nil, fmt.Errorf("failed to transition to ready: %w", err)
-		}
-	}
-	// Then: ready -> running
-	if err := s.taskService.UpdateStatus(taskID, "running"); err != nil {
-		if hasGitRepo && s.gitService != nil {
-			_ = s.gitService.CleanupTaskWorktree(projectPath, taskID, true)
-		}
-		return nil, fmt.Errorf("failed to transition to running: %w", err)
-	}
-
-	// Broadcast task started
-	if s.hub != nil {
-		s.hub.Broadcast(websocket.Message{
-			Type:   websocket.EventTaskUpdated,
-			TaskID: taskID,
-			Payload: map[string]any{
-				"task_id": taskID,
-				"status":  "running",
-			},
-		})
-	}
-
-	// Create and start a session for this task
-	hat := "creator" // Default hat - could be determined from task type
-	if t.Hat.Valid && t.Hat.String != "" {
-		hat = t.Hat.String
-	}
-
-	sess, err := s.sessionManager.CreateSession(taskID, hat, worktreePath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create session: %w", err)
-	}
-
-	// Start the session (runs Ralph loop in background)
-	// Use background context since the session should live beyond the HTTP request
-	if err := s.sessionManager.Start(ctx, sess.ID); err != nil {
-		return nil, fmt.Errorf("failed to start session: %w", err)
-	}
-
-	// Fetch updated task
-	updated, _ := s.taskService.Get(taskID)
-
-	return &startTaskResult{
-		Task:         updated,
-		WorktreePath: worktreePath,
-		SessionID:    sess.ID,
-	}, nil
+// startTaskOptions configures how a task should be started
+type startTaskOptions struct {
+	BaseBranch         string // Base branch for worktree creation
+	InheritedWorktree  string // Worktree to inherit from predecessor
+	PredecessorHandoff string // Context from predecessor task
 }
 
-// startTaskWithInheritance starts a task, optionally inheriting a worktree from a predecessor
-func (s *Server) startTaskWithInheritance(ctx context.Context, taskID string, inheritedWorktree string, predecessorHandoff string) (*startTaskResult, error) {
-	// Get the task first
+// startTask starts a task with the given options
+// This is the single entry point for all task starting logic
+func (s *Server) startTask(ctx context.Context, taskID string, opts startTaskOptions) (*startTaskResult, error) {
+	// Get the task
 	t, err := s.taskService.Get(taskID)
 	if err != nil {
 		return nil, fmt.Errorf("task not found: %w", err)
@@ -167,104 +48,24 @@ func (s *Server) startTaskWithInheritance(ctx context.Context, taskID string, in
 		return nil, fmt.Errorf("task already has a worktree")
 	}
 
-	// Use inherited worktree if provided and valid, otherwise fall back to normal logic
-	var worktreePath string
-	if inheritedWorktree != "" {
-		// Verify the inherited worktree still exists
-		if _, err := os.Stat(inheritedWorktree); err == nil {
-			worktreePath = inheritedWorktree
-			fmt.Printf("startTaskWithInheritance: task %s inheriting worktree %s\n", taskID, worktreePath)
-			// Save inherited worktree path to this task's record
-			if err := s.db.UpdateTaskWorktree(taskID, worktreePath, ""); err != nil {
-				return nil, fmt.Errorf("failed to save inherited worktree path: %w", err)
-			}
-		} else {
-			fmt.Printf("startTaskWithInheritance: inherited worktree %s no longer exists, creating new\n", inheritedWorktree)
-		}
+	// Resolve the worktree path
+	worktreePath, err := s.resolveWorktreePath(taskID, project, opts)
+	if err != nil {
+		return nil, err
 	}
 
-	// If no inherited worktree, fall back to normal worktree creation
-	if worktreePath == "" {
-		projectPath := project.RepoPath
-		baseBranch := project.DefaultBranch
-		if baseBranch == "" {
-			baseBranch = "main"
-		}
-
-		hasGitRepo := s.isValidGitRepo(projectPath)
-		isValidProjectPath := s.isValidProjectPath(projectPath)
-
-		if hasGitRepo && isValidProjectPath && s.gitService != nil {
-			worktreePath, err = s.gitService.SetupTaskWorktree(projectPath, taskID, baseBranch)
-			if err != nil {
-				return nil, fmt.Errorf("failed to create worktree: %w", err)
-			}
-		} else if isValidProjectPath && projectPath != "" {
-			worktreePath = projectPath
-			if err := os.MkdirAll(worktreePath, 0755); err != nil {
-				return nil, fmt.Errorf("failed to create project directory: %w", err)
-			}
-			// Save worktree path to database so it can be inherited by dependent tasks
-			if err := s.db.UpdateTaskWorktree(taskID, worktreePath, ""); err != nil {
-				return nil, fmt.Errorf("failed to save worktree path: %w", err)
-			}
-		} else {
-			if s.baseDir != "" {
-				worktreePath = filepath.Join(s.baseDir, "worktrees", "task-"+taskID)
-			} else {
-				worktreePath = filepath.Join(os.TempDir(), "dex-task-"+taskID)
-			}
-			if err := os.MkdirAll(worktreePath, 0755); err != nil {
-				return nil, fmt.Errorf("failed to create task directory: %w", err)
-			}
-			// Save worktree path to database so it can be inherited by dependent tasks
-			if err := s.db.UpdateTaskWorktree(taskID, worktreePath, ""); err != nil {
-				return nil, fmt.Errorf("failed to save worktree path: %w", err)
-			}
-		}
-	}
-
-	// Transition through ready to running status
-	if t.Status == "pending" || t.Status == "blocked" {
-		if err := s.taskService.UpdateStatus(taskID, "ready"); err != nil {
-			return nil, fmt.Errorf("failed to transition to ready: %w", err)
-		}
-	}
-	if err := s.taskService.UpdateStatus(taskID, "running"); err != nil {
-		return nil, fmt.Errorf("failed to transition to running: %w", err)
+	// Transition to running status
+	if err := s.transitionTaskToRunning(taskID, t.Status); err != nil {
+		return nil, err
 	}
 
 	// Broadcast task started
-	if s.hub != nil {
-		s.hub.Broadcast(websocket.Message{
-			Type:   websocket.EventTaskUpdated,
-			TaskID: taskID,
-			Payload: map[string]any{
-				"task_id": taskID,
-				"status":  "running",
-			},
-		})
-	}
+	s.broadcastTaskUpdated(taskID, "running")
 
-	// Create and start a session for this task
-	hat := "creator"
-	if t.Hat.Valid && t.Hat.String != "" {
-		hat = t.Hat.String
-	}
-
-	sess, err := s.sessionManager.CreateSession(taskID, hat, worktreePath)
+	// Create and start session
+	sess, err := s.createAndStartSession(ctx, taskID, t, worktreePath, opts.PredecessorHandoff)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create session: %w", err)
-	}
-
-	// If we have a predecessor handoff, inject it into the session context
-	if predecessorHandoff != "" {
-		s.sessionManager.SetPredecessorContext(sess.ID, predecessorHandoff)
-	}
-
-	// Start the session
-	if err := s.sessionManager.Start(ctx, sess.ID); err != nil {
-		return nil, fmt.Errorf("failed to start session: %w", err)
+		return nil, err
 	}
 
 	// Fetch updated task
@@ -275,6 +76,143 @@ func (s *Server) startTaskWithInheritance(ctx context.Context, taskID string, in
 		WorktreePath: worktreePath,
 		SessionID:    sess.ID,
 	}, nil
+}
+
+// resolveWorktreePath determines the appropriate working directory for a task
+func (s *Server) resolveWorktreePath(taskID string, project *db.Project, opts startTaskOptions) (string, error) {
+	// Try to inherit worktree from predecessor
+	if opts.InheritedWorktree != "" {
+		if _, err := os.Stat(opts.InheritedWorktree); err == nil {
+			fmt.Printf("resolveWorktreePath: task %s inheriting worktree %s\n", taskID, opts.InheritedWorktree)
+			if err := s.db.UpdateTaskWorktree(taskID, opts.InheritedWorktree, ""); err != nil {
+				return "", fmt.Errorf("failed to save inherited worktree path: %w", err)
+			}
+			return opts.InheritedWorktree, nil
+		}
+		fmt.Printf("resolveWorktreePath: inherited worktree %s no longer exists, creating new\n", opts.InheritedWorktree)
+	}
+
+	projectPath := project.RepoPath
+	baseBranch := opts.BaseBranch
+	if baseBranch == "" {
+		baseBranch = project.DefaultBranch
+		if baseBranch == "" {
+			baseBranch = "main"
+		}
+	}
+
+	hasGitRepo := s.isValidGitRepo(projectPath)
+	isValidPath := s.isValidProjectPath(projectPath)
+
+	// Case 1: Existing git repo - create a proper git worktree
+	if hasGitRepo && isValidPath && s.gitService != nil {
+		worktreePath, err := s.gitService.SetupTaskWorktree(projectPath, taskID, baseBranch)
+		if err != nil {
+			return "", fmt.Errorf("failed to create worktree: %w", err)
+		}
+		return worktreePath, nil
+	}
+
+	// Case 2: Valid project path but no git repo yet - work directly in project path
+	// This is for new projects - the task will initialize git here
+	if isValidPath && projectPath != "" {
+		if err := os.MkdirAll(projectPath, 0755); err != nil {
+			return "", fmt.Errorf("failed to create project directory: %w", err)
+		}
+		if err := s.db.UpdateTaskWorktree(taskID, projectPath, ""); err != nil {
+			return "", fmt.Errorf("failed to save worktree path: %w", err)
+		}
+		fmt.Printf("resolveWorktreePath: task %s working directly in project path %s\n", taskID, projectPath)
+		return projectPath, nil
+	}
+
+	// Case 3: No valid project path - create task-specific directory
+	// This shouldn't happen often, but handles edge cases
+	var worktreePath string
+	if s.baseDir != "" {
+		worktreePath = filepath.Join(s.baseDir, "worktrees", "task-"+taskID)
+	} else {
+		worktreePath = filepath.Join(os.TempDir(), "dex-task-"+taskID)
+	}
+	if err := os.MkdirAll(worktreePath, 0755); err != nil {
+		return "", fmt.Errorf("failed to create task directory: %w", err)
+	}
+	if err := s.db.UpdateTaskWorktree(taskID, worktreePath, ""); err != nil {
+		return "", fmt.Errorf("failed to save worktree path: %w", err)
+	}
+	fmt.Printf("resolveWorktreePath: task %s using fallback directory %s (project path '%s' invalid)\n", taskID, worktreePath, projectPath)
+	return worktreePath, nil
+}
+
+// transitionTaskToRunning moves a task through the state machine to running
+func (s *Server) transitionTaskToRunning(taskID, currentStatus string) error {
+	// Handle different starting states
+	switch currentStatus {
+	case "pending", "blocked":
+		if err := s.taskService.UpdateStatus(taskID, "ready"); err != nil {
+			return fmt.Errorf("failed to transition to ready: %w", err)
+		}
+	}
+
+	if err := s.taskService.UpdateStatus(taskID, "running"); err != nil {
+		return fmt.Errorf("failed to transition to running: %w", err)
+	}
+
+	return nil
+}
+
+// createAndStartSession creates a session for a task and starts it
+func (s *Server) createAndStartSession(ctx context.Context, taskID string, task *db.Task, worktreePath, predecessorHandoff string) (*struct{ ID string }, error) {
+	hat := "creator"
+	if task.Hat.Valid && task.Hat.String != "" {
+		hat = task.Hat.String
+	}
+
+	sess, err := s.sessionManager.CreateSession(taskID, hat, worktreePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create session: %w", err)
+	}
+
+	if predecessorHandoff != "" {
+		s.sessionManager.SetPredecessorContext(sess.ID, predecessorHandoff)
+	}
+
+	if err := s.sessionManager.Start(ctx, sess.ID); err != nil {
+		return nil, fmt.Errorf("failed to start session: %w", err)
+	}
+
+	return &struct{ ID string }{ID: sess.ID}, nil
+}
+
+// broadcastTaskUpdated sends a task.updated WebSocket event
+func (s *Server) broadcastTaskUpdated(taskID, status string) {
+	if s.hub != nil {
+		s.hub.Broadcast(websocket.Message{
+			Type:   websocket.EventTaskUpdated,
+			TaskID: taskID,
+			Payload: map[string]any{
+				"task_id": taskID,
+				"status":  status,
+			},
+		})
+	}
+}
+
+// startTaskInternal starts a task by ID with an optional base branch
+// This is a convenience wrapper for external callers
+func (s *Server) startTaskInternal(ctx context.Context, taskID string, baseBranch string) (*startTaskResult, error) {
+	return s.startTask(ctx, taskID, startTaskOptions{
+		BaseBranch: baseBranch,
+	})
+}
+
+// startTaskWithInheritance starts a task, optionally inheriting a worktree from a predecessor
+// This is a convenience wrapper for task dependency handling
+func (s *Server) startTaskWithInheritance(ctx context.Context, taskID string, inheritedWorktree string, predecessorHandoff string) (*startTaskResult, error) {
+	return s.startTask(ctx, taskID, startTaskOptions{
+		InheritedWorktree:  inheritedWorktree,
+		PredecessorHandoff: predecessorHandoff,
+	})
 }
 
 // handleTaskUnblocking finds tasks that became ready because the given task completed
@@ -288,8 +226,6 @@ func (s *Server) handleTaskUnblocking(ctx context.Context, completedTaskID strin
 	}
 
 	// Find tasks that are now ready to auto-start
-	// This uses the new fully-derived blocked state - tasks stay 'ready' and we query
-	// for tasks that have auto_start=true and no more incomplete blockers
 	tasksToAutoStart, err := s.db.GetTasksReadyToAutoStart(completedTaskID)
 	if err != nil {
 		fmt.Printf("handleTaskUnblocking: failed to get tasks ready to auto-start for %s: %v\n", completedTaskID, err)
@@ -309,7 +245,7 @@ func (s *Server) handleTaskUnblocking(ctx context.Context, completedTaskID strin
 	}
 
 	for _, task := range tasksToAutoStart {
-		// Broadcast task unblocked event (for UI update)
+		// Broadcast task unblocked event
 		if s.hub != nil {
 			s.hub.Broadcast(websocket.Message{
 				Type: "task.unblocked",
@@ -330,7 +266,6 @@ func (s *Server) handleTaskUnblocking(ctx context.Context, completedTaskID strin
 			startResult, err := s.startTaskWithInheritance(context.Background(), taskID, inheritedWorktree, handoff)
 			if err != nil {
 				fmt.Printf("handleTaskUnblocking: auto-start failed for task %s: %v\n", taskID, err)
-				// Broadcast auto-start failure
 				if s.hub != nil {
 					s.hub.Broadcast(websocket.Message{
 						Type: "task.auto_start_failed",
@@ -343,10 +278,9 @@ func (s *Server) handleTaskUnblocking(ctx context.Context, completedTaskID strin
 				return
 			}
 
-				fmt.Printf("handleTaskUnblocking: auto-started task %s (session %s) with inherited worktree from %s\n",
+			fmt.Printf("handleTaskUnblocking: auto-started task %s (session %s) with inherited worktree from %s\n",
 				taskID, startResult.SessionID, completedTaskID)
 
-			// Broadcast auto-start success
 			if s.hub != nil {
 				s.hub.Broadcast(websocket.Message{
 					Type: "task.auto_started",
@@ -364,7 +298,6 @@ func (s *Server) handleTaskUnblocking(ctx context.Context, completedTaskID strin
 }
 
 // generatePredecessorHandoff creates a handoff summary for the completed task
-// to provide context to dependent tasks
 func (s *Server) generatePredecessorHandoff(task *db.Task) string {
 	var sb strings.Builder
 
@@ -403,52 +336,63 @@ func (s *Server) generatePredecessorHandoff(task *db.Task) string {
 }
 
 // isValidGitRepo checks if the given path is a valid git repository
+// Handles both regular repos (.git directory) and git worktrees (.git file)
 func (s *Server) isValidGitRepo(path string) bool {
 	if path == "" {
 		return false
 	}
-	gitDir := filepath.Join(path, ".git")
-	info, err := os.Stat(gitDir)
+	gitPath := filepath.Join(path, ".git")
+	info, err := os.Stat(gitPath)
 	if err != nil {
 		return false
 	}
-	return info.IsDir()
+	// Regular repo has .git directory, worktree has .git file
+	return info.IsDir() || info.Mode().IsRegular()
 }
 
 // isValidProjectPath checks if the given path is appropriate for use as a project directory
-// It returns false for system directories, dex installation directories, and other invalid paths
+// Returns false for system directories and the dex installation directory itself
 func (s *Server) isValidProjectPath(path string) bool {
 	if path == "" || path == "." || path == ".." {
 		return false
 	}
 
-	// Normalize the path
 	absPath, err := filepath.Abs(path)
 	if err != nil {
 		return false
 	}
 
-	// System directories that should never be used (including subdirectories)
-	systemPrefixes := []string{
-		"/usr/",
-		"/bin/",
-		"/sbin/",
-		"/lib/",
-		"/etc/",
+	// System directories that should never be used for project code
+	// Note: We allow subdirectories of /opt/ (like /opt/dex/repos/) but not /opt/ itself
+	systemPaths := []string{
+		"/usr",
+		"/bin",
+		"/sbin",
+		"/lib",
+		"/lib64",
+		"/etc",
+		"/var",
+		"/root",
+		"/boot",
+		"/dev",
+		"/proc",
+		"/sys",
 	}
 
-	for _, prefix := range systemPrefixes {
-		if strings.HasPrefix(absPath, prefix) {
+	for _, sysPath := range systemPaths {
+		// Reject exact match or if path is under system directory
+		if absPath == sysPath || strings.HasPrefix(absPath, sysPath+"/") {
 			return false
 		}
 	}
 
-	// Check if this looks like the dex installation by checking for cmd/main.go
-	// This catches /opt/dex or any other location where dex source is installed
-	dexMarker := filepath.Join(absPath, "cmd", "main.go")
-	if _, err := os.Stat(dexMarker); err == nil {
-		// This is likely the dex source directory
-		return false
+	// Reject the dex base directory itself (but allow subdirectories like repos/)
+	// s.baseDir is typically /opt/dex
+	if s.baseDir != "" {
+		dexBase, err := filepath.Abs(s.baseDir)
+		if err == nil && absPath == dexBase {
+			return false
+		}
 	}
 
 	return true
