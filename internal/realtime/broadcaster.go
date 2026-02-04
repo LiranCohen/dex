@@ -3,41 +3,29 @@ package realtime
 import (
 	"encoding/json"
 	"time"
-
-	"github.com/lirancohen/dex/internal/api/websocket"
 )
 
-// Broadcaster publishes events to both the legacy WebSocket hub and
-// the new Centrifuge realtime node during the migration period.
-// Once migration is complete, the legacy hub can be removed.
+// Broadcaster publishes events to the Centrifuge realtime node
 type Broadcaster struct {
-	hub      *websocket.Hub
-	realtime *Node
+	node *Node
 }
 
-// NewBroadcaster creates a new broadcaster that publishes to both systems
-func NewBroadcaster(hub *websocket.Hub, realtime *Node) *Broadcaster {
+// NewBroadcaster creates a new broadcaster
+func NewBroadcaster(node *Node) *Broadcaster {
 	return &Broadcaster{
-		hub:      hub,
-		realtime: realtime,
+		node: node,
 	}
 }
 
-// Publish sends an event to both the legacy hub and the new realtime system
+// Publish sends an event to the realtime system
 func (b *Broadcaster) Publish(eventType string, payload map[string]any) {
 	// Add timestamp if not present
 	if _, ok := payload["timestamp"]; !ok {
 		payload["timestamp"] = time.Now().UTC().Format(time.RFC3339Nano)
 	}
 
-	// Publish to legacy hub (if available)
-	if b.hub != nil {
-		b.publishToLegacyHub(eventType, payload)
-	}
-
-	// Publish to new realtime system (if available)
-	if b.realtime != nil {
-		b.realtime.Publish(eventType, payload)
+	if b.node != nil {
+		b.node.Publish(eventType, payload)
 	}
 }
 
@@ -74,31 +62,15 @@ func (b *Broadcaster) PublishActivityEvent(taskID string, activity map[string]an
 		"task_id":  taskID,
 		"activity": activity,
 	}
-	b.Publish("activity.new", payload)
-}
-
-// publishToLegacyHub converts the event to the legacy hub format and broadcasts
-func (b *Broadcaster) publishToLegacyHub(eventType string, payload map[string]any) {
-	// Build legacy message format
-	msg := websocket.Message{
-		Type:    eventType,
-		Payload: payload,
-	}
-
-	// Set TaskID if present for subscription filtering
-	if taskID, ok := payload["task_id"].(string); ok {
-		msg.TaskID = taskID
-	}
-
-	b.hub.Broadcast(msg)
+	b.Publish(EventActivityNew, payload)
 }
 
 // Event types as constants for consistency
 const (
 	// Task events
-	EventTaskCreated     = "task.created"
-	EventTaskUpdated     = "task.updated"
-	EventTaskCancelled   = "task.cancelled"
+	EventTaskCreated         = "task.created"
+	EventTaskUpdated         = "task.updated"
+	EventTaskCancelled       = "task.cancelled"
 	EventTaskPaused          = "task.paused"
 	EventTaskResumed         = "task.resumed"
 	EventTaskUnblocked       = "task.unblocked"
@@ -107,7 +79,6 @@ const (
 
 	// Session events
 	EventSessionKilled    = "session.killed"
-
 	EventSessionStarted   = "session.started"
 	EventSessionIteration = "session.iteration"
 	EventSessionCompleted = "session.completed"
@@ -116,18 +87,18 @@ const (
 	EventActivityNew = "activity.new"
 
 	// Quest events
-	EventQuestCreated       = "quest.created"
-	EventQuestUpdated       = "quest.updated"
-	EventQuestDeleted       = "quest.deleted"
-	EventQuestCompleted     = "quest.completed"
-	EventQuestReopened      = "quest.reopened"
-	EventQuestContentDelta  = "quest.content_delta"
-	EventQuestToolCall      = "quest.tool_call"
-	EventQuestToolResult    = "quest.tool_result"
-	EventQuestMessage       = "quest.message"
+	EventQuestCreated        = "quest.created"
+	EventQuestUpdated        = "quest.updated"
+	EventQuestDeleted        = "quest.deleted"
+	EventQuestCompleted      = "quest.completed"
+	EventQuestReopened       = "quest.reopened"
+	EventQuestContentDelta   = "quest.content_delta"
+	EventQuestToolCall       = "quest.tool_call"
+	EventQuestToolResult     = "quest.tool_result"
+	EventQuestMessage        = "quest.message"
 	EventQuestObjectiveDraft = "quest.objective_draft"
-	EventQuestQuestion      = "quest.question"
-	EventQuestReady         = "quest.ready"
+	EventQuestQuestion       = "quest.question"
+	EventQuestReady          = "quest.ready"
 
 	// Planning events
 	EventPlanningStarted   = "planning.started"

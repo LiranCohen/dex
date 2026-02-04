@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
+import { Centrifuge, Subscription, type PublicationContext } from 'centrifuge';
 import { useAuthStore } from '../stores/auth';
 import type { WebSocketEvent } from '../lib/types';
 
@@ -15,7 +16,6 @@ interface UseWebSocketReturn {
   reconnect: () => void;
 }
 
-const WS_RECONNECT_DELAY = 3000;
 const MAX_RECONNECT_ATTEMPTS = 5;
 
 export function useWebSocket(): UseWebSocketReturn {
@@ -23,10 +23,9 @@ export function useWebSocket(): UseWebSocketReturn {
   const [connectionState, setConnectionState] = useState<ConnectionState>('disconnected');
   const [reconnectAttempts, setReconnectAttempts] = useState(0);
   const [lastMessage, setLastMessage] = useState<WebSocketEvent | null>(null);
-  const wsRef = useRef<WebSocket | null>(null);
+  const centrifugeRef = useRef<Centrifuge | null>(null);
+  const subscriptionRef = useRef<Subscription | null>(null);
   const handlersRef = useRef<Set<MessageHandler>>(new Set());
-  const reconnectTimeoutRef = useRef<number | null>(null);
-  const connectRef = useRef<() => void>(() => {});
   const reconnectAttemptsRef = useRef(0);
 
   const token = useAuthStore((state) => state.token);
@@ -41,88 +40,107 @@ export function useWebSocket(): UseWebSocketReturn {
       setReconnectAttempts(0);
     }
 
+    // Clean up existing connection
+    if (centrifugeRef.current) {
+      centrifugeRef.current.disconnect();
+      centrifugeRef.current = null;
+    }
+
     setConnectionState('reconnecting');
 
-    // Build WebSocket URL
+    // Build WebSocket URL for Centrifuge
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/api/v1/ws?token=${token}`;
+    const wsUrl = `${protocol}//${window.location.host}/api/v1/realtime`;
 
     try {
-      const ws = new WebSocket(wsUrl);
+      // Create Centrifuge client with auth token
+      const centrifuge = new Centrifuge(wsUrl, {
+        token: token,
+        // Centrifuge will handle reconnection automatically
+        minReconnectDelay: 1000,
+        maxReconnectDelay: 10000,
+      });
 
-      ws.onopen = () => {
+      // Handle connection state changes
+      centrifuge.on('connected', () => {
+        console.log('[Centrifuge] Connected');
         setConnected(true);
         setConnectionState('connected');
         reconnectAttemptsRef.current = 0;
         setReconnectAttempts(0);
-        console.log('[WebSocket] Connected');
-        // Subscribe to all events
-        ws.send(JSON.stringify({ action: 'subscribe_all' }));
-      };
+      });
 
-      ws.onclose = (event) => {
+      centrifuge.on('connecting', () => {
+        console.log('[Centrifuge] Connecting...');
+        setConnectionState('reconnecting');
+      });
+
+      centrifuge.on('disconnected', (ctx) => {
+        console.log('[Centrifuge] Disconnected:', ctx.reason);
         setConnected(false);
-        wsRef.current = null;
-        console.log('[WebSocket] Disconnected', event.code, event.reason);
 
-        // Reconnect if still authenticated and under max attempts
         if (isAuthenticated) {
           reconnectAttemptsRef.current += 1;
           setReconnectAttempts(reconnectAttemptsRef.current);
 
           if (reconnectAttemptsRef.current >= MAX_RECONNECT_ATTEMPTS) {
             setConnectionState('failed');
-            console.log('[WebSocket] Max reconnect attempts reached');
-            return;
+            console.log('[Centrifuge] Max reconnect attempts reached');
+          } else {
+            setConnectionState('reconnecting');
           }
-
-          setConnectionState('reconnecting');
-          const delay = WS_RECONNECT_DELAY * Math.min(reconnectAttemptsRef.current, 3); // Exponential backoff up to 3x
-          reconnectTimeoutRef.current = window.setTimeout(() => {
-            console.log(`[WebSocket] Attempting reconnect (${reconnectAttemptsRef.current}/${MAX_RECONNECT_ATTEMPTS})...`);
-            connectRef.current();
-          }, delay);
         } else {
           setConnectionState('disconnected');
         }
-      };
+      });
 
-      ws.onerror = (error) => {
-        console.error('[WebSocket] Error:', error);
-      };
+      centrifuge.on('error', (ctx) => {
+        console.error('[Centrifuge] Error:', ctx.error);
+      });
 
-      ws.onmessage = (event) => {
+      // Subscribe to the global channel to receive all events
+      const sub = centrifuge.newSubscription('global');
+
+      sub.on('publication', (ctx: PublicationContext) => {
         try {
-          const data = JSON.parse(event.data) as WebSocketEvent;
-          console.log('[WebSocket] Received:', data.type, data);
+          const data = ctx.data as WebSocketEvent;
+          console.log('[Centrifuge] Received:', data.type, data);
           setLastMessage(data);
 
           // Notify all subscribers
           const handlerCount = handlersRef.current.size;
-          console.log(`[WebSocket] Notifying ${handlerCount} handlers`);
+          console.log(`[Centrifuge] Notifying ${handlerCount} handlers`);
           handlersRef.current.forEach((handler) => {
             try {
               handler(data);
             } catch (err) {
-              console.error('[WebSocket] Handler error:', err);
+              console.error('[Centrifuge] Handler error:', err);
             }
           });
         } catch (err) {
-          console.error('[WebSocket] Failed to parse message:', err);
+          console.error('[Centrifuge] Failed to process message:', err);
         }
-      };
+      });
 
-      wsRef.current = ws;
+      sub.on('subscribed', () => {
+        console.log('[Centrifuge] Subscribed to global channel');
+      });
+
+      sub.on('error', (ctx) => {
+        console.error('[Centrifuge] Subscription error:', ctx.error);
+      });
+
+      // Subscribe and connect
+      sub.subscribe();
+      subscriptionRef.current = sub;
+
+      centrifuge.connect();
+      centrifugeRef.current = centrifuge;
     } catch (err) {
-      console.error('[WebSocket] Failed to connect:', err);
+      console.error('[Centrifuge] Failed to connect:', err);
       setConnectionState('failed');
     }
   }, [isAuthenticated, token]);
-
-  // Keep connectRef updated with latest connect function
-  useEffect(() => {
-    connectRef.current = connect;
-  }, [connect]);
 
   // Connect/disconnect based on auth state
   useEffect(() => {
@@ -131,12 +149,13 @@ export function useWebSocket(): UseWebSocketReturn {
     }
 
     return () => {
-      if (reconnectTimeoutRef.current) {
-        clearTimeout(reconnectTimeoutRef.current);
+      if (subscriptionRef.current) {
+        subscriptionRef.current.unsubscribe();
+        subscriptionRef.current = null;
       }
-      if (wsRef.current) {
-        wsRef.current.close();
-        wsRef.current = null;
+      if (centrifugeRef.current) {
+        centrifugeRef.current.disconnect();
+        centrifugeRef.current = null;
       }
     };
   }, [isAuthenticated, token, connect]);
@@ -153,17 +172,6 @@ export function useWebSocket(): UseWebSocketReturn {
 
   // Manual reconnect function
   const reconnect = useCallback(() => {
-    // Clear any pending reconnect timeout
-    if (reconnectTimeoutRef.current) {
-      clearTimeout(reconnectTimeoutRef.current);
-      reconnectTimeoutRef.current = null;
-    }
-    // Close existing connection if any
-    if (wsRef.current) {
-      wsRef.current.close();
-      wsRef.current = null;
-    }
-    // Connect with manual flag to reset attempts
     connect(true);
   }, [connect]);
 

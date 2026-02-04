@@ -78,18 +78,6 @@ export function ObjectiveDetail() {
     };
   }, []);
 
-  // Debounced loadData to avoid excessive API calls from rapid WebSocket events
-  const debouncedLoadData = useCallback(() => {
-    if (loadDataTimeoutRef.current) {
-      clearTimeout(loadDataTimeoutRef.current);
-    }
-    loadDataTimeoutRef.current = setTimeout(() => {
-      if (isMountedRef.current) {
-        loadData();
-      }
-    }, 300); // 300ms debounce
-  }, [loadData]);
-
   // Calculate prev/next objective navigation
   const { prevObjective, nextObjective, objectivePosition } = useMemo(() => {
     if (!id || questTasks.length === 0) {
@@ -197,6 +185,18 @@ export function ObjectiveDetail() {
 
   useEffect(() => {
     loadData();
+  }, [loadData]);
+
+  // Debounced loadData to avoid excessive API calls from rapid WebSocket events
+  const debouncedLoadData = useCallback(() => {
+    if (loadDataTimeoutRef.current) {
+      clearTimeout(loadDataTimeoutRef.current);
+    }
+    loadDataTimeoutRef.current = setTimeout(() => {
+      if (isMountedRef.current) {
+        loadData();
+      }
+    }, 300); // 300ms debounce
   }, [loadData]);
 
   // WebSocket updates

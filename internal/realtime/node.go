@@ -146,6 +146,11 @@ func (n *Node) PublishToChannel(channel string, data []byte) error {
 
 // canSubscribe checks if a user can subscribe to a channel
 func canSubscribe(userID, channel string) bool {
+	// Handle global channel (receives all events)
+	if channel == "global" {
+		return true
+	}
+
 	// Handle system channel (no ":" delimiter)
 	if channel == "system" {
 		return true
@@ -175,9 +180,10 @@ func canSubscribe(userID, channel string) bool {
 
 // routeEvent determines which channel(s) an event should be published to
 func routeEvent(eventType string, payload map[string]any) []string {
-	var channels []string
+	// Always publish to global channel for clients that want all events
+	channels := []string{"global"}
 
-	// Route based on event type prefix
+	// Route to specific channels based on event type prefix
 	switch {
 	case strings.HasPrefix(eventType, "task."),
 		strings.HasPrefix(eventType, "session."),
@@ -196,8 +202,7 @@ func routeEvent(eventType string, payload map[string]any) []string {
 		}
 
 	case strings.HasPrefix(eventType, "approval."):
-		// Approvals go to system channel for now
-		// TODO: Route to specific user channel when user_id is available
+		// Approvals also go to system channel
 		channels = append(channels, "system")
 
 	case strings.HasPrefix(eventType, "project."):

@@ -24,7 +24,6 @@ import (
 	toolbelthandlers "github.com/lirancohen/dex/internal/api/handlers/toolbelt"
 	"github.com/lirancohen/dex/internal/api/middleware"
 	"github.com/lirancohen/dex/internal/api/setup"
-	"github.com/lirancohen/dex/internal/api/websocket"
 	"github.com/lirancohen/dex/internal/auth"
 	"github.com/lirancohen/dex/internal/realtime"
 	"github.com/lirancohen/dex/internal/db"
@@ -55,9 +54,8 @@ type Server struct {
 	githubSyncService *github.SyncService     // Underlying GitHub sync service
 	handlersSyncSvc   *githubsync.SyncService // Handler-level sync service wrapper
 	setupHandler      *setup.Handler
-	hub               *websocket.Hub
 	realtime          *realtime.Node         // Centrifuge-based realtime messaging
-	broadcaster       *realtime.Broadcaster  // Dual-publish to legacy and new
+	broadcaster       *realtime.Broadcaster
 	deps              *core.Deps
 	addr              string
 	certFile          string
@@ -93,10 +91,6 @@ func NewServer(database *db.DB, cfg Config) *Server {
 	e.Use(echomw.Recover())
 	e.Use(echomw.RequestID())
 
-	// Create WebSocket hub (legacy - will be replaced by realtime)
-	hub := websocket.NewHub()
-	go hub.Run()
-
 	// Create Centrifuge realtime node
 	rtNode, err := realtime.NewNode(realtime.Config{
 		ClientQueueMaxSize: 2 * 1024 * 1024, // 2MB per client
@@ -111,15 +105,14 @@ func NewServer(database *db.DB, cfg Config) *Server {
 		}
 	}
 
-	// Create broadcaster for dual-publishing during migration
-	broadcaster := realtime.NewBroadcaster(hub, rtNode)
+	// Create broadcaster for publishing events
+	broadcaster := realtime.NewBroadcaster(rtNode)
 
 	s := &Server{
 		echo:        e,
 		db:          database,
 		toolbelt:    cfg.Toolbelt,
 		taskService: task.NewService(database),
-		hub:         hub,
 		realtime:    rtNode,
 		broadcaster: broadcaster,
 		addr:        cfg.Addr,
@@ -385,12 +378,7 @@ func (s *Server) registerRoutes() {
 	objectivesHandler.RegisterRoutes(protected)
 	templatesHandler.RegisterRoutes(protected)
 
-	// WebSocket endpoint for real-time updates (legacy hub)
-	protected.GET("/ws", func(c echo.Context) error {
-		return websocket.ServeWS(s.hub, c)
-	})
-
-	// Centrifuge WebSocket endpoint (new realtime system)
+	// Centrifuge WebSocket endpoint for real-time updates
 	if s.realtime != nil {
 		wsHandler := s.realtime.WebSocketHandler()
 
