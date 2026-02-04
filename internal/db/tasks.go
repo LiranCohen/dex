@@ -79,7 +79,7 @@ func (db *DB) GetTaskByID(id string) (*Task, error) {
 	err := db.QueryRow(
 		`SELECT id, project_id, quest_id, github_issue_number, title, description, parent_id,
 		        type, hat, model, priority, autonomy_level, status, base_branch,
-		        worktree_path, branch_name, content_path, pr_number,
+		        worktree_path, branch_name, content_path, pr_number, pr_merged_at, worktree_cleaned_at,
 		        token_budget, time_budget_min, time_used_min,
 		        dollar_budget, dollar_used, created_at, started_at, completed_at
 		 FROM tasks WHERE id = ?`,
@@ -87,7 +87,7 @@ func (db *DB) GetTaskByID(id string) (*Task, error) {
 	).Scan(
 		&task.ID, &task.ProjectID, &task.QuestID, &task.GitHubIssueNumber, &task.Title, &task.Description, &task.ParentID,
 		&task.Type, &task.Hat, &task.Model, &task.Priority, &task.AutonomyLevel, &task.Status, &task.BaseBranch,
-		&task.WorktreePath, &task.BranchName, &task.ContentPath, &task.PRNumber,
+		&task.WorktreePath, &task.BranchName, &task.ContentPath, &task.PRNumber, &task.PRMergedAt, &task.WorktreeCleanedAt,
 		&task.TokenBudget, &task.TimeBudgetMin, &task.TimeUsedMin,
 		&task.DollarBudget, &task.DollarUsed, &task.CreatedAt, &task.StartedAt, &task.CompletedAt,
 	)
@@ -127,7 +127,7 @@ func (db *DB) ListAllTasks() ([]*Task, error) {
 func (db *DB) listTasks(whereClause string, args ...any) ([]*Task, error) {
 	query := `SELECT id, project_id, quest_id, github_issue_number, title, description, parent_id,
 	                 type, hat, model, priority, autonomy_level, status, base_branch,
-	                 worktree_path, branch_name, content_path, pr_number,
+	                 worktree_path, branch_name, content_path, pr_number, pr_merged_at, worktree_cleaned_at,
 	                 token_budget, time_budget_min, time_used_min,
 	                 dollar_budget, dollar_used, created_at, started_at, completed_at
 	          FROM tasks ` + whereClause
@@ -144,7 +144,7 @@ func (db *DB) listTasks(whereClause string, args ...any) ([]*Task, error) {
 		err := rows.Scan(
 			&task.ID, &task.ProjectID, &task.QuestID, &task.GitHubIssueNumber, &task.Title, &task.Description, &task.ParentID,
 			&task.Type, &task.Hat, &task.Model, &task.Priority, &task.AutonomyLevel, &task.Status, &task.BaseBranch,
-			&task.WorktreePath, &task.BranchName, &task.ContentPath, &task.PRNumber,
+			&task.WorktreePath, &task.BranchName, &task.ContentPath, &task.PRNumber, &task.PRMergedAt, &task.WorktreeCleanedAt,
 			&task.TokenBudget, &task.TimeBudgetMin, &task.TimeUsedMin,
 			&task.DollarBudget, &task.DollarUsed, &task.CreatedAt, &task.StartedAt, &task.CompletedAt,
 		)
@@ -235,6 +235,65 @@ func (db *DB) UpdateTaskPRNumber(id string, prNumber int) error {
 	}
 
 	return nil
+}
+
+// MarkTaskPRMerged marks a task's PR as merged
+func (db *DB) MarkTaskPRMerged(id string) error {
+	result, err := db.Exec(`UPDATE tasks SET pr_merged_at = ? WHERE id = ?`, time.Now(), id)
+	if err != nil {
+		return fmt.Errorf("failed to mark task PR merged: %w", err)
+	}
+
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("task not found: %s", id)
+	}
+
+	return nil
+}
+
+// MarkTaskWorktreeCleaned marks a task's worktree as cleaned and clears the path
+func (db *DB) MarkTaskWorktreeCleaned(id string) error {
+	result, err := db.Exec(
+		`UPDATE tasks SET worktree_cleaned_at = ?, worktree_path = NULL, branch_name = NULL WHERE id = ?`,
+		time.Now(), id,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to mark task worktree cleaned: %w", err)
+	}
+
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("task not found: %s", id)
+	}
+
+	return nil
+}
+
+// GetTasksWithStaleWorktrees returns tasks that have worktrees but haven't been cleaned
+// A stale worktree is one where the task is completed and either:
+// - Has a PR that was merged, or
+// - Has no PR (task was completed without PR creation)
+func (db *DB) GetTasksWithStaleWorktrees() ([]*Task, error) {
+	return db.listTasks(`
+		WHERE worktree_path IS NOT NULL
+		  AND worktree_path != ''
+		  AND worktree_cleaned_at IS NULL
+		  AND status IN ('completed', 'cancelled')
+		ORDER BY completed_at ASC
+	`)
+}
+
+// GetTasksReadyForWorktreeCleanup returns completed tasks with merged PRs ready for cleanup
+func (db *DB) GetTasksReadyForWorktreeCleanup() ([]*Task, error) {
+	return db.listTasks(`
+		WHERE worktree_path IS NOT NULL
+		  AND worktree_path != ''
+		  AND worktree_cleaned_at IS NULL
+		  AND status = 'completed'
+		  AND pr_merged_at IS NOT NULL
+		ORDER BY pr_merged_at ASC
+	`)
 }
 
 // UpdateTaskGitHubIssue sets the GitHub Issue number for a task/objective
@@ -446,7 +505,7 @@ func (db *DB) GetTasksUnblockedBy(completedTaskID string) ([]*Task, error) {
 	query := `
 		SELECT DISTINCT t.id, t.project_id, t.quest_id, t.github_issue_number, t.title, t.description, t.parent_id,
 		       t.type, t.hat, t.model, t.priority, t.autonomy_level, t.status, t.base_branch,
-		       t.worktree_path, t.branch_name, t.content_path, t.pr_number,
+		       t.worktree_path, t.branch_name, t.content_path, t.pr_number, t.pr_merged_at, t.worktree_cleaned_at,
 		       t.token_budget, t.time_budget_min, t.time_used_min,
 		       t.dollar_budget, t.dollar_used, t.created_at, t.started_at, t.completed_at
 		FROM tasks t
@@ -473,7 +532,7 @@ func (db *DB) GetTasksUnblockedBy(completedTaskID string) ([]*Task, error) {
 		err := rows.Scan(
 			&task.ID, &task.ProjectID, &task.QuestID, &task.GitHubIssueNumber, &task.Title, &task.Description, &task.ParentID,
 			&task.Type, &task.Hat, &task.Model, &task.Priority, &task.AutonomyLevel, &task.Status, &task.BaseBranch,
-			&task.WorktreePath, &task.BranchName, &task.ContentPath, &task.PRNumber,
+			&task.WorktreePath, &task.BranchName, &task.ContentPath, &task.PRNumber, &task.PRMergedAt, &task.WorktreeCleanedAt,
 			&task.TokenBudget, &task.TimeBudgetMin, &task.TimeUsedMin,
 			&task.DollarBudget, &task.DollarUsed, &task.CreatedAt, &task.StartedAt, &task.CompletedAt,
 		)
@@ -544,7 +603,7 @@ func (db *DB) GetTasksReadyToAutoStart(completedTaskID string) ([]*Task, error) 
 	query := `
 		SELECT DISTINCT t.id, t.project_id, t.quest_id, t.github_issue_number, t.title, t.description, t.parent_id,
 		       t.type, t.hat, t.model, t.priority, t.autonomy_level, t.status, t.base_branch,
-		       t.worktree_path, t.branch_name, t.content_path, t.pr_number,
+		       t.worktree_path, t.branch_name, t.content_path, t.pr_number, t.pr_merged_at, t.worktree_cleaned_at,
 		       t.token_budget, t.time_budget_min, t.time_used_min,
 		       t.dollar_budget, t.dollar_used, t.created_at, t.started_at, t.completed_at
 		FROM tasks t
@@ -572,7 +631,7 @@ func (db *DB) GetTasksReadyToAutoStart(completedTaskID string) ([]*Task, error) 
 		err := rows.Scan(
 			&task.ID, &task.ProjectID, &task.QuestID, &task.GitHubIssueNumber, &task.Title, &task.Description, &task.ParentID,
 			&task.Type, &task.Hat, &task.Model, &task.Priority, &task.AutonomyLevel, &task.Status, &task.BaseBranch,
-			&task.WorktreePath, &task.BranchName, &task.ContentPath, &task.PRNumber,
+			&task.WorktreePath, &task.BranchName, &task.ContentPath, &task.PRNumber, &task.PRMergedAt, &task.WorktreeCleanedAt,
 			&task.TokenBudget, &task.TimeBudgetMin, &task.TimeUsedMin,
 			&task.DollarBudget, &task.DollarUsed, &task.CreatedAt, &task.StartedAt, &task.CompletedAt,
 		)

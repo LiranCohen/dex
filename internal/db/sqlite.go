@@ -103,6 +103,9 @@ func (db *DB) Migrate() error {
 		"ALTER TABLE sessions ADD COLUMN quality_gate_attempts INTEGER DEFAULT 0",
 		// Task auto-start preference for dependency unblocking
 		"ALTER TABLE tasks ADD COLUMN auto_start BOOLEAN DEFAULT FALSE",
+		// Worktree cleanup tracking
+		"ALTER TABLE tasks ADD COLUMN worktree_cleaned_at DATETIME",
+		"ALTER TABLE tasks ADD COLUMN pr_merged_at DATETIME",
 	}
 	for _, migration := range optionalMigrations {
 		_, _ = db.Exec(migration) // Ignore errors - column may already exist

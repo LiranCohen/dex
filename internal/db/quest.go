@@ -353,7 +353,7 @@ func (db *DB) GetTasksByQuestID(questID string) ([]*Task, error) {
 	rows, err := db.Query(
 		`SELECT id, project_id, quest_id, github_issue_number, title, description, parent_id, type, hat, model,
 		        priority, autonomy_level, status, base_branch, worktree_path, branch_name, content_path, pr_number,
-		        token_budget, time_budget_min, time_used_min, dollar_budget, dollar_used,
+		        pr_merged_at, worktree_cleaned_at, token_budget, time_budget_min, time_used_min, dollar_budget, dollar_used,
 		        created_at, started_at, completed_at
 		 FROM tasks WHERE quest_id = ? ORDER BY created_at ASC`,
 		questID,
@@ -370,7 +370,7 @@ func (db *DB) GetTasksByQuestID(questID string) ([]*Task, error) {
 			&task.ID, &task.ProjectID, &task.QuestID, &task.GitHubIssueNumber, &task.Title, &task.Description,
 			&task.ParentID, &task.Type, &task.Hat, &task.Model, &task.Priority, &task.AutonomyLevel, &task.Status,
 			&task.BaseBranch, &task.WorktreePath, &task.BranchName, &task.ContentPath, &task.PRNumber,
-			&task.TokenBudget, &task.TimeBudgetMin, &task.TimeUsedMin,
+			&task.PRMergedAt, &task.WorktreeCleanedAt, &task.TokenBudget, &task.TimeBudgetMin, &task.TimeUsedMin,
 			&task.DollarBudget, &task.DollarUsed, &task.CreatedAt, &task.StartedAt, &task.CompletedAt,
 		)
 		if err != nil {

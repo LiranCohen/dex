@@ -95,6 +95,8 @@ type Task struct {
 	BranchName        sql.NullString
 	ContentPath       sql.NullString // Path to git content (relative to repo): tasks/{task-id}/
 	PRNumber          sql.NullInt64
+	PRMergedAt        sql.NullTime   // When the PR was merged (for worktree cleanup)
+	WorktreeCleanedAt sql.NullTime   // When the worktree was cleaned up
 	TokenBudget       sql.NullInt64
 	TimeBudgetMin     sql.NullInt64
 	TimeUsedMin       int64
