@@ -96,10 +96,9 @@ func (b *Broadcaster) publishToLegacyHub(eventType string, payload map[string]an
 // Event types as constants for consistency
 const (
 	// Task events
-	EventTaskCreated         = "task.created"
-	EventTaskUpdated         = "task.updated"
-	EventTaskCompleted       = "task.completed"
-	EventTaskCancelled       = "task.cancelled"
+	EventTaskCreated     = "task.created"
+	EventTaskUpdated     = "task.updated"
+	EventTaskCancelled   = "task.cancelled"
 	EventTaskPaused          = "task.paused"
 	EventTaskResumed         = "task.resumed"
 	EventTaskUnblocked       = "task.unblocked"
@@ -142,9 +141,6 @@ const (
 	// Approval events
 	EventApprovalRequired = "approval.required"
 	EventApprovalResolved = "approval.resolved"
-
-	// Project events
-	EventProjectUpdated = "project.updated"
 )
 
 // ActivityType constants

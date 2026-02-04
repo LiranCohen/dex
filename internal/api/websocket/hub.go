@@ -9,17 +9,6 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-// Event type constants
-const (
-	EventTaskCreated      = "task.created"
-	EventTaskUpdated      = "task.updated"
-	EventTaskCompleted    = "task.completed"
-	EventSessionStarted   = "session.started"
-	EventSessionIteration = "session.iteration"
-	EventSessionCompleted = "session.completed"
-	EventApprovalRequired = "approval.required"
-)
-
 // Message represents a WebSocket event message
 type Message struct {
 	Type      string         `json:"type"`

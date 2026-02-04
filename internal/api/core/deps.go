@@ -6,14 +6,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/lirancohen/dex/internal/api/websocket"
 	"github.com/lirancohen/dex/internal/auth"
-	"github.com/lirancohen/dex/internal/realtime"
 	"github.com/lirancohen/dex/internal/db"
 	"github.com/lirancohen/dex/internal/git"
 	"github.com/lirancohen/dex/internal/github"
 	"github.com/lirancohen/dex/internal/planning"
 	"github.com/lirancohen/dex/internal/quest"
+	"github.com/lirancohen/dex/internal/realtime"
 	"github.com/lirancohen/dex/internal/session"
 	"github.com/lirancohen/dex/internal/task"
 	"github.com/lirancohen/dex/internal/toolbelt"
@@ -42,7 +41,6 @@ type Deps struct {
 	GitService     *git.Service
 	Planner        *planning.Planner
 	QuestHandler   *quest.Handler
-	Hub            *websocket.Hub         // Legacy WebSocket hub (to be deprecated)
 	Realtime       *realtime.Node         // Centrifuge realtime node
 	Broadcaster    *realtime.Broadcaster  // Publishes to both legacy and new systems
 	TokenConfig    *auth.TokenConfig

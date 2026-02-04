@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/lirancohen/dex/internal/db"
+	"github.com/lirancohen/dex/internal/realtime"
 )
 
 // ActivityRecorder records session activity to the database and broadcasts via WebSocket
@@ -55,7 +56,7 @@ func (r *ActivityRecorder) broadcastActivity(activity *db.SessionActivity) {
 		tokensOutput = &activity.TokensOutput.Int64
 	}
 
-	r.broadcast("activity.new", map[string]any{
+	r.broadcast(realtime.EventActivityNew, map[string]any{
 		"task_id":    r.taskID,
 		"session_id": r.sessionID,
 		"activity": map[string]any{
@@ -326,7 +327,7 @@ func (r *ActivityRecorder) RecordChecklistUpdate(iteration int, itemID, status, 
 	// Also broadcast a specific checklist event for real-time UI updates
 	// Using 'checklist.updated' event type with nested 'item' object to match frontend expectations
 	if r.broadcast != nil {
-		r.broadcast("checklist.updated", map[string]any{
+		r.broadcast(realtime.EventChecklistUpdated, map[string]any{
 			"task_id":      r.taskID,
 			"checklist_id": checklistID,
 			"item": map[string]any{

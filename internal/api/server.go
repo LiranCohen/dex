@@ -220,7 +220,6 @@ func NewServer(database *db.DB, cfg Config) *Server {
 		GitService:     s.gitService,
 		Planner:        s.planner,
 		QuestHandler:   s.questHandler,
-		Hub:            hub,
 		Realtime:       rtNode,
 		Broadcaster:    broadcaster,
 		TokenConfig:    cfg.TokenConfig,
