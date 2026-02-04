@@ -63,9 +63,9 @@ export function Home() {
       ]);
       setQuests(questsData || []);
       setApprovalCount((approvalsData.approvals || []).filter((a: Approval) => a.status === 'pending').length);
-      // Filter out the default project (path is ".")
+      // Filter out the default project (path is ".") unless it has GitHub info
       const realProjects = (projectsData.projects || []).filter(
-        (p: Project) => p.RepoPath !== '.'
+        (p: Project) => p.RepoPath !== '.' || (p.GitHubOwner && p.GitHubRepo)
       );
       setProjects(realProjects);
     } catch (err) {
