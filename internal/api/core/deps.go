@@ -42,8 +42,9 @@ type Deps struct {
 	GitService     *git.Service
 	Planner        *planning.Planner
 	QuestHandler   *quest.Handler
-	Hub            *websocket.Hub      // Legacy WebSocket hub (to be deprecated)
-	Realtime       *realtime.Node      // Centrifuge realtime node
+	Hub            *websocket.Hub         // Legacy WebSocket hub (to be deprecated)
+	Realtime       *realtime.Node         // Centrifuge realtime node
+	Broadcaster    *realtime.Broadcaster  // Publishes to both legacy and new systems
 	TokenConfig    *auth.TokenConfig
 	BaseDir        string
 

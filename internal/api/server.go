@@ -110,6 +110,9 @@ func NewServer(database *db.DB, cfg Config) *Server {
 		}
 	}
 
+	// Create broadcaster for dual-publishing during migration
+	broadcaster := realtime.NewBroadcaster(hub, rtNode)
+
 	s := &Server{
 		echo:        e,
 		db:          database,
@@ -217,6 +220,7 @@ func NewServer(database *db.DB, cfg Config) *Server {
 		QuestHandler:   s.questHandler,
 		Hub:            hub,
 		Realtime:       rtNode,
+		Broadcaster:    broadcaster,
 		TokenConfig:    cfg.TokenConfig,
 		BaseDir:        cfg.BaseDir,
 		Challenges:     s.challenges,
