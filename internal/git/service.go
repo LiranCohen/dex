@@ -137,6 +137,11 @@ func (s *Service) Operations() *Operations {
 	return s.operations
 }
 
+// RepoManager returns the repository manager for cloning/creating repos
+func (s *Service) RepoManager() *RepoManager {
+	return s.repos
+}
+
 // CreateRepo creates a new git repository
 func (s *Service) CreateRepo(opts CreateOptions) (string, error) {
 	if s.repos == nil {

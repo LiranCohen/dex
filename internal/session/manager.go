@@ -115,6 +115,7 @@ type Manager struct {
 
 	// Git and GitHub for PR creation on completion
 	gitOps              *git.Operations
+	repoManager         *git.RepoManager       // For cloning repos to permanent location
 	githubClient        *toolbelt.GitHubClient // Static client (PAT-based)
 	githubClientFetcher GitHubClientFetcher    // Dynamic client fetcher (GitHub App)
 
@@ -201,6 +202,13 @@ func (m *Manager) SetGitOperations(ops *git.Operations) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.gitOps = ops
+}
+
+// SetRepoManager sets the repo manager for cloning repos to permanent location
+func (m *Manager) SetRepoManager(rm *git.RepoManager) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.repoManager = rm
 }
 
 // SetGitHubClient sets the GitHub client for creating PRs
@@ -614,11 +622,35 @@ func (m *Manager) runSession(ctx context.Context, session *ActiveSession) {
 
 				// Set callback to update project when a repo is created
 				projectID := project.ID
+				repoMgr := m.repoManager
 				loop.SetOnRepoCreated(func(newOwner, newRepo string) {
+					// Update GitHub info in database
 					if err := m.db.UpdateProjectGitHub(projectID, newOwner, newRepo); err != nil {
 						fmt.Printf("runSession: warning - failed to update project GitHub info: %v\n", err)
-					} else {
-						fmt.Printf("runSession: updated project %s with GitHub %s/%s\n", projectID, newOwner, newRepo)
+						return
+					}
+					fmt.Printf("runSession: updated project %s with GitHub %s/%s\n", projectID, newOwner, newRepo)
+
+					// Clone the repo to permanent location if repo manager is available
+					if repoMgr != nil {
+						cloneURL := fmt.Sprintf("git@github.com:%s/%s.git", newOwner, newRepo)
+						repoPath, err := repoMgr.CloneWithOptions(git.CloneOptions{
+							URL:   cloneURL,
+							Owner: newOwner,
+							Name:  newRepo,
+						})
+						if err != nil {
+							fmt.Printf("runSession: warning - failed to clone repo to permanent location: %v\n", err)
+							return
+						}
+						fmt.Printf("runSession: cloned repo to %s\n", repoPath)
+
+						// Update project's RepoPath
+						if err := m.db.UpdateProject(projectID, fmt.Sprintf("%s/%s", newOwner, newRepo), repoPath, "main"); err != nil {
+							fmt.Printf("runSession: warning - failed to update project repo path: %v\n", err)
+						} else {
+							fmt.Printf("runSession: updated project %s repo path to %s\n", projectID, repoPath)
+						}
 					}
 				})
 			}

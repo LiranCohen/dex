@@ -146,6 +146,7 @@ func NewServer(database *db.DB, cfg Config) *Server {
 	// Wire up git operations if git service is available
 	if s.gitService != nil {
 		sessionMgr.SetGitOperations(s.gitService.Operations())
+		sessionMgr.SetRepoManager(s.gitService.RepoManager())
 	}
 
 	// Wire up GitHub client if toolbelt has it configured
