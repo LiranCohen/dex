@@ -630,16 +630,27 @@ func (m *Manager) runSession(ctx context.Context, session *ActiveSession) {
 
 				// Set callback to update project when a repo is created
 				projectID := project.ID
+				projectProvider := project.GetGitProvider()
 				repoMgr := m.repoManager
 				loop.SetOnRepoCreated(func(newOwner, newRepo string) {
-					// Update GitHub info in database
-					if err := m.db.UpdateProjectGitHub(projectID, newOwner, newRepo); err != nil {
-						fmt.Printf("runSession: warning - failed to update project GitHub info: %v\n", err)
+					// Update provider-agnostic git info
+					if err := m.db.UpdateProjectGitProvider(projectID, projectProvider, newOwner, newRepo); err != nil {
+						fmt.Printf("runSession: warning - failed to update project git provider info: %v\n", err)
+					}
+					// Keep legacy GitHub fields in sync for GitHub projects
+					if projectProvider == db.GitProviderGitHub {
+						if err := m.db.UpdateProjectGitHub(projectID, newOwner, newRepo); err != nil {
+							fmt.Printf("runSession: warning - failed to update project GitHub info: %v\n", err)
+						}
+					}
+					fmt.Printf("runSession: updated project %s with %s %s/%s\n", projectID, projectProvider, newOwner, newRepo)
+
+					// For Forgejo projects, the repo already exists as a bare repo — no clone needed
+					if projectProvider == db.GitProviderForgejo {
 						return
 					}
-					fmt.Printf("runSession: updated project %s with GitHub %s/%s\n", projectID, newOwner, newRepo)
 
-					// Clone the repo to permanent location if repo manager is available
+					// Clone the repo to permanent location if repo manager is available (GitHub only)
 					if repoMgr != nil {
 						cloneURL := fmt.Sprintf("git@github.com:%s/%s.git", newOwner, newRepo)
 						repoPath, err := repoMgr.CloneWithOptions(git.CloneOptions{
@@ -997,21 +1008,27 @@ func (m *Manager) createPRForTask(taskID, worktreePath string) {
 		return
 	}
 
-	// Get project from DB to find GitHub owner/repo
+	// Get project from DB to find git provider owner/repo
 	project, err := m.db.GetProjectByID(task.ProjectID)
 	if err != nil || project == nil {
 		fmt.Printf("createPRForTask: failed to get project for task %s: %v\n", taskID, err)
 		return
 	}
 
-	// Check if project has GitHub configured
-	if !project.GitHubOwner.Valid || !project.GitHubRepo.Valid {
-		fmt.Printf("createPRForTask: project %s has no GitHub owner/repo configured\n", project.ID)
+	owner := project.GetOwner()
+	repo := project.GetRepo()
+	if owner == "" || repo == "" {
+		fmt.Printf("createPRForTask: project %s has no owner/repo configured\n", project.ID)
 		return
 	}
 
-	owner := project.GitHubOwner.String
-	repo := project.GitHubRepo.String
+	// For Forgejo projects, PRs are created via the Forgejo API.
+	// The push is a no-op (bare repo worktrees), so we just need the PR.
+	if project.IsForgejo() {
+		fmt.Printf("createPRForTask: Forgejo project %s — push is no-op, PR creation via Forgejo API not yet wired\n", project.ID)
+		// TODO: Wire Forgejo gitprovider.CreatePR here in Phase 6 (quest sync)
+		return
+	}
 
 	// Get current branch name from worktree
 	if gitOps == nil {

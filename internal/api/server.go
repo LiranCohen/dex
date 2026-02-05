@@ -261,6 +261,7 @@ func NewServer(database *db.DB, cfg Config) *Server {
 		TaskService:    s.taskService,
 		SessionManager: sessionMgr,
 		GitService:     s.gitService,
+		ForgejoManager: s.forgejoManager,
 		Planner:        s.planner,
 		QuestHandler:   s.questHandler,
 		Realtime:       rtNode,

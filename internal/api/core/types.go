@@ -284,6 +284,9 @@ type ProjectResponse struct {
 	ID             string  `json:"ID"`
 	Name           string  `json:"Name"`
 	RepoPath       string  `json:"RepoPath"`
+	GitProvider    string  `json:"GitProvider"`
+	GitOwner       *string `json:"GitOwner"`
+	GitRepo        *string `json:"GitRepo"`
 	GitHubOwner    *string `json:"GitHubOwner"`
 	GitHubRepo     *string `json:"GitHubRepo"`
 	RemoteOrigin   *string `json:"RemoteOrigin"`
@@ -298,8 +301,15 @@ func ToProjectResponse(p *db.Project) ProjectResponse {
 		ID:            p.ID,
 		Name:          p.Name,
 		RepoPath:      p.RepoPath,
+		GitProvider:   p.GetGitProvider(),
 		DefaultBranch: p.DefaultBranch,
 		CreatedAt:     p.CreatedAt.Format(time.RFC3339),
+	}
+	if p.GitOwner.Valid {
+		resp.GitOwner = &p.GitOwner.String
+	}
+	if p.GitRepo.Valid {
+		resp.GitRepo = &p.GitRepo.String
 	}
 	if p.GitHubOwner.Valid {
 		resp.GitHubOwner = &p.GitHubOwner.String
