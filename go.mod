@@ -1,8 +1,10 @@
 module github.com/lirancohen/dex
 
-go 1.25
+go 1.24.0
 
-require golang.org/x/crypto v0.47.0 // indirect
+toolchain go1.24.7
+
+require golang.org/x/crypto v0.47.0
 
 require (
 	github.com/WebP2P/dexnet v0.0.0-00010101000000-000000000000
@@ -40,7 +42,7 @@ require (
 	github.com/centrifugal/protocol v0.17.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/coder/websocket v1.8.12 // indirect
-	github.com/creachadair/msync v0.7.1 // indirect
+	github.com/creachadair/msync v0.6.0 // indirect
 	github.com/dblohm7/wingoes v0.0.0-20240119213807-a09d6be7affa // indirect
 	github.com/dolthub/maphash v0.1.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
@@ -116,4 +118,4 @@ require (
 )
 
 // Use local dexnet fork for mesh networking
-replace github.com/WebP2P/dexnet => /Users/liran/src/dexnet
+replace github.com/WebP2P/dexnet => /home/user/dexnet
