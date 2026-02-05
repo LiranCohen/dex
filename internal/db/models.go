@@ -27,13 +27,22 @@ type WebAuthnCredential struct {
 	CreatedAt    time.Time
 }
 
+// Git provider identifiers.
+const (
+	GitProviderForgejo = "forgejo"
+	GitProviderGitHub  = "github"
+)
+
 // Project represents a managed project
 type Project struct {
 	ID             string
 	Name           string
 	RepoPath       string
-	GitHubOwner    sql.NullString // GitHub owner/org for this project
-	GitHubRepo     sql.NullString // GitHub repo name
+	GitProvider    sql.NullString // "forgejo" or "github" (default: "github" for backwards compat)
+	GitOwner       sql.NullString // Owner/org on the git provider
+	GitRepo        sql.NullString // Repo name on the git provider
+	GitHubOwner    sql.NullString // GitHub owner/org (legacy, mirrors GitOwner for github provider)
+	GitHubRepo     sql.NullString // GitHub repo name (legacy, mirrors GitRepo for github provider)
 	RemoteOrigin   sql.NullString // git remote origin URL (e.g., git@github.com:user/repo.git)
 	RemoteUpstream sql.NullString // git remote upstream URL (if fork, e.g., git@github.com:org/repo.git)
 	DefaultBranch  string
@@ -46,20 +55,39 @@ func (p *Project) IsFork() bool {
 	return p.RemoteUpstream.Valid && p.RemoteUpstream.String != ""
 }
 
-// GetOwner returns the GitHub owner or empty string if not set
+// GetGitProvider returns the git provider or "github" as default.
+func (p *Project) GetGitProvider() string {
+	if p.GitProvider.Valid && p.GitProvider.String != "" {
+		return p.GitProvider.String
+	}
+	return GitProviderGitHub
+}
+
+// GetOwner returns the git owner, preferring the provider-agnostic field.
 func (p *Project) GetOwner() string {
+	if p.GitOwner.Valid && p.GitOwner.String != "" {
+		return p.GitOwner.String
+	}
 	if p.GitHubOwner.Valid {
 		return p.GitHubOwner.String
 	}
 	return ""
 }
 
-// GetRepo returns the GitHub repo name or empty string if not set
+// GetRepo returns the git repo name, preferring the provider-agnostic field.
 func (p *Project) GetRepo() string {
+	if p.GitRepo.Valid && p.GitRepo.String != "" {
+		return p.GitRepo.String
+	}
 	if p.GitHubRepo.Valid {
 		return p.GitHubRepo.String
 	}
 	return ""
+}
+
+// IsForgejo returns true if this project uses the Forgejo git provider.
+func (p *Project) IsForgejo() bool {
+	return p.GetGitProvider() == GitProviderForgejo
 }
 
 // ProjectServices tracks which toolbelt services are used by a project

@@ -67,6 +67,7 @@ func (db *DB) Migrate() error {
 		migrationMemories,
 		migrationEvents,
 		migrationWorkers,
+		migrationForgejoConfig,
 	}
 
 	for i, migration := range migrations {
@@ -112,6 +113,10 @@ func (db *DB) Migrate() error {
 		"ALTER TABLE secrets ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP",
 		// GitHub App config encryption support
 		"ALTER TABLE github_app_config ADD COLUMN encrypted INTEGER DEFAULT 0",
+		// Provider-agnostic git columns
+		"ALTER TABLE projects ADD COLUMN git_provider TEXT DEFAULT 'github'",
+		"ALTER TABLE projects ADD COLUMN git_owner TEXT",
+		"ALTER TABLE projects ADD COLUMN git_repo TEXT",
 	}
 	for _, migration := range optionalMigrations {
 		_, _ = db.Exec(migration) // Ignore errors - column may already exist
@@ -502,4 +507,18 @@ CREATE TABLE IF NOT EXISTS events (
 
 CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id);
 CREATE INDEX IF NOT EXISTS idx_events_topic ON events(topic);
+`
+
+const migrationForgejoConfig = `
+-- Forgejo instance configuration (singleton - only one row)
+CREATE TABLE IF NOT EXISTS forgejo_config (
+	id INTEGER PRIMARY KEY CHECK (id = 1),
+	base_url TEXT NOT NULL DEFAULT 'http://127.0.0.1:3000',
+	admin_token_ref TEXT NOT NULL DEFAULT 'forgejo_admin_token',
+	bot_token_ref TEXT NOT NULL DEFAULT 'forgejo_bot_token',
+	bot_username TEXT NOT NULL DEFAULT 'dex-bot',
+	default_org TEXT,
+	created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+	updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
 `

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/lirancohen/dex/internal/db"
+	"github.com/lirancohen/dex/internal/git"
 	"github.com/lirancohen/dex/internal/realtime"
 )
 
@@ -328,18 +329,20 @@ func (s *Server) generatePredecessorHandoff(task *db.Task) string {
 }
 
 // isValidGitRepo checks if the given path is a valid git repository
-// Handles both regular repos (.git directory) and git worktrees (.git file)
+// Handles regular repos (.git directory), git worktrees (.git file),
+// and bare repos (HEAD + objects/ + refs/ directly in path, used by Forgejo).
 func (s *Server) isValidGitRepo(path string) bool {
 	if path == "" {
 		return false
 	}
 	gitPath := filepath.Join(path, ".git")
 	info, err := os.Stat(gitPath)
-	if err != nil {
-		return false
+	if err == nil {
+		// Regular repo has .git directory, worktree has .git file
+		return info.IsDir() || info.Mode().IsRegular()
 	}
-	// Regular repo has .git directory, worktree has .git file
-	return info.IsDir() || info.Mode().IsRegular()
+	// Check for bare repo (Forgejo stores repos as bare)
+	return git.IsBareRepo(path)
 }
 
 // isValidProjectPath checks if the given path is appropriate for use as a project directory

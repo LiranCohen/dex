@@ -47,12 +47,13 @@ func (db *DB) GetProjectByID(id string) (*Project, error) {
 	var servicesJSON sql.NullString
 
 	err := db.QueryRow(
-		`SELECT id, name, repo_path, github_owner, github_repo, remote_origin, remote_upstream, default_branch, services, created_at
+		`SELECT id, name, repo_path, github_owner, github_repo, git_provider, git_owner, git_repo, remote_origin, remote_upstream, default_branch, services, created_at
 		 FROM projects WHERE id = ?`,
 		id,
 	).Scan(
 		&project.ID, &project.Name, &project.RepoPath,
 		&project.GitHubOwner, &project.GitHubRepo,
+		&project.GitProvider, &project.GitOwner, &project.GitRepo,
 		&project.RemoteOrigin, &project.RemoteUpstream,
 		&project.DefaultBranch, &servicesJSON, &project.CreatedAt,
 	)
@@ -76,7 +77,7 @@ func (db *DB) GetProjectByID(id string) (*Project, error) {
 // ListProjects returns all projects
 func (db *DB) ListProjects() ([]*Project, error) {
 	rows, err := db.Query(
-		`SELECT id, name, repo_path, github_owner, github_repo, remote_origin, remote_upstream, default_branch, services, created_at
+		`SELECT id, name, repo_path, github_owner, github_repo, git_provider, git_owner, git_repo, remote_origin, remote_upstream, default_branch, services, created_at
 		 FROM projects ORDER BY created_at DESC`,
 	)
 	if err != nil {
@@ -92,6 +93,7 @@ func (db *DB) ListProjects() ([]*Project, error) {
 		err := rows.Scan(
 			&project.ID, &project.Name, &project.RepoPath,
 			&project.GitHubOwner, &project.GitHubRepo,
+			&project.GitProvider, &project.GitOwner, &project.GitRepo,
 			&project.RemoteOrigin, &project.RemoteUpstream,
 			&project.DefaultBranch, &servicesJSON, &project.CreatedAt,
 		)
@@ -232,12 +234,13 @@ func (db *DB) GetProjectByRepoPath(repoPath string) (*Project, error) {
 	var servicesJSON sql.NullString
 
 	err := db.QueryRow(
-		`SELECT id, name, repo_path, github_owner, github_repo, remote_origin, remote_upstream, default_branch, services, created_at
+		`SELECT id, name, repo_path, github_owner, github_repo, git_provider, git_owner, git_repo, remote_origin, remote_upstream, default_branch, services, created_at
 		 FROM projects WHERE repo_path = ?`,
 		repoPath,
 	).Scan(
 		&project.ID, &project.Name, &project.RepoPath,
 		&project.GitHubOwner, &project.GitHubRepo,
+		&project.GitProvider, &project.GitOwner, &project.GitRepo,
 		&project.RemoteOrigin, &project.RemoteUpstream,
 		&project.DefaultBranch, &servicesJSON, &project.CreatedAt,
 	)
@@ -264,12 +267,13 @@ func (db *DB) GetProjectByGitHub(owner, repo string) (*Project, error) {
 	var servicesJSON sql.NullString
 
 	err := db.QueryRow(
-		`SELECT id, name, repo_path, github_owner, github_repo, remote_origin, remote_upstream, default_branch, services, created_at
+		`SELECT id, name, repo_path, github_owner, github_repo, git_provider, git_owner, git_repo, remote_origin, remote_upstream, default_branch, services, created_at
 		 FROM projects WHERE github_owner = ? AND github_repo = ?`,
 		owner, repo,
 	).Scan(
 		&project.ID, &project.Name, &project.RepoPath,
 		&project.GitHubOwner, &project.GitHubRepo,
+		&project.GitProvider, &project.GitOwner, &project.GitRepo,
 		&project.RemoteOrigin, &project.RemoteUpstream,
 		&project.DefaultBranch, &servicesJSON, &project.CreatedAt,
 	)
@@ -334,4 +338,143 @@ func (db *DB) GetOrCreateProjectByGitHub(owner, repo, repoPath string) (*Project
 	project.GitHubRepo = sql.NullString{String: repo, Valid: true}
 
 	return project, nil
+}
+
+// UpdateProjectGitProvider sets the git provider, owner, and repo for a project
+func (db *DB) UpdateProjectGitProvider(id, provider, owner, repo string) error {
+	result, err := db.Exec(
+		`UPDATE projects SET git_provider = ?, git_owner = ?, git_repo = ? WHERE id = ?`,
+		provider, owner, repo, id,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to update project git provider: %w", err)
+	}
+
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("project not found: %s", id)
+	}
+
+	return nil
+}
+
+// GetProjectByGitProvider retrieves a project by its git provider, owner, and repo
+func (db *DB) GetProjectByGitProvider(provider, owner, repo string) (*Project, error) {
+	project := &Project{}
+	var servicesJSON sql.NullString
+
+	err := db.QueryRow(
+		`SELECT id, name, repo_path, github_owner, github_repo, git_provider, git_owner, git_repo, remote_origin, remote_upstream, default_branch, services, created_at
+		 FROM projects WHERE git_provider = ? AND git_owner = ? AND git_repo = ?`,
+		provider, owner, repo,
+	).Scan(
+		&project.ID, &project.Name, &project.RepoPath,
+		&project.GitHubOwner, &project.GitHubRepo,
+		&project.GitProvider, &project.GitOwner, &project.GitRepo,
+		&project.RemoteOrigin, &project.RemoteUpstream,
+		&project.DefaultBranch, &servicesJSON, &project.CreatedAt,
+	)
+
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get project by git provider: %w", err)
+	}
+
+	if servicesJSON.Valid && servicesJSON.String != "" {
+		if err := json.Unmarshal([]byte(servicesJSON.String), &project.Services); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal services: %w", err)
+		}
+	}
+
+	return project, nil
+}
+
+// GetOrCreateProjectByForgejo finds an existing project by Forgejo owner/repo or creates a new one.
+// The repoPath should be the bare repo path under Forgejo's repositories directory.
+func (db *DB) GetOrCreateProjectByForgejo(owner, repo, repoPath string) (*Project, error) {
+	// First try to find by provider-agnostic fields
+	project, err := db.GetProjectByGitProvider(GitProviderForgejo, owner, repo)
+	if err != nil {
+		return nil, err
+	}
+	if project != nil {
+		return project, nil
+	}
+
+	// Also check by repo path in case it exists with different fields
+	project, err = db.GetProjectByRepoPath(repoPath)
+	if err != nil {
+		return nil, err
+	}
+	if project != nil {
+		// Update the git provider fields if they're not set
+		if !project.GitProvider.Valid || project.GitProvider.String != GitProviderForgejo {
+			if err := db.UpdateProjectGitProvider(project.ID, GitProviderForgejo, owner, repo); err != nil {
+				return nil, fmt.Errorf("failed to update project git provider info: %w", err)
+			}
+			project.GitProvider = sql.NullString{String: GitProviderForgejo, Valid: true}
+			project.GitOwner = sql.NullString{String: owner, Valid: true}
+			project.GitRepo = sql.NullString{String: repo, Valid: true}
+		}
+		return project, nil
+	}
+
+	// Create new project with Forgejo info
+	projectName := fmt.Sprintf("%s/%s", owner, repo)
+	project, err = db.CreateProject(projectName, repoPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create project: %w", err)
+	}
+
+	// Set git provider fields
+	if err := db.UpdateProjectGitProvider(project.ID, GitProviderForgejo, owner, repo); err != nil {
+		return nil, fmt.Errorf("failed to set project git provider info: %w", err)
+	}
+	project.GitProvider = sql.NullString{String: GitProviderForgejo, Valid: true}
+	project.GitOwner = sql.NullString{String: owner, Valid: true}
+	project.GitRepo = sql.NullString{String: repo, Valid: true}
+
+	return project, nil
+}
+
+// ListForgejoProjects returns all projects that use the Forgejo git provider
+func (db *DB) ListForgejoProjects() ([]*Project, error) {
+	rows, err := db.Query(
+		`SELECT id, name, repo_path, github_owner, github_repo, git_provider, git_owner, git_repo, remote_origin, remote_upstream, default_branch, services, created_at
+		 FROM projects WHERE git_provider = ? ORDER BY created_at DESC`,
+		GitProviderForgejo,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list forgejo projects: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var projects []*Project
+	for rows.Next() {
+		project := &Project{}
+		var servicesJSON sql.NullString
+
+		err := rows.Scan(
+			&project.ID, &project.Name, &project.RepoPath,
+			&project.GitHubOwner, &project.GitHubRepo,
+			&project.GitProvider, &project.GitOwner, &project.GitRepo,
+			&project.RemoteOrigin, &project.RemoteUpstream,
+			&project.DefaultBranch, &servicesJSON, &project.CreatedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan project: %w", err)
+		}
+
+		if servicesJSON.Valid && servicesJSON.String != "" {
+			if err := json.Unmarshal([]byte(servicesJSON.String), &project.Services); err != nil {
+				return nil, fmt.Errorf("failed to unmarshal services: %w", err)
+			}
+		}
+
+		projects = append(projects, project)
+	}
+
+	return projects, nil
 }

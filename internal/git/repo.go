@@ -92,14 +92,37 @@ func (m *RepoManager) Create(opts CreateOptions) (string, error) {
 	return repoPath, nil
 }
 
-// Exists checks if a git repository exists at the given path
+// Exists checks if a git repository exists at the given path.
+// Detects both regular repos (with .git directory) and bare repos.
 func (m *RepoManager) Exists(repoPath string) bool {
+	// Regular repo: has .git directory or .git file (worktree)
 	gitDir := filepath.Join(repoPath, ".git")
 	info, err := os.Stat(gitDir)
-	if err != nil {
+	if err == nil && (info.IsDir() || info.Mode().IsRegular()) {
+		return true
+	}
+
+	// Bare repo: has HEAD file directly in the directory
+	return IsBareRepo(repoPath)
+}
+
+// IsBareRepo checks if the given path is a bare git repository.
+// Bare repos have HEAD, objects/, and refs/ directly in the directory
+// (no .git subdirectory). Forgejo stores repos this way.
+func IsBareRepo(path string) bool {
+	headPath := filepath.Join(path, "HEAD")
+	if _, err := os.Stat(headPath); err != nil {
 		return false
 	}
-	return info.IsDir()
+	objectsPath := filepath.Join(path, "objects")
+	if info, err := os.Stat(objectsPath); err != nil || !info.IsDir() {
+		return false
+	}
+	refsPath := filepath.Join(path, "refs")
+	if info, err := os.Stat(refsPath); err != nil || !info.IsDir() {
+		return false
+	}
+	return true
 }
 
 // SetRemote adds or updates the origin remote
