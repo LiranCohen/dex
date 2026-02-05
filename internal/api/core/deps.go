@@ -10,6 +10,7 @@ import (
 	"github.com/lirancohen/dex/internal/db"
 	"github.com/lirancohen/dex/internal/git"
 	"github.com/lirancohen/dex/internal/github"
+	"github.com/lirancohen/dex/internal/mesh"
 	"github.com/lirancohen/dex/internal/planning"
 	"github.com/lirancohen/dex/internal/quest"
 	"github.com/lirancohen/dex/internal/realtime"
@@ -41,8 +42,9 @@ type Deps struct {
 	GitService     *git.Service
 	Planner        *planning.Planner
 	QuestHandler   *quest.Handler
-	Realtime       *realtime.Node         // Centrifuge realtime node
-	Broadcaster    *realtime.Broadcaster  // Publishes to both legacy and new systems
+	Realtime       *realtime.Node        // Centrifuge realtime node
+	Broadcaster    *realtime.Broadcaster // Publishes to both legacy and new systems
+	MeshClient     *mesh.Client          // Campus mesh network client
 	TokenConfig    *auth.TokenConfig
 	BaseDir        string
 

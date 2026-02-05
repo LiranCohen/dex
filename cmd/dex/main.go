@@ -15,6 +15,7 @@ import (
 	"github.com/lirancohen/dex/internal/api"
 	"github.com/lirancohen/dex/internal/auth"
 	"github.com/lirancohen/dex/internal/db"
+	"github.com/lirancohen/dex/internal/mesh"
 	"github.com/lirancohen/dex/internal/toolbelt"
 )
 
@@ -31,6 +32,14 @@ func main() {
 	baseDir := flag.String("base-dir", "", "Base Dex directory (default: /opt/dex). Repos at {base-dir}/repos/, worktrees at {base-dir}/worktrees/")
 	jwtSecret := flag.String("jwt-secret", "", "JWT signing secret (auto-generated if not provided)")
 	showVersion := flag.Bool("version", false, "Show version and exit")
+
+	// Mesh networking flags
+	meshEnabled := flag.Bool("mesh", false, "Enable mesh networking")
+	meshHostname := flag.String("mesh-hostname", "", "Hostname for this node on the mesh network")
+	meshControlURL := flag.String("mesh-control-url", "https://central.enbox.id", "Central coordination service URL")
+	meshAuthKey := flag.String("mesh-auth-key", "", "Pre-auth key for automatic mesh registration")
+	meshStateDir := flag.String("mesh-state-dir", "", "Directory for mesh state (default: {base-dir}/mesh)")
+
 	flag.Parse()
 
 	if *showVersion {
@@ -159,6 +168,32 @@ func main() {
 	}
 	_ = *jwtSecret // Reserved for future use (loading keys from file)
 
+	// Configure mesh networking if enabled
+	var meshConfig *mesh.Config
+	if *meshEnabled {
+		// Default mesh state directory
+		meshState := *meshStateDir
+		if meshState == "" {
+			meshState = filepath.Join(dataDir, "mesh")
+		}
+
+		// Default hostname to OS hostname if not specified
+		hostname := *meshHostname
+		if hostname == "" {
+			hostname, _ = os.Hostname()
+		}
+
+		meshConfig = &mesh.Config{
+			Enabled:    true,
+			Hostname:   hostname,
+			StateDir:   meshState,
+			ControlURL: *meshControlURL,
+			AuthKey:    *meshAuthKey,
+			IsHQ:       true, // dex server is always the HQ
+		}
+		fmt.Printf("Mesh networking enabled: hostname=%s, control=%s\n", hostname, *meshControlURL)
+	}
+
 	// Create API server
 	server := api.NewServer(database, api.Config{
 		Addr:        *addr,
@@ -168,6 +203,7 @@ func main() {
 		Toolbelt:    tb,
 		BaseDir:     dataDir,
 		TokenConfig: tokenConfig,
+		Mesh:        meshConfig,
 	})
 
 	// Start server in goroutine
