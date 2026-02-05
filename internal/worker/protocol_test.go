@@ -14,7 +14,7 @@ func TestMessage_JSONRoundtrip(t *testing.T) {
 		Type:      MsgTypeDispatch,
 		ID:        "msg-123",
 		Timestamp: time.Now().Truncate(time.Millisecond), // JSON doesn't preserve nanoseconds
-		Payload:   json.RawMessage(`{"test": "value"}`),
+		Payload:   json.RawMessage(`{"test":"value"}`),   // Use compact JSON (no spaces)
 	}
 
 	data, err := json.Marshal(msg)
