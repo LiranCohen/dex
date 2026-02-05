@@ -176,6 +176,7 @@ func (w *LocalWorker) Start(ctx context.Context) error {
 // receiveLoop continuously reads messages from the worker.
 func (w *LocalWorker) receiveLoop() {
 	defer close(w.done)
+	defer close(w.eventChan)
 
 	for {
 		msg, err := w.conn.Receive()

@@ -199,33 +199,54 @@ func (m *Manager) processWorkerMessage(workerID string, msg *Message) {
 	switch msg.Type {
 	case MsgTypeProgress:
 		payload, err := ParsePayload[ProgressPayload](msg)
-		if err == nil && m.onProgress != nil {
+		if err != nil {
+			fmt.Printf("Worker %s: failed to parse progress message: %v\n", workerID, err)
+			return
+		}
+		if m.onProgress != nil {
 			m.onProgress(payload.ObjectiveID, payload)
 		}
 
 	case MsgTypeActivity:
 		payload, err := ParsePayload[ActivityPayload](msg)
-		if err == nil && m.onActivity != nil {
+		if err != nil {
+			fmt.Printf("Worker %s: failed to parse activity message: %v\n", workerID, err)
+			return
+		}
+		if m.onActivity != nil {
 			m.onActivity(payload.Events)
 		}
 
 	case MsgTypeCompleted:
 		payload, err := ParsePayload[CompletedPayload](msg)
-		if err == nil && m.onCompleted != nil {
+		if err != nil {
+			fmt.Printf("Worker %s: failed to parse completed message: %v\n", workerID, err)
+			return
+		}
+		if m.onCompleted != nil {
 			m.onCompleted(payload.Report)
 		}
 
 	case MsgTypeFailed:
 		payload, err := ParsePayload[FailedPayload](msg)
-		if err == nil && m.onFailed != nil {
+		if err != nil {
+			fmt.Printf("Worker %s: failed to parse failed message: %v\n", workerID, err)
+			return
+		}
+		if m.onFailed != nil {
 			m.onFailed(payload.ObjectiveID, payload.SessionID, payload.Error)
 		}
 
 	case MsgTypeError:
 		payload, err := ParsePayload[ErrorPayload](msg)
-		if err == nil {
-			fmt.Printf("Worker %s error: %s: %s\n", workerID, payload.Code, payload.Message)
+		if err != nil {
+			fmt.Printf("Worker %s: failed to parse error message: %v\n", workerID, err)
+			return
 		}
+		fmt.Printf("Worker %s error: %s: %s\n", workerID, payload.Code, payload.Message)
+
+	default:
+		fmt.Printf("Worker %s: unknown message type: %s\n", workerID, msg.Type)
 	}
 }
 
@@ -258,14 +279,18 @@ func (m *Manager) dispatchToWorkerWithSecrets(payload *ObjectivePayload, secrets
 		return fmt.Errorf("no idle workers available")
 	}
 
-	// If secrets are provided and worker has a public key, encrypt them
-	if secrets != nil && worker.PublicKey() != "" {
+	// Encrypt secrets for the worker
+	if secrets != nil {
+		pubKey := worker.PublicKey()
+		if pubKey == "" {
+			return fmt.Errorf("worker %s has no public key - cannot encrypt secrets", worker.ID())
+		}
 		dispatcher := NewDispatcher(m.hqKeyPair)
 		encPayload, err := dispatcher.PreparePayload(
 			payload.Objective,
 			payload.Project,
 			*secrets,
-			worker.PublicKey(),
+			pubKey,
 			payload.Sync,
 		)
 		if err != nil {

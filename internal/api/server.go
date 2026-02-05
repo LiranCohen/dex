@@ -339,11 +339,13 @@ func NewServer(database *db.DB, cfg Config) *Server {
 			func(objectiveID string, progress *worker.ProgressPayload) {
 				if broadcaster != nil {
 					broadcaster.PublishWorkerProgress(objectiveID, map[string]any{
-						"objective_id": objectiveID,
-						"iteration":    progress.Iteration,
-						"tokens_used":  progress.TokensUsed,
-						"progress":     progress.Progress,
-						"status":       progress.Status,
+						"objective_id":  objectiveID,
+						"session_id":    progress.SessionID,
+						"iteration":     progress.Iteration,
+						"tokens_input":  progress.TokensInput,
+						"tokens_output": progress.TokensOutput,
+						"hat":           progress.Hat,
+						"status":        progress.Status,
 					})
 				}
 			},
