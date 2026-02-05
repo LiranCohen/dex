@@ -31,6 +31,11 @@ func (m *Manager) bootstrap(ctx context.Context) error {
 		return fmt.Errorf("failed to create admin user: %w", err)
 	}
 
+	// Store admin password so the user can log into the Forgejo web UI
+	if err := m.db.SetSecret(SecretKeyAdminPassword, adminPassword); err != nil {
+		return fmt.Errorf("failed to store admin password: %w", err)
+	}
+
 	// 2. Generate admin API token via CLI
 	adminToken, err := m.cliCreateToken(ctx, adminUsername, "dex-admin-token")
 	if err != nil {

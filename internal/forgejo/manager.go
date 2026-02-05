@@ -14,8 +14,9 @@ import (
 
 // Secret keys used by the Forgejo subsystem.
 const (
-	SecretKeyAdminToken = "forgejo_admin_token"
-	SecretKeyBotToken   = "forgejo_bot_token"
+	SecretKeyAdminToken    = "forgejo_admin_token"
+	SecretKeyBotToken      = "forgejo_bot_token"
+	SecretKeyAdminPassword = "forgejo_admin_password"
 )
 
 // Manager controls the lifecycle of an embedded Forgejo instance.
@@ -175,6 +176,26 @@ func (m *Manager) AdminToken() (string, error) {
 		return "", fmt.Errorf("forgejo admin token not configured (bootstrap may not have run)")
 	}
 	return token, nil
+}
+
+// AccessInfo returns the credentials needed to log into the Forgejo web UI.
+type AccessInfo struct {
+	URL      string `json:"url"`
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
+
+// WebAccess returns the URL and credentials for the Forgejo web UI.
+func (m *Manager) WebAccess() (*AccessInfo, error) {
+	password, err := m.db.GetSecret(SecretKeyAdminPassword)
+	if err != nil || password == "" {
+		return nil, fmt.Errorf("admin password not available (bootstrap may not have run)")
+	}
+	return &AccessInfo{
+		URL:      m.BaseURL(),
+		Username: adminUsername,
+		Password: password,
+	}, nil
 }
 
 // RepoPath returns the filesystem path to a bare repo in Forgejo's repository root.

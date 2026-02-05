@@ -16,6 +16,7 @@ import (
 	githubhandlers "github.com/lirancohen/dex/internal/api/handlers/github"
 	githubsync "github.com/lirancohen/dex/internal/api/handlers/github"
 	"github.com/lirancohen/dex/internal/api/handlers/memory"
+	forgejohandlers "github.com/lirancohen/dex/internal/api/handlers/forgejo"
 	meshhandlers "github.com/lirancohen/dex/internal/api/handlers/mesh"
 	planninghandlers "github.com/lirancohen/dex/internal/api/handlers/planning"
 	"github.com/lirancohen/dex/internal/api/handlers/projects"
@@ -444,6 +445,7 @@ func (s *Server) registerRoutes() {
 	githubHandler := githubhandlers.New(s.deps)
 	meshHandler := meshhandlers.New(s.deps)
 	workersHandler := workershandlers.New(s.deps)
+	forgejoHandler := forgejohandlers.New(s.deps)
 
 	// Wire up callbacks for GitHub sync
 	githubHandler.InitGitHubApp = s.initGitHubApp
@@ -503,6 +505,7 @@ func (s *Server) registerRoutes() {
 	templatesHandler.RegisterRoutes(protected)
 	meshHandler.RegisterRoutes(protected)
 	workersHandler.RegisterRoutes(protected)
+	forgejoHandler.RegisterRoutes(protected)
 
 	// Centrifuge WebSocket endpoint for real-time updates
 	// Auth is handled via Centrifuge protocol in Node.OnConnecting, not HTTP middleware
