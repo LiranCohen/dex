@@ -16,6 +16,7 @@ import (
 	"github.com/lirancohen/dex/internal/auth"
 	"github.com/lirancohen/dex/internal/crypto"
 	"github.com/lirancohen/dex/internal/db"
+	"github.com/lirancohen/dex/internal/forgejo"
 	"github.com/lirancohen/dex/internal/mesh"
 	"github.com/lirancohen/dex/internal/toolbelt"
 )
@@ -40,6 +41,11 @@ func main() {
 	meshControlURL := flag.String("mesh-control-url", "https://central.enbox.id", "Central coordination service URL")
 	meshAuthKey := flag.String("mesh-auth-key", "", "Pre-auth key for automatic mesh registration")
 	meshStateDir := flag.String("mesh-state-dir", "", "Directory for mesh state (default: {base-dir}/mesh)")
+
+	// Forgejo flags
+	forgejoEnabled := flag.Bool("forgejo", false, "Enable embedded Forgejo git server")
+	forgejoBinary := flag.String("forgejo-binary", "", "Path to Forgejo binary (default: auto-download)")
+	forgejoPort := flag.Int("forgejo-port", 3000, "HTTP port for Forgejo")
 
 	flag.Parse()
 
@@ -239,6 +245,18 @@ func main() {
 		fmt.Printf("Mesh networking enabled: hostname=%s, control=%s\n", hostname, *meshControlURL)
 	}
 
+	// Configure embedded Forgejo if enabled
+	var forgejoConfig *forgejo.Config
+	if *forgejoEnabled {
+		cfg := forgejo.DefaultConfig(dataDir)
+		cfg.HTTPPort = *forgejoPort
+		if *forgejoBinary != "" {
+			cfg.BinaryPath = *forgejoBinary
+		}
+		forgejoConfig = &cfg
+		fmt.Printf("Embedded Forgejo enabled: port=%d, data=%s\n", cfg.HTTPPort, cfg.DataDir)
+	}
+
 	// Create API server
 	server := api.NewServer(database, api.Config{
 		Addr:        *addr,
@@ -250,6 +268,7 @@ func main() {
 		TokenConfig: tokenConfig,
 		Mesh:        meshConfig,
 		Encryption:  encConfig,
+		Forgejo:     forgejoConfig,
 	})
 
 	// Start server in goroutine

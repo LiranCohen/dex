@@ -631,37 +631,35 @@ Mesh Peer (laptop)          HQ (Dex)              HQ (Forgejo)
 
 ## Forgejo Binary Distribution
 
-Forgejo is a single static binary (~100MB). Options for distribution:
+Forgejo is a single static binary (~100MB). Downloaded on first run from a **Dex-controlled mirror** to ensure version stability.
 
-### Option A: Download on First Run (Recommended)
+**Decision:** Download on first run, but from our own mirror — not directly from Codeberg. This prevents upstream releases from breaking installs. The Dex build pins a specific Forgejo version + SHA256 checksum.
 
 ```go
+const (
+    forgejoVersion  = "9.0.3"
+    forgejoChecksum = "sha256:abc123..." // Pinned checksum
+    forgejeMirror   = "https://dl.enbox.id/forgejo"  // Our mirror
+    forgejoUpstream = "https://codeberg.org/forgejo/forgejo/releases/download"  // Fallback
+)
+
 func (m *Manager) ensureBinary() error {
     binaryPath := filepath.Join(m.dataDir, "bin", "forgejo")
-    if fileExists(binaryPath) {
+    if fileExists(binaryPath) && checksumMatches(binaryPath, forgejoChecksum) {
         return nil
     }
 
-    // Download from Forgejo releases (or bundle in Dex release)
-    url := fmt.Sprintf(
-        "https://codeberg.org/forgejo/forgejo/releases/download/v%s/forgejo-%s-linux-amd64",
-        forgejoVersion, forgejoVersion,
-    )
-    return downloadFile(url, binaryPath)
+    // Try mirror first, fall back to upstream
+    urls := []string{
+        fmt.Sprintf("%s/v%s/forgejo-%s-linux-amd64", forgejeMirror, forgejoVersion, forgejoVersion),
+        fmt.Sprintf("%s/v%s/forgejo-%s-linux-amd64", forgejoUpstream, forgejoVersion, forgejoVersion),
+    }
+
+    return downloadAndVerify(urls, binaryPath, forgejoChecksum)
 }
 ```
 
-Cached in `{data_dir}/forgejo/bin/forgejo`. Verified by SHA256 checksum embedded in Dex binary.
-
-### Option B: Bundled in Dex Release
-
-Include the Forgejo binary in Dex's release archive. Increases Dex download size by ~100MB but requires no internet for setup.
-
-### Option C: System Package
-
-Require Forgejo installed via system package manager. Less control but standard for Linux deployments.
-
-**Recommendation:** Option A for flexibility, with Option B as a build flag (`make release-bundled`).
+Cached in `{data_dir}/forgejo/bin/forgejo`. A system-installed Forgejo binary can be used instead via `--forgejo-binary=/usr/bin/forgejo` flag.
 
 ---
 
@@ -670,10 +668,7 @@ Require Forgejo installed via system package manager. Less control but standard 
 ```
 /opt/dex/                          (or {data_dir})
 ├── dex.db                         # Dex SQLite database
-├── repos/                         # Git repositories (working copies)
-│   └── workspace/
-│       └── my-project/
-├── worktrees/                     # Task worktrees
+├── worktrees/                     # Task worktrees (created from bare repos)
 │   └── my-project/
 │       └── abc123/
 ├── mesh/                          # Mesh networking state
@@ -684,11 +679,23 @@ Require Forgejo installed via system package manager. Less control but standard 
     ├── forgejo.db                 # Forgejo SQLite database
     ├── repositories/              # Bare git repositories (Forgejo-managed)
     │   └── workspace/
-    │       └── my-project.git/
+    │       └── my-project.git/    # ← Dex creates worktrees directly from here
     └── log/                       # Forgejo logs
 ```
 
-**Important:** Forgejo maintains its own bare repositories in `repositories/`. Dex's `repos/` directory contains working copies cloned from Forgejo. This separation is intentional — Forgejo is the authoritative git server, Dex's repos are working checkouts.
+**Decision: No separate `repos/` directory.** Dex creates worktrees directly from Forgejo's bare repositories. Since Forgejo stores bare repos and Dex uses `git worktree add`, they share the same object store with zero duplication:
+
+```bash
+# Dex creates a task worktree directly from Forgejo's bare repo:
+git -C /opt/dex/forgejo/repositories/workspace/my-project.git \
+    worktree add /opt/dex/worktrees/my-project/abc123 -b task/task-abc123
+
+# Commits land directly in the bare repo's object store.
+# Forgejo sees new branches immediately — no push needed.
+# PRs created via Forgejo API referencing the branch.
+```
+
+This means the `Project.RepoPath` field points to the Forgejo bare repo path, and the existing `WorktreeManager` creates worktrees from there. The key insight: since Forgejo is local, there's no "remote" — the bare repo IS the server.
 
 ---
 
@@ -700,19 +707,19 @@ Require Forgejo installed via system package manager. Less control but standard 
 User clicks "New Project"
     → Dex API: POST /api/v1/projects
         → Forgejo API: Create repo in workspace org
-        → Git: Clone repo to {data_dir}/repos/workspace/project/
         → DB: Store project with git_provider=forgejo, git_owner=workspace, git_repo=project
-        → Git: Set remote origin to http://127.0.0.1:3000/workspace/project.git
+        → Project.RepoPath = {data_dir}/forgejo/repositories/workspace/project.git
+        (No clone needed — the bare repo IS the project repo)
 ```
 
 ### Running a Task
 
 ```
 Task started
-    → Git Service: Create worktree from project repo
+    → Git Service: git worktree add from bare repo on new branch
     → Session: Claude Code runs in worktree
-    → On completion: git push to Forgejo (via bot token)
-    → Forgejo API: Create PR
+    → On completion: commits are already in the bare repo (no push needed)
+    → Forgejo API: Create PR referencing the branch
     → Quest sync: Update issue with status
 ```
 
@@ -740,21 +747,23 @@ $ git clone http://hq:3000/workspace/my-project.git
 
 ---
 
+## Resolved Decisions
+
+1. **Repo storage** — Dex creates worktrees directly from Forgejo's bare repos. No separate `repos/` directory. No duplication. See Data Layout section.
+
+2. **Binary distribution** — Download on first run from a Dex-controlled mirror (`dl.enbox.id`), falling back to upstream Codeberg. Version + checksum pinned in Dex binary. See Binary Distribution section.
+
+3. **DNS aliases (`git.<user>.enbox.id`)** — Deferred. Requires Central to support multiple DNS names for a single mesh node. Phase 2 uses port-based routing (`hq:3000` for Forgejo, `hq:8080` for Dex). A separate effort will add DNS alias support to Central, at which point Phase 2 can upgrade to hostname-based routing. Not blocking for implementation.
+
 ## Open Questions
 
-1. **Forgejo version pinning** — Pin to a specific version or track latest stable?
-   - Recommendation: Pin to a specific minor version, auto-update patch versions.
-
-2. **Repo storage deduplication** — Dex's `repos/` and Forgejo's `repositories/` store the same data twice. Can we use Forgejo's repos directly as Dex's working copies?
-   - Recommendation: No. Forgejo uses bare repos; Dex needs working trees. The overhead is acceptable for the separation of concerns. Worktrees can reference Forgejo's bare repos directly via `git worktree add` from the bare repo.
-
-3. **CI/CD (Forgejo Actions)** — Enable or keep disabled?
+1. **CI/CD (Forgejo Actions)** — Enable or keep disabled?
    - Recommendation: Disabled initially. Dex's session system IS the CI/CD. Forgejo Actions can be added later for standard workflows.
 
-4. **Backup strategy** — How to back up Forgejo data?
+2. **Backup strategy** — How to back up Forgejo data?
    - Recommendation: `forgejo dump` command, integrated into Dex's backup system. Single command backs up both Dex and Forgejo databases + repositories.
 
-5. **Multi-HQ / Federation** — What if someone runs multiple HQ nodes?
+3. **Multi-HQ / Federation** — What if someone runs multiple HQ nodes?
    - Out of scope for now. One HQ per Campus. Federation is a future proposal.
 
 ---

@@ -29,6 +29,7 @@ import (
 	"github.com/lirancohen/dex/internal/auth"
 	"github.com/lirancohen/dex/internal/crypto"
 	"github.com/lirancohen/dex/internal/db"
+	"github.com/lirancohen/dex/internal/forgejo"
 	"github.com/lirancohen/dex/internal/git"
 	"github.com/lirancohen/dex/internal/github"
 	"github.com/lirancohen/dex/internal/mesh"
@@ -63,6 +64,7 @@ type Server struct {
 	broadcaster       *realtime.Broadcaster
 	meshClient        *mesh.Client    // Campus mesh network client
 	workerManager     *worker.Manager // Worker pool manager for distributed execution
+	forgejoManager    *forgejo.Manager // Embedded Forgejo instance manager
 	deps              *core.Deps
 	encryption        *crypto.EncryptionConfig // Encryption for secrets and worker payloads
 	addr              string
@@ -89,6 +91,7 @@ type Config struct {
 	Mesh        *mesh.Config             // Mesh networking configuration (optional)
 	Encryption  *crypto.EncryptionConfig // Encryption configuration for secrets at rest and worker payloads
 	Worker      *worker.ManagerConfig    // Worker pool configuration (optional)
+	Forgejo     *forgejo.Config          // Embedded Forgejo configuration (optional)
 }
 
 // NewServer creates a new API server
@@ -143,23 +146,30 @@ func NewServer(database *db.DB, cfg Config) *Server {
 		secretsStore = db.NewEncryptedSecretsStore(database, cfg.Encryption.MasterKey)
 	}
 
+	// Initialize Forgejo manager if configured
+	var forgejoMgr *forgejo.Manager
+	if cfg.Forgejo != nil {
+		forgejoMgr = forgejo.NewManager(*cfg.Forgejo, database)
+	}
+
 	s := &Server{
-		echo:          e,
-		db:            database,
-		toolbelt:      cfg.Toolbelt,
-		taskService:   task.NewService(database),
-		realtime:      rtNode,
-		broadcaster:   broadcaster,
-		meshClient:    meshClient,
-		workerManager: workerMgr,
-		encryption:    cfg.Encryption,
-		addr:          cfg.Addr,
-		certFile:      cfg.CertFile,
-		keyFile:       cfg.KeyFile,
-		tokenConfig:   cfg.TokenConfig,
-		staticDir:     cfg.StaticDir,
-		baseDir:       cfg.BaseDir,
-		challenges:    make(map[string]challengeEntry),
+		echo:           e,
+		db:             database,
+		toolbelt:       cfg.Toolbelt,
+		taskService:    task.NewService(database),
+		realtime:       rtNode,
+		broadcaster:    broadcaster,
+		meshClient:     meshClient,
+		workerManager:  workerMgr,
+		forgejoManager: forgejoMgr,
+		encryption:     cfg.Encryption,
+		addr:           cfg.Addr,
+		certFile:       cfg.CertFile,
+		keyFile:        cfg.KeyFile,
+		tokenConfig:    cfg.TokenConfig,
+		staticDir:      cfg.StaticDir,
+		baseDir:        cfg.BaseDir,
+		challenges:     make(map[string]challengeEntry),
 	}
 
 	// Setup git service with derived paths from base directory
@@ -563,6 +573,14 @@ func (s *Server) Start() error {
 		fmt.Println("Worker manager started")
 	}
 
+	// Start embedded Forgejo if configured
+	if s.forgejoManager != nil {
+		ctx := context.Background()
+		if err := s.forgejoManager.Start(ctx); err != nil {
+			return fmt.Errorf("forgejo start failed: %w", err)
+		}
+	}
+
 	if s.certFile != "" && s.keyFile != "" {
 		// HTTPS mode (for Tailscale)
 		fmt.Printf("Starting HTTPS server on %s\n", s.addr)
@@ -580,6 +598,13 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	if s.workerManager != nil {
 		if err := s.workerManager.Stop(ctx); err != nil {
 			fmt.Printf("Warning: failed to stop worker manager: %v\n", err)
+		}
+	}
+
+	// Stop embedded Forgejo
+	if s.forgejoManager != nil {
+		if err := s.forgejoManager.Stop(); err != nil {
+			fmt.Printf("Warning: failed to stop forgejo: %v\n", err)
 		}
 	}
 
