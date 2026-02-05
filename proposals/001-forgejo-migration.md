@@ -1,222 +1,330 @@
-# Proposal: Replace GitHub with Self-Hosted Forgejo
+# Proposal: Mesh-Native Git Hosting with Forgejo on HQ
 
-**Status:** Draft
+**Status:** Draft (Revised)
 **Author:** Dex
 **Created:** 2026-02-03
-
----
-
-## Agent Context
-
-This proposal is designed to be implemented by an AI agent (Ralph-style loop). The implementation is broken into discrete, sequential phases. Each phase has clear acceptance criteria and can be validated before proceeding.
-
-### Key Principles for Implementation
-
-1. **Build incrementally** - Each phase produces working code that can be tested
-2. **Abstraction first** - Create interfaces before implementations to enable swapping providers
-3. **Preserve backwards compatibility** - GitHub provider should remain functional throughout
-4. **Test at boundaries** - Verify each phase works before starting the next
-5. **Follow existing patterns** - Match the codebase's existing style for handlers, database, etc.
-
-### Critical Files to Understand First
-
-Before starting implementation, read these files to understand existing patterns:
-
-```
-internal/github/app.go          # Current GitHub auth pattern
-internal/github/sync.go         # How sync currently works
-internal/api/handlers/github/   # API handler patterns
-internal/db/models.go           # Database model patterns
-internal/db/sqlite.go           # Migration patterns
-internal/auth/passkey.go        # Existing WebAuthn implementation
-frontend/src/components/onboarding/  # Onboarding UI patterns
-```
-
-### Dependencies to Add
-
-```go
-// go.mod additions
-require (
-    code.gitea.io/sdk/gitea v0.19.0  // Forgejo/Gitea SDK
-)
-```
+**Revised:** 2026-02-05
 
 ---
 
 ## Summary
 
-Replace the tight GitHub integration in Dex with a self-hosted Forgejo instance, providing full control over git hosting, issue tracking, and user management while eliminating external dependencies and reducing friction.
+Replace the GitHub integration with a Forgejo instance running directly on the HQ node, exposed to the mesh network at a reserved address (`git.<username>.enbox.id`). This eliminates all external dependencies for git hosting while making repositories accessible to every device on the Campus mesh — laptops, phones, worker nodes — without any internet dependency.
+
+---
 
 ## Motivation
 
-The current GitHub integration introduces unnecessary friction:
+The current architecture has three external dependencies that compromise self-sovereignty:
 
-1. **External dependency** - Requires GitHub account, app setup, and internet connectivity
-2. **Complex onboarding** - GitHub App manifest flow, organization selection, installation permissions
-3. **Rate limits** - GitHub API rate limiting affects sync operations
-4. **Privacy concerns** - All project data visible to GitHub
-5. **Vendor lock-in** - Tightly coupled to GitHub's API and authentication model
+1. **GitHub** — All code hosting, issues, PRs, and sync depend on github.com
+2. **Tailscale** — Network access currently routes through Tailscale's coordination servers
+3. **Cloudflare Tunnels** — Alternative access path depends on Cloudflare infrastructure
 
-A self-hosted Forgejo instance provides equivalent functionality with full control.
+The mesh networking system (dexnet/Central) is already replacing Tailscale. This proposal completes the picture by replacing GitHub. The result: a fully self-contained development platform where the HQ node is the authoritative source for everything.
 
----
+### Why Not Just Use Bare Git?
 
-## Current State Analysis
+Forgejo provides features that bare git repos cannot:
 
-### GitHub Features Currently Used
+- **Web UI** for browsing code, diffs, and history from any device on the mesh
+- **Issues & PRs** that the quest/objective system currently depends on
+- **API** compatible with the Gitea SDK, giving us a clean programmatic interface
+- **Access control** for multi-user scenarios (invitations, teams, permissions)
+- **Webhooks** for triggering Dex actions on push, PR, etc.
 
-| Feature | Usage in Dex | Criticality |
-|---------|--------------|-------------|
-| Issues | Quest/objective tracking, progress comments | High |
-| Pull Requests | Linked to objectives, auto-created | Medium |
-| Repositories | Creation, workflow setup | Medium |
-| GitHub App Auth | JWT tokens, installation management | High |
-| Labels | `dex:quest`, `dex:objective` classification | Low |
-| Comments | Status updates, checklist sync | Medium |
-
-### Current Integration Points
-
-```
-internal/github/
-├── app.go          # GitHub App manager, JWT generation
-├── issue.go        # Issue CRUD with retry logic
-├── comments.go     # Rate-limited commenting
-└── sync.go         # Quest/objective sync orchestrator
-
-internal/toolbelt/github.go    # Client wrapper
-internal/api/handlers/github/  # API handlers
-internal/db/github.go          # Persistence
-```
-
-### Database Fields Affected
-
-- `Task`: `github_issue_number`, `pr_number`
-- `Quest`: `github_issue_number`
-- `Project`: `github_owner`, `github_repo`
-- `GitHubAppConfig`: entire table
-- `GitHubInstallation`: entire table
+Bare git would require reimplementing all of this. Forgejo gives it to us for free in a single binary.
 
 ---
 
-## Proposed Architecture
+## Architecture
 
-### High-Level Design
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                      Dex Dashboard                          │
-│                    (Primary Interface)                      │
-│                                                             │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐ │
-│  │   Passkey   │  │   Quest/    │  │   Project           │ │
-│  │   Auth      │  │   Task UI   │  │   Management        │ │
-│  └──────┬──────┘  └─────────────┘  └─────────────────────┘ │
-│         │                                                   │
-│         │ OIDC Provider                                     │
-└─────────┼───────────────────────────────────────────────────┘
-          │
-          │ SSO Token
-          ▼
-┌─────────────────────────────────────────────────────────────┐
-│                    Forgejo Instance                         │
-│                  (Embedded/Sidecar)                         │
-│                                                             │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐ │
-│  │   Git       │  │   Issues    │  │   Pull Requests     │ │
-│  │   Repos     │  │   Tracking  │  │   Code Review       │ │
-│  └─────────────┘  └─────────────┘  └─────────────────────┘ │
-│                                                             │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐ │
-│  │   Actions   │  │   Packages  │  │   Webhooks          │ │
-│  │   (CI/CD)   │  │   Registry  │  │   (to Dex)          │ │
-│  └─────────────┘  └─────────────┘  └─────────────────────┘ │
-└─────────────────────────────────────────────────────────────┘
-```
-
-### Component Responsibilities
-
-| Component | Responsibility |
-|-----------|----------------|
-| Dex Dashboard | Primary UI, passkey auth, OIDC provider, quest management |
-| Forgejo | Git hosting, issue tracking, PRs, CI/CD, code browsing |
-| Dex Bot Account | Automated operations (repo creation, issue sync, PR creation) |
-
-### Authentication Flow
+### Network Topology
 
 ```
-User                    Dex                     Forgejo
-  │                      │                         │
-  │──── Passkey ────────►│                         │
-  │                      │                         │
-  │◄─── Session ─────────│                         │
-  │                      │                         │
-  │──── Access Forgejo ──┼────────────────────────►│
-  │                      │                         │
-  │                      │◄── OIDC Auth Request ───│
-  │                      │                         │
-  │                      │─── Token (already ──────►│
-  │                      │    authenticated)       │
-  │                      │                         │
-  │◄─────────────────────┼─── Forgejo Session ─────│
+Campus Mesh (WireGuard / dexnet)
+─────────────────────────────────────────────────────
+│                                                     │
+│  ┌─────────────────────────────────────────────┐    │
+│  │            HQ Node (dex server)             │    │
+│  │                                             │    │
+│  │  ┌──────────┐  ┌──────────┐  ┌──────────┐  │    │
+│  │  │ Dex API  │  │ Forgejo  │  │ Realtime │  │    │
+│  │  │ :8080    │  │ :3000    │  │ (centri) │  │    │
+│  │  └────┬─────┘  └────┬─────┘  └──────────┘  │    │
+│  │       │              │                      │    │
+│  │       └──────┬───────┘                      │    │
+│  │              │                              │    │
+│  │    ┌─────────▼──────────┐                   │    │
+│  │    │  Mesh Listener(s)  │                   │    │
+│  │    │                    │                   │    │
+│  │    │  hq.enbox.id:443   │  ← Dex dashboard  │    │
+│  │    │  git.hq.enbox.id   │  ← Forgejo web+api│    │
+│  │    │  :9418 (git proto) │  ← git clone/push │    │
+│  │    └────────────────────┘                   │    │
+│  └─────────────────────────────────────────────┘    │
+│                                                     │
+│  ┌───────────┐  ┌───────────┐  ┌───────────┐      │
+│  │  Laptop   │  │  Phone    │  │  Worker   │      │
+│  │  (peer)   │  │  (peer)   │  │  (peer)   │      │
+│  │           │  │           │  │           │      │
+│  │ git clone │  │ browse    │  │ git push  │      │
+│  │ git push  │  │ code/PRs  │  │ (CI jobs) │      │
+│  └───────────┘  └───────────┘  └───────────┘      │
+─────────────────────────────────────────────────────
 ```
 
----
+### Reserved Mesh Addresses
 
-## Implementation Phases
+The HQ node registers multiple hostnames on the mesh:
 
-### Phase 1: Git Provider Abstraction Layer
+| Address | Service | Purpose |
+|---------|---------|---------|
+| `hq.<username>.enbox.id` | Dex API + Dashboard | Primary management interface |
+| `git.<username>.enbox.id` | Forgejo (HTTP/HTTPS) | Web UI, API, HTTP git transport |
 
-**Goal:** Create an interface that abstracts git hosting operations, allowing multiple backends.
+Both resolve to the same HQ node's mesh IP but are handled by a reverse proxy (or separate mesh listeners) that routes by hostname. The `<username>` portion comes from the Campus owner's identity registered with Central.
 
-**Tasks:**
-1. Create `internal/gitprovider/provider.go` with the `Provider` interface
-2. Create `internal/gitprovider/types.go` with shared types (User, Org, Repo, Issue, PR)
-3. Implement `internal/gitprovider/github/client.go` wrapping existing GitHub code
-4. Add provider selection to configuration (`DEX_GIT_PROVIDER=github|forgejo`)
-5. Update `internal/github/sync.go` to use the interface instead of direct GitHub calls
+**Alternative (simpler):** A single hostname `hq.<username>.enbox.id` with path-based routing:
+- `/` → Dex dashboard
+- `/git/` → Forgejo (or Forgejo at a subpath)
 
-**Acceptance Criteria:**
-- [ ] Existing GitHub functionality works unchanged
-- [ ] `Provider` interface covers all current GitHub operations
-- [ ] Can instantiate either provider based on config
-- [ ] All tests pass
+The dedicated `git.` subdomain is preferred because it makes clone URLs clean:
+```
+git clone http://git.hq.enbox.id/workspace/my-project.git
+```
 
-**Interface Definition:**
+### How Mesh Listeners Work
+
+The mesh client already exposes `Listen()` and `Dial()` — currently unused. This proposal puts them to work:
 
 ```go
-// internal/gitprovider/provider.go
+// In the HQ startup sequence, after mesh client is connected:
 
+// 1. Create a mesh listener for Forgejo
+gitListener, err := meshClient.Listen("tcp", ":3000")
+
+// 2. Forgejo binds to this listener instead of localhost
+// All traffic arrives encrypted over WireGuard from mesh peers
+forgejoServer.Serve(gitListener)
+```
+
+This means Forgejo is **only accessible via the mesh**. No ports are opened on the public internet. No tunnels. No external DNS. The mesh's WireGuard encryption handles transport security.
+
+### Process Architecture on HQ
+
+```
+dex (main process, PID 1)
+ ├── API server (Echo, :8080 on mesh)
+ ├── Realtime (Centrifuge, WebSocket)
+ ├── Mesh client (dexnet/tsnet)
+ ├── Forgejo manager (subprocess lifecycle)
+ │    └── forgejo (child process, :3000 on localhost)
+ └── Reverse proxy / mesh router
+      ├── hq.*.enbox.id → API server
+      └── git.*.enbox.id → Forgejo
+```
+
+Dex manages Forgejo as a child process. Forgejo binds to `localhost:3000` (never exposed directly). A mesh-level router inside Dex accepts connections on the mesh listener and proxies to the right backend based on the SNI/Host header.
+
+---
+
+## Implementation Plan
+
+### Phase 1: Forgejo Lifecycle Manager
+
+**Goal:** Dex can start, stop, health-check, and auto-configure a Forgejo instance as a child process.
+
+**What gets built:**
+- `internal/forgejo/manager.go` — Start/stop Forgejo subprocess
+- `internal/forgejo/config.go` — Generate `app.ini` from Dex configuration
+- `internal/forgejo/setup.go` — First-run setup (admin user, bot account, tokens)
+
+**Forgejo Configuration (app.ini):**
+
+```ini
+[server]
+HTTP_ADDR = 127.0.0.1
+HTTP_PORT = 3000
+ROOT_URL = http://git.hq.enbox.id
+DISABLE_SSH = true        ; SSH not needed — mesh handles auth/encryption
+LFS_START_SERVER = false  ; Keep it simple initially
+
+[database]
+DB_TYPE = sqlite3
+PATH = {data_dir}/forgejo/forgejo.db
+
+[security]
+INSTALL_LOCK = true
+SECRET_KEY = {generated}
+INTERNAL_TOKEN = {generated}
+
+[service]
+DISABLE_REGISTRATION = true   ; Users created only via Dex invitation
+REQUIRE_SIGNIN_VIEW = true    ; Must be authenticated to see anything
+ENABLE_NOTIFY_MAIL = false
+
+[repository]
+DEFAULT_PRIVATE = private     ; Everything private by default
+ROOT = {data_dir}/forgejo/repositories
+
+[log]
+MODE = console
+LEVEL = warn                  ; Dex controls logging
+```
+
+**Key Design Decisions:**
+- SSH disabled — the mesh provides encrypted transport; HTTP git over mesh is sufficient
+- Registration disabled — all user provisioning goes through Dex
+- Private by default — this is a personal/team dev environment, not a public forge
+- SQLite — matches Dex's own database approach, no external DB needed
+
+**First-Run Bootstrap:**
+
+```go
+func (m *Manager) bootstrap(ctx context.Context) error {
+    // 1. Create admin account via Forgejo CLI
+    m.cli("admin", "user", "create",
+        "--username", "dex-admin",
+        "--password", secureRandom(),
+        "--email", "admin@hq.local",
+        "--admin")
+
+    // 2. Generate admin API token
+    adminToken := m.cli("admin", "user", "generate-access-token",
+        "--username", "dex-admin",
+        "--token-name", "dex-admin",
+        "--scopes", "all",
+        "--raw")
+
+    // 3. Create bot account for automated operations
+    m.api(adminToken).CreateUser(User{
+        Username: "dex-bot",
+        Email:    "bot@hq.local",
+        Password: secureRandom(),
+    })
+
+    // 4. Generate bot token
+    botToken := m.api(adminToken).CreateAccessToken("dex-bot", "automation", []string{"all"})
+
+    // 5. Store tokens in Dex database (encrypted)
+    m.db.SetSecret("forgejo_admin_token", adminToken)
+    m.db.SetSecret("forgejo_bot_token", botToken)
+
+    return nil
+}
+```
+
+**Acceptance Criteria:**
+- [ ] `dex --forgejo` starts Forgejo as a child process on `:3000`
+- [ ] Health check polls `/api/v1/version` until ready
+- [ ] First run creates admin + bot accounts automatically
+- [ ] Tokens stored encrypted in Dex's SQLite database
+- [ ] Graceful shutdown kills Forgejo child process
+- [ ] Forgejo data lives under `{data_dir}/forgejo/`
+
+---
+
+### Phase 2: Mesh Service Router
+
+**Goal:** Expose both Dex and Forgejo to the mesh through hostname-based routing.
+
+**What gets built:**
+- `internal/mesh/router.go` — Accept mesh connections, route by Host header
+- Updates to `internal/mesh/client.go` — Register multiple service names
+- Updates to `internal/api/server.go` — Wire mesh listener into server startup
+
+**Router Design:**
+
+```go
+// internal/mesh/router.go
+
+type ServiceRouter struct {
+    meshClient *Client
+    routes     map[string]string // hostname pattern → backend addr
+    listener   net.Listener
+}
+
+func (r *ServiceRouter) Start(ctx context.Context) error {
+    // Listen on mesh port 443 (HTTPS) or 80 (HTTP)
+    var err error
+    r.listener, err = r.meshClient.Listen("tcp", ":80")
+    if err != nil {
+        return fmt.Errorf("mesh listen: %w", err)
+    }
+
+    // Accept connections and route based on Host header
+    for {
+        conn, err := r.listener.Accept()
+        if err != nil {
+            return err
+        }
+        go r.handleConn(conn)
+    }
+}
+
+func (r *ServiceRouter) handleConn(conn net.Conn) {
+    // Peek at HTTP Host header, proxy to correct backend
+    // hq.*.enbox.id → localhost:8080 (Dex API)
+    // git.*.enbox.id → localhost:3000 (Forgejo)
+}
+```
+
+**TLS Consideration:** Traffic on the mesh is already encrypted by WireGuard. We can run HTTP (not HTTPS) internally and let the mesh handle encryption. This avoids certificate management complexity. If we want HTTPS for defense-in-depth, the mesh client's `ListenTLS()` can use auto-generated certs from the control plane.
+
+**Hostname Registration:** The dexnet control plane (Central) needs to know that the HQ node should be reachable at both `hq.<user>.enbox.id` and `git.<user>.enbox.id`. Two approaches:
+
+1. **Multiple tsnet.Server instances** — Each service gets its own mesh identity. Simple but uses more mesh IPs.
+2. **Single mesh identity + DNS aliases** — HQ registers one IP, Central adds CNAME-like records for `git.*` → same IP. Preferred, requires Central support.
+3. **Single hostname, port-based** — HQ is `hq.<user>.enbox.id`, Forgejo at `:3000`, Dex at `:8080`. Simplest. No Central changes needed.
+
+**Recommended: Option 3 for Phase 2, evolve to Option 2 later.**
+
+This means initial clone URLs are:
+```
+git clone http://hq.<user>.enbox.id:3000/workspace/project.git
+```
+
+And later, with DNS alias support from Central:
+```
+git clone http://git.<user>.enbox.id/workspace/project.git
+```
+
+**Acceptance Criteria:**
+- [ ] Forgejo web UI accessible from any mesh peer at `hq:3000`
+- [ ] Dex dashboard accessible from any mesh peer at `hq:8080`
+- [ ] No ports exposed on public network
+- [ ] Connection from non-mesh device is refused
+
+---
+
+### Phase 3: Git Provider Abstraction
+
+**Goal:** Decouple the quest/objective sync system from GitHub-specific code.
+
+**What gets built:**
+- `internal/gitprovider/provider.go` — Interface definition
+- `internal/gitprovider/forgejo/client.go` — Forgejo implementation using Gitea SDK
+- `internal/gitprovider/github/client.go` — Wrapper around existing GitHub code (keep working)
+- `internal/gitprovider/types.go` — Shared types
+
+**Provider Interface (focused on what Dex actually uses):**
+
+```go
 package gitprovider
 
-import "context"
-
-// Provider abstracts git hosting operations
 type Provider interface {
-    // Health
-    Health(ctx context.Context) error
-
-    // Users
-    CreateUser(ctx context.Context, user *User) error
-    UpdateUser(ctx context.Context, username string, settings *UserSettings) error
-    DeleteUser(ctx context.Context, username string) error
-    CreateAccessToken(ctx context.Context, username, tokenName string, scopes []string) (string, error)
-
-    // Organizations
-    CreateOrg(ctx context.Context, org *Organization) error
-    AddOrgMember(ctx context.Context, org, username string, role OrgRole) error
-    RemoveOrgMember(ctx context.Context, org, username string) error
-
-    // Repositories
+    // Repos
     CreateRepo(ctx context.Context, owner string, repo *Repository) error
-    DeleteRepo(ctx context.Context, owner, repo string) error
     GetRepo(ctx context.Context, owner, repo string) (*Repository, error)
+    DeleteRepo(ctx context.Context, owner, repo string) error
 
-    // Issues
+    // Issues (used by quest/objective sync)
     CreateIssue(ctx context.Context, owner, repo string, issue *Issue) (*Issue, error)
-    UpdateIssue(ctx context.Context, owner, repo string, number int, issue *IssueUpdate) error
+    UpdateIssue(ctx context.Context, owner, repo string, number int, update *IssueUpdate) error
     CloseIssue(ctx context.Context, owner, repo string, number int) error
-    AddIssueComment(ctx context.Context, owner, repo string, number int, body string) error
-    AddIssueLabels(ctx context.Context, owner, repo string, number int, labels []string) error
+    AddComment(ctx context.Context, owner, repo string, number int, body string) error
+    SetLabels(ctx context.Context, owner, repo string, number int, labels []string) error
 
     // Pull Requests
     CreatePR(ctx context.Context, owner, repo string, pr *PullRequest) (*PullRequest, error)
@@ -224,1099 +332,459 @@ type Provider interface {
 
     // Webhooks
     CreateWebhook(ctx context.Context, owner, repo string, hook *Webhook) error
+
+    // Health
+    Ping(ctx context.Context) error
 }
 ```
 
-**Types Definition:**
+**Forgejo Implementation:**
 
 ```go
-// internal/gitprovider/types.go
-
-package gitprovider
-
-type User struct {
-    Username    string
-    Email       string
-    FullName    string
-    Password    string // Only for creation
-    IsAdmin     bool
-    MustChange  bool
-}
-
-type UserSettings struct {
-    FullName  *string
-    Bio       *string
-    Location  *string
-    Website   *string
-    AvatarB64 *string // Base64 encoded image
-}
-
-type Organization struct {
-    Name        string
-    FullName    string
-    Description string
-    Visibility  Visibility
-}
-
-type Visibility string
-
-const (
-    VisibilityPublic  Visibility = "public"
-    VisibilityPrivate Visibility = "private"
-)
-
-type OrgRole string
-
-const (
-    OrgRoleOwner  OrgRole = "owner"
-    OrgRoleMember OrgRole = "member"
-)
-
-type Repository struct {
-    Name          string
-    Description   string
-    Private       bool
-    DefaultBranch string
-    AutoInit      bool
-}
-
-type Issue struct {
-    Number int64
-    Title  string
-    Body   string
-    Labels []string
-    State  IssueState
-}
-
-type IssueState string
-
-const (
-    IssueStateOpen   IssueState = "open"
-    IssueStateClosed IssueState = "closed"
-)
-
-type IssueUpdate struct {
-    Title  *string
-    Body   *string
-    State  *IssueState
-}
-
-type PullRequest struct {
-    Number int64
-    Title  string
-    Body   string
-    Head   string // Source branch
-    Base   string // Target branch
-}
-
-type MergeMethod string
-
-const (
-    MergeMethodMerge  MergeMethod = "merge"
-    MergeMethodSquash MergeMethod = "squash"
-    MergeMethodRebase MergeMethod = "rebase"
-)
-
-type Webhook struct {
-    URL         string
-    ContentType string
-    Secret      string
-    Events      []string
-    Active      bool
-}
-```
-
----
-
-### Phase 2: Forgejo Provider Implementation
-
-**Goal:** Implement the `Provider` interface for Forgejo using the Gitea SDK.
-
-**Tasks:**
-1. Add `code.gitea.io/sdk/gitea` to go.mod
-2. Create `internal/gitprovider/forgejo/client.go` implementing `Provider`
-3. Implement all interface methods using Gitea SDK
-4. Add retry logic matching existing GitHub patterns
-5. Write unit tests for Forgejo provider
-
-**Acceptance Criteria:**
-- [ ] All `Provider` interface methods implemented
-- [ ] Can create users, orgs, repos, issues, PRs via Forgejo API
-- [ ] Retry logic handles rate limits and transient failures
-- [ ] Unit tests cover happy path and error cases
-
-**Implementation Pattern:**
-
-```go
-// internal/gitprovider/forgejo/client.go
-
 package forgejo
 
 import (
-    "context"
     "code.gitea.io/sdk/gitea"
-    "github.com/lirancohen/dex/internal/gitprovider"
 )
 
 type Client struct {
-    client   *gitea.Client
-    baseURL  string
-    botToken string
+    api     *gitea.Client
+    baseURL string
 }
 
 func New(baseURL, token string) (*Client, error) {
-    client, err := gitea.NewClient(baseURL, gitea.SetToken(token))
+    api, err := gitea.NewClient(baseURL, gitea.SetToken(token))
     if err != nil {
         return nil, err
     }
-    return &Client{
-        client:   client,
-        baseURL:  baseURL,
-        botToken: token,
-    }, nil
-}
-
-func (c *Client) Health(ctx context.Context) error {
-    _, _, err := c.client.ServerVersion()
-    return err
-}
-
-func (c *Client) CreateUser(ctx context.Context, user *gitprovider.User) error {
-    _, _, err := c.client.AdminCreateUser(gitea.CreateUserOption{
-        Username:           user.Username,
-        Email:              user.Email,
-        FullName:           user.FullName,
-        Password:           user.Password,
-        MustChangePassword: &user.MustChange,
-    })
-    return err
+    return &Client{api: api, baseURL: baseURL}, nil
 }
 
 func (c *Client) CreateIssue(ctx context.Context, owner, repo string, issue *gitprovider.Issue) (*gitprovider.Issue, error) {
-    created, _, err := c.client.CreateIssue(owner, repo, gitea.CreateIssueOption{
+    created, _, err := c.api.CreateIssue(owner, repo, gitea.CreateIssueOption{
         Title: issue.Title,
         Body:  issue.Body,
     })
     if err != nil {
         return nil, err
     }
-    issue.Number = created.Index
+    issue.Number = int(created.Index)
     return issue, nil
 }
-
-// ... implement remaining methods
+// ... remaining methods follow the same pattern
 ```
+
+**Migration Path:**
+- Add `DEX_GIT_PROVIDER=forgejo|github` config flag
+- Default to `forgejo` for new installs
+- Existing installs with GitHub configured continue to use GitHub
+- `internal/github/sync.go` refactored to call `gitprovider.Provider` methods
+
+**Acceptance Criteria:**
+- [ ] Existing GitHub sync works unchanged through the abstraction
+- [ ] New Forgejo provider passes all integration tests against local instance
+- [ ] Provider selected at startup via configuration
+- [ ] Quest/objective CRUD operations work with Forgejo backend
 
 ---
 
-### Phase 3: Forgejo Manager (Lifecycle Management)
+### Phase 4: Database & Project Model Updates
 
-**Goal:** Create a manager that can start, stop, and configure a Forgejo instance.
+**Goal:** Generalize the database schema from GitHub-specific to provider-agnostic.
 
-**Tasks:**
-1. Create `internal/forgejo/manager.go` for process management
-2. Create `internal/forgejo/config.go` for app.ini generation
-3. Implement startup with health check polling
-4. Implement graceful shutdown
-5. Add auto-configuration (admin user, bot account creation via CLI)
-
-**Acceptance Criteria:**
-- [ ] Can start Forgejo as subprocess
-- [ ] Health check waits for Forgejo to be ready
-- [ ] Can create admin user via CLI on first run
-- [ ] Can generate bot token via CLI
-- [ ] Graceful shutdown on Dex exit
-
-**Manager Implementation:**
-
-```go
-// internal/forgejo/manager.go
-
-package forgejo
-
-import (
-    "context"
-    "fmt"
-    "os"
-    "os/exec"
-    "path/filepath"
-    "time"
-)
-
-type Manager struct {
-    cmd        *exec.Cmd
-    dataDir    string
-    port       int
-    adminToken string
-    botToken   string
-}
-
-type Config struct {
-    DataDir  string
-    Port     int
-    RootURL  string
-}
-
-func NewManager(cfg Config) *Manager {
-    return &Manager{
-        dataDir: cfg.DataDir,
-        port:    cfg.Port,
-    }
-}
-
-func (m *Manager) Start(ctx context.Context) error {
-    // Ensure data directory exists
-    if err := os.MkdirAll(m.dataDir, 0755); err != nil {
-        return fmt.Errorf("create data dir: %w", err)
-    }
-
-    // Generate app.ini if not exists
-    if err := m.ensureConfig(); err != nil {
-        return fmt.Errorf("ensure config: %w", err)
-    }
-
-    // Start Forgejo process
-    m.cmd = exec.CommandContext(ctx, "forgejo", "web",
-        "--config", filepath.Join(m.dataDir, "app.ini"),
-    )
-    m.cmd.Dir = m.dataDir
-    m.cmd.Env = append(os.Environ(),
-        fmt.Sprintf("FORGEJO_WORK_DIR=%s", m.dataDir),
-    )
-
-    if err := m.cmd.Start(); err != nil {
-        return fmt.Errorf("start forgejo: %w", err)
-    }
-
-    // Wait for health
-    if err := m.waitReady(ctx); err != nil {
-        m.Stop()
-        return fmt.Errorf("wait ready: %w", err)
-    }
-
-    // Run first-time setup if needed
-    if err := m.ensureSetup(ctx); err != nil {
-        return fmt.Errorf("ensure setup: %w", err)
-    }
-
-    return nil
-}
-
-func (m *Manager) Stop() error {
-    if m.cmd != nil && m.cmd.Process != nil {
-        return m.cmd.Process.Signal(os.Interrupt)
-    }
-    return nil
-}
-
-func (m *Manager) waitReady(ctx context.Context) error {
-    deadline := time.Now().Add(30 * time.Second)
-    for time.Now().Before(deadline) {
-        // Try health endpoint
-        // ...
-        time.Sleep(500 * time.Millisecond)
-    }
-    return fmt.Errorf("timeout waiting for forgejo")
-}
-
-func (m *Manager) CLI(args ...string) (string, error) {
-    cmd := exec.Command("forgejo", args...)
-    cmd.Dir = m.dataDir
-    cmd.Env = append(os.Environ(),
-        fmt.Sprintf("FORGEJO_WORK_DIR=%s", m.dataDir),
-    )
-    out, err := cmd.Output()
-    return string(out), err
-}
-
-func (m *Manager) ensureSetup(ctx context.Context) error {
-    // Check if admin exists, create if not
-    // Generate tokens
-    // Create bot account
-    return nil
-}
-```
-
-**Config Template:**
-
-```go
-// internal/forgejo/config.go
-
-package forgejo
-
-const appIniTemplate = `
-[server]
-ROOT_URL = {{.RootURL}}
-HTTP_PORT = {{.Port}}
-DISABLE_SSH = true
-LFS_START_SERVER = false
-
-[database]
-DB_TYPE = sqlite3
-PATH = {{.DataDir}}/forgejo.db
-
-[security]
-INSTALL_LOCK = true
-SECRET_KEY = {{.SecretKey}}
-INTERNAL_TOKEN = {{.InternalToken}}
-
-[service]
-DISABLE_REGISTRATION = true
-REQUIRE_SIGNIN_VIEW = true
-ENABLE_NOTIFY_MAIL = false
-
-[oauth2]
-ENABLE = true
-
-[openid]
-ENABLE_OPENID_SIGNIN = true
-ENABLE_OPENID_SIGNUP = false
-
-[mailer]
-ENABLED = false
-
-[log]
-MODE = console
-LEVEL = info
-
-[repository]
-DEFAULT_PRIVATE = private
-`
-```
-
----
-
-### Phase 4: Database Schema Updates
-
-**Goal:** Update database schema to support Forgejo configuration and generic git provider fields.
-
-**Tasks:**
-1. Create migration to add `forgejo_config` table
-2. Create migration to add `invitations` table
-3. Create migration to add `oidc_clients` table
-4. Create migration to rename `github_*` columns to `git_*` (with aliases for backwards compat)
-5. Add `git_provider` column to projects table
-6. Update model structs in `internal/db/models.go`
-
-**Acceptance Criteria:**
-- [ ] Migrations run successfully on fresh DB
-- [ ] Migrations run successfully on existing DB with GitHub data
-- [ ] Old GitHub column names still work (aliases)
-- [ ] New Forgejo config can be stored and retrieved
-
-**New Tables:**
+**Schema Changes:**
 
 ```sql
--- Forgejo instance configuration
+-- New: Forgejo instance configuration
 CREATE TABLE IF NOT EXISTS forgejo_config (
     id INTEGER PRIMARY KEY,
-    base_url TEXT NOT NULL,
-    admin_token TEXT NOT NULL,
-    bot_token TEXT NOT NULL,
+    base_url TEXT NOT NULL DEFAULT 'http://127.0.0.1:3000',
+    admin_token_ref TEXT NOT NULL,   -- Reference to secrets table
+    bot_token_ref TEXT NOT NULL,     -- Reference to secrets table
     bot_username TEXT NOT NULL DEFAULT 'dex-bot',
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-
--- User invitations
-CREATE TABLE IF NOT EXISTS invitations (
-    id INTEGER PRIMARY KEY,
-    email TEXT NOT NULL,
-    token TEXT NOT NULL UNIQUE,
-    invited_by INTEGER REFERENCES users(id),
-    access_level TEXT NOT NULL DEFAULT 'contributor',
-    workspaces TEXT,
-    accepted_at DATETIME,
-    expires_at DATETIME NOT NULL,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
--- OIDC configuration for Dex as provider
-CREATE TABLE IF NOT EXISTS oidc_clients (
-    id INTEGER PRIMARY KEY,
-    client_id TEXT NOT NULL UNIQUE,
-    client_secret TEXT NOT NULL,
-    name TEXT NOT NULL,
-    redirect_uris TEXT NOT NULL,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-```
-
-**Column Renames (with backwards compat):**
-
-```sql
--- Add new columns
-ALTER TABLE projects ADD COLUMN git_owner TEXT;
-ALTER TABLE projects ADD COLUMN git_repo TEXT;
+-- Add provider-agnostic columns to projects
 ALTER TABLE projects ADD COLUMN git_provider TEXT DEFAULT 'forgejo';
+ALTER TABLE projects ADD COLUMN git_owner TEXT;     -- Org/user on the provider
+ALTER TABLE projects ADD COLUMN git_repo TEXT;      -- Repo name on the provider
 
--- Copy data
-UPDATE projects SET git_owner = github_owner WHERE github_owner IS NOT NULL;
-UPDATE projects SET git_repo = github_repo WHERE github_repo IS NOT NULL;
+-- Migrate existing data
+UPDATE projects SET
+    git_provider = 'github',
+    git_owner = github_owner,
+    git_repo = github_repo
+WHERE github_owner IS NOT NULL;
 
--- Note: Keep old columns for backwards compat, remove in future version
+-- Update projects that don't have GitHub to use Forgejo
+UPDATE projects SET
+    git_provider = 'forgejo'
+WHERE github_owner IS NULL;
 ```
 
----
-
-### Phase 5: OIDC Provider Implementation
-
-**Goal:** Make Dex act as an OIDC provider so Forgejo can use it for SSO.
-
-**Tasks:**
-1. Create `internal/oidc/provider.go` with OIDC endpoints
-2. Implement `/.well-known/openid-configuration` endpoint
-3. Implement `/oauth2/authorize` endpoint
-4. Implement `/oauth2/token` endpoint
-5. Implement `/oauth2/userinfo` endpoint
-6. Add OIDC routes to API server
-7. Store OIDC client credentials for Forgejo
-
-**Acceptance Criteria:**
-- [ ] OIDC discovery endpoint returns valid configuration
-- [ ] Authorization flow works with Forgejo as client
-- [ ] Tokens are properly signed and validated
-- [ ] User info endpoint returns correct user data
-- [ ] SSO login from Forgejo works end-to-end
-
-**OIDC Endpoints:**
+**Model Updates:**
 
 ```go
-// internal/oidc/provider.go
-
-package oidc
-
-import (
-    "crypto/rsa"
-    "time"
-    "github.com/golang-jwt/jwt/v5"
-)
-
-type Provider struct {
-    issuer     string
-    signingKey *rsa.PrivateKey
-    db         *db.DB
-}
-
-type DiscoveryDocument struct {
-    Issuer                string   `json:"issuer"`
-    AuthorizationEndpoint string   `json:"authorization_endpoint"`
-    TokenEndpoint         string   `json:"token_endpoint"`
-    UserInfoEndpoint      string   `json:"userinfo_endpoint"`
-    JwksURI               string   `json:"jwks_uri"`
-    ResponseTypesSupported []string `json:"response_types_supported"`
-    SubjectTypesSupported  []string `json:"subject_types_supported"`
-    IDTokenSigningAlgValues []string `json:"id_token_signing_alg_values_supported"`
-}
-
-func (p *Provider) Discovery() *DiscoveryDocument {
-    return &DiscoveryDocument{
-        Issuer:                p.issuer,
-        AuthorizationEndpoint: p.issuer + "/oauth2/authorize",
-        TokenEndpoint:         p.issuer + "/oauth2/token",
-        UserInfoEndpoint:      p.issuer + "/oauth2/userinfo",
-        JwksURI:               p.issuer + "/.well-known/jwks.json",
-        ResponseTypesSupported: []string{"code"},
-        SubjectTypesSupported:  []string{"public"},
-        IDTokenSigningAlgValues: []string{"RS256"},
-    }
-}
-
-// HandleAuthorize - GET /oauth2/authorize
-// HandleToken - POST /oauth2/token
-// HandleUserInfo - GET /oauth2/userinfo
-// HandleJWKS - GET /.well-known/jwks.json
-```
-
----
-
-### Phase 6: API Handlers for Forgejo Setup
-
-**Goal:** Create API endpoints for Forgejo configuration and status.
-
-**Tasks:**
-1. Create `internal/api/handlers/forgejo/handlers.go`
-2. Implement `GET /api/forgejo/status` - health and config status
-3. Implement `POST /api/forgejo/setup` - trigger initial setup
-4. Implement `GET /api/forgejo/config` - get current config
-5. Add routes to API server
-6. Update setup status to include Forgejo state
-
-**Acceptance Criteria:**
-- [ ] Status endpoint returns Forgejo health
-- [ ] Setup endpoint triggers Forgejo initialization
-- [ ] Config endpoint returns connection details
-- [ ] Frontend can check Forgejo status during onboarding
-
-**Handler Pattern:**
-
-```go
-// internal/api/handlers/forgejo/handlers.go
-
-package forgejo
-
-import (
-    "net/http"
-    "github.com/lirancohen/dex/internal/forgejo"
-)
-
-type Handler struct {
-    manager *forgejo.Manager
-    db      *db.DB
-}
-
-type StatusResponse struct {
-    Running   bool   `json:"running"`
-    Healthy   bool   `json:"healthy"`
-    URL       string `json:"url,omitempty"`
-    BotUser   string `json:"bot_user,omitempty"`
-}
-
-func (h *Handler) GetStatus(w http.ResponseWriter, r *http.Request) {
-    // Check manager status
-    // Return JSON response
-}
-
-func (h *Handler) TriggerSetup(w http.ResponseWriter, r *http.Request) {
-    // Start Forgejo if not running
-    // Run setup if needed
-    // Return status
+type Project struct {
+    ID             string
+    Name           string
+    RepoPath       string
+    GitProvider    string         // "forgejo" or "github"
+    GitOwner       sql.NullString // Owner on the git provider
+    GitRepo        sql.NullString // Repo name on the git provider
+    // Keep old fields for backwards compat during transition
+    GitHubOwner    sql.NullString
+    GitHubRepo     sql.NullString
+    RemoteOrigin   sql.NullString
+    RemoteUpstream sql.NullString
+    DefaultBranch  string
+    Services       ProjectServices
+    CreatedAt      time.Time
 }
 ```
 
+**Acceptance Criteria:**
+- [ ] Migration runs cleanly on existing databases
+- [ ] New installs create `forgejo_config` table
+- [ ] Projects can be associated with either provider
+- [ ] Old `github_*` columns still readable (backwards compat)
+
 ---
 
-### Phase 7: Frontend Onboarding Updates
+### Phase 5: Onboarding Flow Replacement
 
-**Goal:** Update the onboarding flow to set up Forgejo instead of GitHub.
-
-**Tasks:**
-1. Remove GitHub App setup steps from onboarding
-2. Add Forgejo setup progress step
-3. Add workspace creation step
-4. Update onboarding state machine
-5. Add Forgejo status polling during setup
-6. Update completion screen with Forgejo links
-
-**Acceptance Criteria:**
-- [ ] Onboarding no longer mentions GitHub
-- [ ] Forgejo setup shows progress indicators
-- [ ] Workspace creation works via Forgejo API
-- [ ] User can access Forgejo after onboarding
+**Goal:** New installs set up Forgejo instead of GitHub. Zero external accounts needed.
 
 **New Onboarding Steps:**
 
-```typescript
-// frontend/src/components/onboarding/steps/ForgejoSetupStep.tsx
-
-interface SetupStatus {
-  step: 'starting' | 'creating_admin' | 'creating_bot' | 'configuring_sso' | 'complete';
-  progress: number;
-  error?: string;
-}
-
-export function ForgejoSetupStep() {
-  const [status, setStatus] = useState<SetupStatus>({ step: 'starting', progress: 0 });
-
-  useEffect(() => {
-    // Poll /api/forgejo/status
-    // Update progress
-  }, []);
-
-  return (
-    <div>
-      <h2>Setting Up Git Server</h2>
-      <ProgressBar value={status.progress} />
-      <StatusList>
-        <StatusItem done={status.progress > 20}>Starting Forgejo instance</StatusItem>
-        <StatusItem done={status.progress > 40}>Creating admin account</StatusItem>
-        <StatusItem done={status.progress > 60}>Setting up Dex bot</StatusItem>
-        <StatusItem done={status.progress > 80}>Configuring SSO</StatusItem>
-        <StatusItem done={status.progress === 100}>Ready!</StatusItem>
-      </StatusList>
-    </div>
-  );
-}
-```
-
-**Updated Onboarding Flow:**
-
 ```
 Step 1: Welcome
-Step 2: Create Passkey (existing)
-Step 3: Forgejo Setup (new - replaces GitHub steps)
-Step 4: Create Workspace (new)
-Step 5: First Project (optional)
-Step 6: Complete
+    "Dex runs your own private git server. No accounts needed."
+
+Step 2: Create Passkey
+    (Unchanged — device biometric / security key)
+
+Step 3: Git Server Setup (automatic)
+    ████████████████░░░░░░  75%
+    [x] Starting Forgejo
+    [x] Creating admin account
+    [x] Setting up automation bot
+    [ ] Creating your workspace...
+
+Step 4: Workspace
+    Name: [ my-workspace ]
+    → Creates Forgejo org + default repo
+
+Step 5: Anthropic API Key
+    (Unchanged — needed for Claude sessions)
+
+Step 6: Done
+    "Your git server is running at git.hq.enbox.id"
+    "Clone URL: http://hq:3000/my-workspace/my-project.git"
 ```
 
----
+**What Gets Removed:**
+- GitHub App manifest flow (complex multi-step OAuth dance)
+- Organization selection step
+- Installation permissions step
+- GitHub token management
+- All `setup/steps/github-*` API endpoints
 
-### Phase 8: Invitation System
-
-**Goal:** Allow users to invite collaborators without requiring GitHub.
-
-**Tasks:**
-1. Create `internal/api/handlers/invitations/handlers.go`
-2. Implement `POST /api/invitations` - create invitation
-3. Implement `GET /api/invitations` - list pending invitations
-4. Implement `DELETE /api/invitations/:id` - revoke invitation
-5. Implement `POST /api/invitations/:token/accept` - accept invitation
-6. Create invitation email/link generation
-7. Add invitation acceptance frontend flow
+**What Gets Added:**
+- `POST /api/v1/setup/forgejo` — Trigger Forgejo bootstrap
+- `GET /api/v1/setup/forgejo/status` — Poll bootstrap progress
+- `POST /api/v1/setup/workspace` — Create Forgejo org (already exists, needs rewiring)
 
 **Acceptance Criteria:**
-- [ ] Can create invitation for email address
-- [ ] Invitation creates Forgejo user account
-- [ ] Invitation link allows passkey registration
-- [ ] Accepted user has access to specified workspaces
-
-**Invitation Flow:**
-
-```go
-// POST /api/invitations
-type CreateInvitationRequest struct {
-    Email       string   `json:"email"`
-    AccessLevel string   `json:"access_level"` // "contributor", "maintainer", "admin"
-    Workspaces  []string `json:"workspaces"`
-}
-
-// Response includes invitation link
-type CreateInvitationResponse struct {
-    ID        int64  `json:"id"`
-    Email     string `json:"email"`
-    InviteURL string `json:"invite_url"`
-    ExpiresAt string `json:"expires_at"`
-}
-```
+- [ ] Fresh install completes without any external account
+- [ ] Forgejo running and healthy at end of onboarding
+- [ ] Workspace org created with bot account as member
+- [ ] User can clone the default repo from a mesh peer
 
 ---
 
-### Phase 9: Migration & Cleanup
+### Phase 6: Quest/Objective Sync Migration
 
-**Goal:** Support migration from GitHub-based installations and clean up old code.
+**Goal:** Wire the quest and objective system to use Forgejo instead of GitHub for issue tracking.
 
-**Tasks:**
-1. Create migration tool for existing GitHub data
-2. Document migration process
-3. Add deprecation warnings to GitHub-specific code paths
-4. Update all documentation to reference Forgejo
-5. Add configuration to disable GitHub provider entirely
+**Current Flow (GitHub):**
+1. Quest created → GitHub Issue created in project repo
+2. Objectives added → Sub-issues or checklist items on the issue
+3. Task completes → Comment posted, checklist updated
+4. PR created → Linked to the objective issue
+
+**New Flow (Forgejo):**
+Same logic, same UX, different backend. The `gitprovider.Provider` abstraction makes this a configuration change, not a code rewrite.
+
+**Files to Update:**
+- `internal/github/sync.go` → Refactor to use `gitprovider.Provider`
+- `internal/api/handlers/github/sync.go` → Rename to `internal/api/handlers/gitsync/`
+- `internal/api/handlers/github/handlers.go` → Move provider-agnostic parts out
+- `internal/quest/handler.go` → Use provider interface instead of `toolbelt.GitHubClient`
 
 **Acceptance Criteria:**
-- [ ] Existing GitHub installations can migrate to Forgejo
-- [ ] Documentation is updated
-- [ ] GitHub code paths show deprecation warnings
-- [ ] Fresh installs use Forgejo by default
+- [ ] Creating a quest creates a Forgejo issue
+- [ ] Objective progress updates Forgejo issue comments
+- [ ] Task completion posts to Forgejo
+- [ ] PR creation works against Forgejo repos
 
 ---
 
-## Onboarding Flow Details
+### Phase 7: Git Remote Wiring
 
-### Step 1: Welcome
+**Goal:** When Dex creates worktrees and pushes branches, it pushes to Forgejo instead of GitHub.
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    Step 1: Welcome                          │
-│                                                             │
-│  "Welcome to Dex! Let's get you set up."                   │
-│                                                             │
-│  Dex will configure:                                        │
-│  - Local git server (Forgejo)                              │
-│  - Your personal workspace                                  │
-│  - Secure passkey authentication                           │
-│                                                             │
-│                    [ Get Started ]                          │
-└─────────────────────────────────────────────────────────────┘
-```
+**Current git flow:**
+1. Project has `RemoteOrigin` pointing to `github.com/org/repo`
+2. Worktree created, branch pushed to origin
+3. PR created via GitHub API
 
-### Step 2: Passkey Registration
+**New git flow:**
+1. Project has `RemoteOrigin` pointing to `http://127.0.0.1:3000/workspace/repo.git`
+2. Worktree created, branch pushed to origin (Forgejo)
+3. PR created via Forgejo API (gitprovider.Provider)
+
+**Auth for git push:** Forgejo is on localhost. We use the bot token for HTTP basic auth:
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                 Step 2: Create Your Passkey                 │
-│                                                             │
-│  Your passkey secures access to Dex and all connected      │
-│  services. Use your device's biometrics or security key.   │
-│                                                             │
-│                 [ Register Passkey ]                        │
-└─────────────────────────────────────────────────────────────┘
+http://dex-bot:{token}@127.0.0.1:3000/workspace/repo.git
 ```
 
-### Step 3: Forgejo Auto-Configuration
+This is already the pattern used for GitHub (`x-access-token:{token}@github.com`), so the existing `git/operations.go` auth injection works with minimal changes.
+
+**For mesh peers pushing directly:** They authenticate to Forgejo via OIDC (see Phase 8) and push over HTTP through the mesh:
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│              Step 3: Setting Up Git Server                  │
-│                                                             │
-│  [x] Starting Forgejo instance                             │
-│  [x] Creating admin account                                 │
-│  [x] Configuring SSO with Dex                              │
-│  [ ] Creating your workspace...                            │
-│  [ ] Setting up Dex bot account                            │
-│                                                             │
-│  ████████████████████░░░░░░░░░░  65%                       │
-└─────────────────────────────────────────────────────────────┘
+git clone http://hq:3000/workspace/my-project.git
+# Auth handled by git credential helper that gets OIDC tokens from Dex
 ```
 
-**Backend Operations:**
+**Acceptance Criteria:**
+- [ ] `git push` from HQ to Forgejo works with bot token
+- [ ] `git clone` from mesh peer works
+- [ ] `git push` from mesh peer works with user credentials
+- [ ] Existing worktree workflow unchanged for the end user
+
+---
+
+### Phase 8: Authentication (OIDC SSO)
+
+**Goal:** Users authenticate to Forgejo using their Dex passkey — single sign-on across the mesh.
+
+**Flow:**
+
+```
+Mesh Peer (laptop)          HQ (Dex)              HQ (Forgejo)
+      │                       │                       │
+      │──── Open Forgejo ─────┼──────────────────────►│
+      │                       │                       │
+      │                       │◄── OIDC redirect ─────│
+      │                       │                       │
+      │◄── Passkey prompt ────│                       │
+      │                       │                       │
+      │──── Biometric ───────►│                       │
+      │                       │                       │
+      │                       │─── OIDC token ───────►│
+      │                       │                       │
+      │◄──────────────────────┼─── Logged in ─────────│
+```
+
+**What gets built:**
+- `internal/oidc/provider.go` — Minimal OIDC provider (Dex as identity provider)
+- Endpoints: `/.well-known/openid-configuration`, `/oauth2/authorize`, `/oauth2/token`, `/oauth2/userinfo`, `/.well-known/jwks.json`
+- Forgejo configured with OIDC auth source pointing to Dex
+
+**This is the most complex phase** but it's also optional for single-user setups where the HQ owner is the only user. In that case, Forgejo's admin token handles everything and the web UI is accessed directly through Dex's dashboard (embedded iframe or proxy).
+
+**Acceptance Criteria:**
+- [ ] OIDC discovery endpoint works
+- [ ] Forgejo redirects to Dex for login
+- [ ] Passkey auth grants Forgejo session
+- [ ] User identity flows through correctly (username, email)
+
+---
+
+### Phase 9: GitHub Removal & Cleanup
+
+**Goal:** Remove GitHub as a required dependency. Keep it as an optional provider for users who want it.
+
+**What gets removed from the critical path:**
+- `internal/github/app.go` — GitHub App manager (JWT generation, installation management)
+- `internal/api/handlers/github/` — GitHub-specific API handlers (keep as optional)
+- All `setup/steps/github-*` endpoints from onboarding
+- GitHub App config from database (mark as optional/legacy)
+- `SecretKeyGitHubToken` from default secrets
+
+**What stays (optional):**
+- `internal/gitprovider/github/` — GitHub as an alternative provider
+- Import from GitHub functionality (clone existing repos into Forgejo)
+- `toolbelt.GitHubClient` — Available if user configures a token
+
+**Acceptance Criteria:**
+- [ ] Fresh install works with zero GitHub references
+- [ ] `internal/github/` code compiles but is not imported by default
+- [ ] Existing installs with GitHub continue to function
+- [ ] Migration guide documents how to move repos from GitHub to Forgejo
+
+---
+
+## Forgejo Binary Distribution
+
+Forgejo is a single static binary (~100MB). Options for distribution:
+
+### Option A: Download on First Run (Recommended)
 
 ```go
-// 1. Start Forgejo (embedded or container)
-forgejo.Start(config)
+func (m *Manager) ensureBinary() error {
+    binaryPath := filepath.Join(m.dataDir, "bin", "forgejo")
+    if fileExists(binaryPath) {
+        return nil
+    }
 
-// 2. Wait for health check
-forgejo.WaitReady()
-
-// 3. Create admin account via CLI
-forgejo.CLI("admin", "user", "create",
-    "--username", "dex-admin",
-    "--password", generateSecurePassword(),
-    "--email", "admin@localhost",
-    "--admin")
-
-// 4. Generate admin token
-adminToken := forgejo.CLI("admin", "user", "generate-access-token",
-    "--username", "dex-admin",
-    "--token-name", "dex-setup",
-    "--scopes", "all",
-    "--raw")
-
-// 5. Configure OIDC auth source via API
-forgejo.API.CreateAuthSource(AuthSource{
-    Type:         "oauth2",
-    Name:         "dex",
-    Provider:     "openidConnect",
-    ClientID:     dexOIDCClientID,
-    ClientSecret: dexOIDCClientSecret,
-    OpenIDURL:    "http://localhost:PORT/.well-known/openid-configuration",
-})
-
-// 6. Create dex-bot account
-forgejo.API.AdminCreateUser(User{
-    Username: "dex-bot",
-    Email:    "bot@localhost",
-    Password: generateSecurePassword(),
-})
-
-// 7. Generate bot token for API operations
-botToken := forgejo.API.CreateAccessToken("dex-bot", "automation", []string{"all"})
-
-// 8. Set bot profile
-forgejo.API.UpdateUserSettings("dex-bot", Settings{
-    FullName: "Dex",
-    Bio:      "Your AI development assistant",
-})
-
-// 9. Upload bot avatar
-forgejo.API.UploadAvatar("dex-bot", dexAvatarBase64)
+    // Download from Forgejo releases (or bundle in Dex release)
+    url := fmt.Sprintf(
+        "https://codeberg.org/forgejo/forgejo/releases/download/v%s/forgejo-%s-linux-amd64",
+        forgejoVersion, forgejoVersion,
+    )
+    return downloadFile(url, binaryPath)
+}
 ```
 
-### Step 4: User Account Linking
+Cached in `{data_dir}/forgejo/bin/forgejo`. Verified by SHA256 checksum embedded in Dex binary.
+
+### Option B: Bundled in Dex Release
+
+Include the Forgejo binary in Dex's release archive. Increases Dex download size by ~100MB but requires no internet for setup.
+
+### Option C: System Package
+
+Require Forgejo installed via system package manager. Less control but standard for Linux deployments.
+
+**Recommendation:** Option A for flexibility, with Option B as a build flag (`make release-bundled`).
+
+---
+
+## Data Layout
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│              Step 4: Your Git Account                       │
-│                                                             │
-│  Your Forgejo account has been created and linked to       │
-│  your Dex passkey.                                          │
-│                                                             │
-│    Username: alice                                          │
-│    Email: alice@localhost                                   │
-│    Auth: Passkey (via Dex SSO)                             │
-│                                                             │
-│  You can access Forgejo directly at:                       │
-│  http://localhost:3000                                      │
-│                                                             │
-│                      [ Continue ]                           │
-└─────────────────────────────────────────────────────────────┘
+/opt/dex/                          (or {data_dir})
+├── dex.db                         # Dex SQLite database
+├── repos/                         # Git repositories (working copies)
+│   └── workspace/
+│       └── my-project/
+├── worktrees/                     # Task worktrees
+│   └── my-project/
+│       └── abc123/
+├── mesh/                          # Mesh networking state
+└── forgejo/                       # Forgejo data directory
+    ├── bin/
+    │   └── forgejo                # Forgejo binary
+    ├── app.ini                    # Forgejo configuration
+    ├── forgejo.db                 # Forgejo SQLite database
+    ├── repositories/              # Bare git repositories (Forgejo-managed)
+    │   └── workspace/
+    │       └── my-project.git/
+    └── log/                       # Forgejo logs
 ```
 
-### Step 5: Workspace Creation
+**Important:** Forgejo maintains its own bare repositories in `repositories/`. Dex's `repos/` directory contains working copies cloned from Forgejo. This separation is intentional — Forgejo is the authoritative git server, Dex's repos are working checkouts.
+
+---
+
+## Git Workflow (How It All Connects)
+
+### Creating a Project
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│              Step 5: Create Workspace                       │
-│                                                             │
-│  A workspace organizes your projects. You can create       │
-│  multiple workspaces for different contexts.               │
-│                                                             │
-│  Workspace Name: [ my-workspace                         ]  │
-│                                                             │
-│  This will create:                                          │
-│  - Organization: my-workspace                              │
-│  - Team: maintainers (you + dex-bot)                       │
-│  - Default repository settings                             │
-│                                                             │
-│                [ Create Workspace ]                         │
-└─────────────────────────────────────────────────────────────┘
+User clicks "New Project"
+    → Dex API: POST /api/v1/projects
+        → Forgejo API: Create repo in workspace org
+        → Git: Clone repo to {data_dir}/repos/workspace/project/
+        → DB: Store project with git_provider=forgejo, git_owner=workspace, git_repo=project
+        → Git: Set remote origin to http://127.0.0.1:3000/workspace/project.git
 ```
 
-**Backend Operations:**
-
-```go
-// 1. Create organization
-forgejo.API.AdminCreateOrg(user, Org{
-    Username:   workspaceName,
-    FullName:   workspaceName,
-    Visibility: "private",
-})
-
-// 2. Add dex-bot to organization with write access
-forgejo.API.AddOrgMember(workspaceName, "dex-bot", "owner")
-
-// 3. Create maintainers team
-forgejo.API.CreateTeam(workspaceName, Team{
-    Name:       "maintainers",
-    Permission: "write",
-    Units:      []string{"repo.code", "repo.issues", "repo.pulls"},
-})
-
-// 4. Add user to maintainers team
-forgejo.API.AddTeamMember(teamID, username)
-```
-
-### Step 6: First Project
+### Running a Task
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│              Step 6: Add Your First Project                 │
-│                                                             │
-│  ( ) Import existing repository                            │
-│      Clone from URL or local path                          │
-│                                                             │
-│  (x) Create new project                                    │
-│      Start fresh with a new repository                     │
-│                                                             │
-│  ( ) Skip for now                                          │
-│      You can add projects later                            │
-│                                                             │
-│  Project Name: [ my-awesome-project                     ]  │
-│                                                             │
-│                 [ Create Project ]                          │
-└─────────────────────────────────────────────────────────────┘
+Task started
+    → Git Service: Create worktree from project repo
+    → Session: Claude Code runs in worktree
+    → On completion: git push to Forgejo (via bot token)
+    → Forgejo API: Create PR
+    → Quest sync: Update issue with status
 ```
 
-### Step 7: Complete
+### Cloning from a Mesh Peer (e.g., laptop)
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    You're All Set!                          │
-│                                                             │
-│  Dex is ready to help you build.                           │
-│                                                             │
-│  [x] Passkey configured                                    │
-│  [x] Git server running                                    │
-│  [x] Workspace created: my-workspace                       │
-│  [x] Project ready: my-awesome-project                     │
-│                                                             │
-│  Quick Links:                                               │
-│  - Dashboard: http://localhost:8080                        │
-│  - Git Server: http://localhost:3000                       │
-│  - Clone URL: http://localhost:3000/my-workspace/my-project│
-│                                                             │
-│               [ Open Dashboard ]                            │
-└─────────────────────────────────────────────────────────────┘
+$ git clone http://hq:3000/workspace/my-project.git
+# Mesh resolves "hq" to HQ's mesh IP
+# WireGuard encrypts the connection
+# Forgejo serves the repo over HTTP
 ```
 
 ---
 
-## Inviting Additional Users
+## Security Model
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                   Invite Collaborator                       │
-│                                                             │
-│  Email: [ bob@example.com                               ]  │
-│                                                             │
-│  Access Level:                                              │
-│  [ Contributor (can push to assigned branches)          v] │
-│                                                             │
-│  Workspaces:                                                │
-│  [x] my-workspace                                          │
-│  [ ] another-workspace                                     │
-│                                                             │
-│              [ Send Invitation ]                            │
-└─────────────────────────────────────────────────────────────┘
-```
-
-**Backend Operations:**
-
-```go
-// 1. Create user account in Forgejo
-forgejo.API.AdminCreateUser(User{
-    Username:           generateUsername(email),
-    Email:              email,
-    MustChangePassword: false, // Will use SSO
-})
-
-// 2. Create pending invitation in Dex
-dex.DB.CreateInvitation(Invitation{
-    Email:       email,
-    InvitedBy:   currentUser,
-    Workspaces:  selectedWorkspaces,
-    AccessLevel: accessLevel,
-    Token:       generateInviteToken(),
-    ExpiresAt:   time.Now().Add(7 * 24 * time.Hour),
-})
-
-// 3. Send invitation email (or display link)
-inviteURL := fmt.Sprintf("http://localhost:8080/invite/%s", token)
-```
-
-**Invite Acceptance:**
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│              You've Been Invited to Dex                     │
-│                                                             │
-│  Alice invited you to collaborate on:                      │
-│  - my-workspace                                             │
-│                                                             │
-│  To get started, create your passkey:                      │
-│                                                             │
-│              [ Accept & Create Passkey ]                    │
-└─────────────────────────────────────────────────────────────┘
-```
-
----
-
-## Configuration
-
-### Environment Variables
-
-```bash
-# Git Provider Selection
-DEX_GIT_PROVIDER=forgejo  # or "github" for backward compat
-
-# Forgejo Configuration (embedded mode)
-DEX_FORGEJO_ENABLED=true
-DEX_FORGEJO_PORT=3000
-DEX_FORGEJO_DATA_DIR=/var/lib/dex/forgejo
-
-# Forgejo Configuration (external mode)
-DEX_FORGEJO_EXTERNAL_URL=https://git.example.com
-DEX_FORGEJO_ADMIN_TOKEN=<token>
-
-# OIDC Provider
-DEX_OIDC_ISSUER=http://localhost:8080
-DEX_OIDC_SIGNING_KEY=<key>
-```
-
-### Forgejo app.ini Template
-
-```ini
-[server]
-ROOT_URL = http://localhost:3000
-HTTP_PORT = 3000
-DISABLE_SSH = true
-
-[database]
-DB_TYPE = sqlite3
-PATH = /data/forgejo.db
-
-[security]
-INSTALL_LOCK = true
-SECRET_KEY = <generated>
-
-[service]
-DISABLE_REGISTRATION = true
-REQUIRE_SIGNIN_VIEW = true
-ENABLE_NOTIFY_MAIL = false
-
-[oauth2]
-ENABLE = true
-
-[openid]
-ENABLE_OPENID_SIGNIN = true
-ENABLE_OPENID_SIGNUP = false
-
-[mailer]
-ENABLED = false
-
-[log]
-MODE = console
-LEVEL = info
-```
-
----
-
-## Deployment Options
-
-### Option A: Embedded Binary (Recommended)
-
-Bundle Forgejo as a subprocess managed by Dex. Single binary distribution with automatic lifecycle management.
-
-### Option B: Docker Sidecar
-
-Run Forgejo in a container alongside Dex:
-
-```yaml
-services:
-  dex:
-    image: dex:latest
-    ports:
-      - "8080:8080"
-    environment:
-      - FORGEJO_URL=http://forgejo:3000
-    depends_on:
-      - forgejo
-
-  forgejo:
-    image: codeberg.org/forgejo/forgejo:9
-    volumes:
-      - forgejo-data:/data
-```
-
-### Option C: External Instance
-
-Point to existing Forgejo/Gitea instance with admin token.
-
----
-
-## Security Considerations
-
-1. **Token Storage**: All tokens stored encrypted in database
-2. **OIDC Security**: Use secure signing keys, short token lifetimes
-3. **Network Isolation**: Forgejo can bind to localhost only
-4. **Bot Permissions**: Bot account has minimal required permissions
-5. **Audit Logging**: Log all administrative actions
-
----
-
-## Rollback Plan
-
-If issues arise:
-
-1. GitHub provider remains available as alternative
-2. Database migrations are reversible
-3. Configuration switch between providers
-4. Data export from Forgejo to GitHub possible via git + API
-
----
-
-## Success Metrics
-
-1. **Setup Time**: < 2 minutes for complete onboarding (vs ~10 min with GitHub)
-2. **Reliability**: No external API failures or rate limits
-3. **Privacy**: All data remains local
-4. **User Experience**: Single sign-on, no context switching
+| Layer | Protection |
+|-------|-----------|
+| **Network** | WireGuard encryption on all mesh traffic. Forgejo never exposed to public internet. |
+| **Authentication** | Passkey (WebAuthn) via Dex OIDC → Forgejo. No passwords. |
+| **Authorization** | Forgejo's org/team/repo permissions. Bot account has scoped tokens. |
+| **Data at rest** | SQLite databases on HQ's filesystem. Standard Linux file permissions. |
+| **Tokens** | Stored encrypted in Dex's database. Never transmitted outside the mesh. |
+| **Git transport** | HTTP over WireGuard. Equivalent security to SSH without key management. |
 
 ---
 
 ## Open Questions
 
-1. **Forgejo Actions**: Should we enable CI/CD or keep it simple?
-2. **Email**: Required for invitations, or use alternative notification?
-3. **Backup**: Include Forgejo data in Dex backup strategy?
-4. **Multi-user default**: Always set up for multi-user, or have single-user mode?
+1. **Forgejo version pinning** — Pin to a specific version or track latest stable?
+   - Recommendation: Pin to a specific minor version, auto-update patch versions.
+
+2. **Repo storage deduplication** — Dex's `repos/` and Forgejo's `repositories/` store the same data twice. Can we use Forgejo's repos directly as Dex's working copies?
+   - Recommendation: No. Forgejo uses bare repos; Dex needs working trees. The overhead is acceptable for the separation of concerns. Worktrees can reference Forgejo's bare repos directly via `git worktree add` from the bare repo.
+
+3. **CI/CD (Forgejo Actions)** — Enable or keep disabled?
+   - Recommendation: Disabled initially. Dex's session system IS the CI/CD. Forgejo Actions can be added later for standard workflows.
+
+4. **Backup strategy** — How to back up Forgejo data?
+   - Recommendation: `forgejo dump` command, integrated into Dex's backup system. Single command backs up both Dex and Forgejo databases + repositories.
+
+5. **Multi-HQ / Federation** — What if someone runs multiple HQ nodes?
+   - Out of scope for now. One HQ per Campus. Federation is a future proposal.
+
+---
+
+## Implementation Priority
+
+The phases are ordered by dependency and value:
+
+| Phase | Depends On | Value | Effort |
+|-------|-----------|-------|--------|
+| 1. Forgejo Lifecycle | Nothing | Foundation | Medium |
+| 2. Mesh Router | Phase 1 + mesh client | Mesh accessibility | Medium |
+| 3. Git Provider Abstraction | Nothing (parallel with 1) | Decoupling | Medium |
+| 4. Database Updates | Phase 3 | Data model | Low |
+| 5. Onboarding | Phases 1, 4 | UX | Medium |
+| 6. Quest Sync | Phases 3, 4 | Feature parity | Medium |
+| 7. Git Remote Wiring | Phases 1, 4 | Core workflow | Low |
+| 8. OIDC SSO | Phases 1, 5 | Multi-user | High |
+| 9. GitHub Removal | All above | Cleanup | Low |
+
+**Phases 1 and 3 can be built in parallel.** Phase 2 can start as soon as Phase 1 is working. Phases 5-7 can be done in any order once their dependencies are met.
+
+**Minimum viable: Phases 1, 3, 4, 5, 7** — This gives us a working Forgejo instance that Dex uses for all git operations, with the new onboarding flow. Mesh exposure (Phase 2) and SSO (Phase 8) can follow.
 
 ---
 
 ## References
 
 - [Forgejo Documentation](https://forgejo.org/docs/)
-- [Forgejo API](https://forgejo.org/docs/latest/user/api-usage/)
+- [Forgejo API Reference](https://forgejo.org/docs/latest/user/api-usage/)
 - [Gitea Go SDK](https://code.gitea.io/sdk/gitea)
-- [WebAuthn Spec](https://www.w3.org/TR/webauthn/)
-- [OpenID Connect](https://openid.net/connect/)
+- [Forgejo Binary Releases](https://codeberg.org/forgejo/forgejo/releases)
+- [tsnet Documentation](https://pkg.go.dev/tailscale.com/tsnet) (dexnet fork)
