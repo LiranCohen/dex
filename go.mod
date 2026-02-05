@@ -1,6 +1,6 @@
 module github.com/lirancohen/dex
 
-go 1.24.0
+go 1.24.7
 
 toolchain go1.24.7
 
