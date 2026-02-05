@@ -2,7 +2,6 @@ package worker
 
 import (
 	"context"
-	"encoding/base64"
 	"fmt"
 	"net"
 	"sync"
@@ -14,7 +13,7 @@ type RemoteWorker struct {
 	id       string
 	hostname string
 	meshIP   string
-	pubKey   [32]byte
+	pubKey   string // age X25519 public key (age1...)
 	conn     net.Conn
 	protocol *Conn
 
@@ -34,7 +33,8 @@ type RemoteWorker struct {
 }
 
 // NewRemoteWorker creates a new remote worker from a mesh connection.
-func NewRemoteWorker(id, hostname, meshIP string, pubKey [32]byte, conn net.Conn) *RemoteWorker {
+// pubKey should be an age X25519 public key string (age1...).
+func NewRemoteWorker(id, hostname, meshIP, pubKey string, conn net.Conn) *RemoteWorker {
 	return &RemoteWorker{
 		id:          id,
 		hostname:    hostname,
@@ -69,6 +69,7 @@ func (w *RemoteWorker) Start(ctx context.Context) error {
 // receiveLoop continuously reads messages from the remote worker.
 func (w *RemoteWorker) receiveLoop(ctx context.Context) {
 	defer close(w.done)
+	defer close(w.eventChan)
 
 	for {
 		select {
@@ -263,12 +264,12 @@ func (w *RemoteWorker) Events() <-chan *Message {
 	return w.eventChan
 }
 
-// PublicKey returns the worker's public key as base64 for encryption.
+// PublicKey returns the worker's public key (age format) for encryption.
 func (w *RemoteWorker) PublicKey() string {
-	return base64.StdEncoding.EncodeToString(w.pubKey[:])
+	return w.pubKey
 }
 
 // EncryptPayload encrypts an objective payload for this specific remote worker.
 func (w *RemoteWorker) EncryptPayload(dispatcher *Dispatcher, objective Objective, project Project, secrets WorkerSecrets, syncConfig SyncConfig) (*ObjectivePayload, error) {
-	return dispatcher.PreparePayload(objective, project, secrets, w.PublicKey(), syncConfig)
+	return dispatcher.PreparePayload(objective, project, secrets, w.pubKey, syncConfig)
 }

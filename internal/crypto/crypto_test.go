@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -167,17 +168,27 @@ func TestKeyPair_GenerateAndEncryptDecrypt(t *testing.T) {
 		t.Fatalf("GenerateKeyPair failed: %v", err)
 	}
 
+	// Verify public keys are in age format
+	if !strings.HasPrefix(hqKeyPair.PublicKey(), "age1") {
+		t.Errorf("Public key should start with 'age1', got %q", hqKeyPair.PublicKey())
+	}
+
+	// Verify private keys are in age format
+	if !strings.HasPrefix(hqKeyPair.PrivateKey(), "AGE-SECRET-KEY-1") {
+		t.Errorf("Private key should start with 'AGE-SECRET-KEY-1', got %q", hqKeyPair.PrivateKey())
+	}
+
 	// HQ encrypts for worker
 	message := []byte("Secret objective payload")
-	encrypted, err := hqKeyPair.EncryptForRecipient(message, workerKeyPair.PublicKey)
+	encrypted, err := hqKeyPair.EncryptForRecipient(message, workerKeyPair.PublicKey())
 	if err != nil {
 		t.Fatalf("EncryptForRecipient failed: %v", err)
 	}
 
-	// Worker decrypts from HQ
-	decrypted, err := workerKeyPair.DecryptFromSender(encrypted, hqKeyPair.PublicKey)
+	// Worker decrypts
+	decrypted, err := workerKeyPair.Decrypt(encrypted)
 	if err != nil {
-		t.Fatalf("DecryptFromSender failed: %v", err)
+		t.Fatalf("Decrypt failed: %v", err)
 	}
 
 	if !bytes.Equal(decrypted, message) {
@@ -195,17 +206,15 @@ func TestKeyPair_Base64Encoding(t *testing.T) {
 		t.Error("Base64 encoding should return non-empty strings")
 	}
 
-	// Reconstruct from base64
-	kp2, err := KeyPairFromBase64(pubB64, privB64)
+	// Should be valid base64
+	_, err := base64.StdEncoding.DecodeString(pubB64)
 	if err != nil {
-		t.Fatalf("KeyPairFromBase64 failed: %v", err)
+		t.Errorf("PublicKeyBase64 should return valid base64: %v", err)
 	}
 
-	if kp2.PublicKey != kp.PublicKey {
-		t.Error("Public key mismatch after base64 roundtrip")
-	}
-	if kp2.PrivateKey != kp.PrivateKey {
-		t.Error("Private key mismatch after base64 roundtrip")
+	_, err = base64.StdEncoding.DecodeString(privB64)
+	if err != nil {
+		t.Errorf("PrivateKeyBase64 should return valid base64: %v", err)
 	}
 }
 
@@ -213,81 +222,89 @@ func TestKeyPair_FromPrivate(t *testing.T) {
 	original, _ := GenerateKeyPair()
 
 	// Reconstruct from just private key
-	reconstructed := KeyPairFromPrivate(original.PrivateKey)
+	reconstructed, err := KeyPairFromPrivate(original.PrivateKey())
+	if err != nil {
+		t.Fatalf("KeyPairFromPrivate failed: %v", err)
+	}
 
-	if reconstructed.PublicKey != original.PublicKey {
+	if reconstructed.PublicKey() != original.PublicKey() {
 		t.Error("Public key should be derivable from private key")
+	}
+
+	// Invalid private key
+	_, err = KeyPairFromPrivate("not-a-valid-key")
+	if err == nil {
+		t.Error("Should fail on invalid private key")
 	}
 }
 
-func TestPublicKeyFromBase64(t *testing.T) {
+func TestRecipientFromPublicKey(t *testing.T) {
 	kp, _ := GenerateKeyPair()
-	pubB64 := kp.PublicKeyBase64()
 
-	pubKey, err := PublicKeyFromBase64(pubB64)
+	recipient, err := RecipientFromPublicKey(kp.PublicKey())
 	if err != nil {
-		t.Fatalf("PublicKeyFromBase64 failed: %v", err)
+		t.Fatalf("RecipientFromPublicKey failed: %v", err)
 	}
 
-	if pubKey != kp.PublicKey {
-		t.Error("Public key mismatch")
+	if recipient.String() != kp.PublicKey() {
+		t.Error("Recipient public key should match")
 	}
 
 	// Invalid inputs
-	_, err = PublicKeyFromBase64("not-valid-base64!")
+	_, err = RecipientFromPublicKey("not-a-valid-key")
 	if err == nil {
-		t.Error("Should fail on invalid base64")
-	}
-
-	_, err = PublicKeyFromBase64(base64.StdEncoding.EncodeToString([]byte("short")))
-	if err == nil {
-		t.Error("Should fail on wrong length")
+		t.Error("Should fail on invalid public key")
 	}
 }
 
-func TestSealAnonymous_OpenAnonymous(t *testing.T) {
+func TestEncryptForRecipientStatic(t *testing.T) {
 	recipient, _ := GenerateKeyPair()
+	message := []byte("Test message for static encryption")
 
-	message := []byte("Anonymous message that anyone can send")
-
-	// Seal anonymously (no sender keypair needed)
-	sealed, err := SealAnonymous(message, recipient.PublicKey)
+	// Encrypt without needing a sender keypair
+	encrypted, err := EncryptForRecipientStatic(message, recipient.PublicKey())
 	if err != nil {
-		t.Fatalf("SealAnonymous failed: %v", err)
+		t.Fatalf("EncryptForRecipientStatic failed: %v", err)
 	}
 
-	// Recipient opens
-	opened, err := recipient.OpenAnonymous(sealed)
+	// Recipient should be able to decrypt
+	decrypted, err := recipient.Decrypt(encrypted)
 	if err != nil {
-		t.Fatalf("OpenAnonymous failed: %v", err)
+		t.Fatalf("Decrypt failed: %v", err)
 	}
 
-	if !bytes.Equal(opened, message) {
-		t.Errorf("Message mismatch: got %q, want %q", opened, message)
+	if !bytes.Equal(decrypted, message) {
+		t.Errorf("Message mismatch: got %q, want %q", decrypted, message)
+	}
+
+	// Invalid recipient
+	_, err = EncryptForRecipientStatic(message, "invalid-key")
+	if err == nil {
+		t.Error("Should fail with invalid recipient key")
 	}
 }
 
-func TestOpenAnonymous_InvalidData(t *testing.T) {
+func TestKeyPair_DecryptInvalidData(t *testing.T) {
 	kp, _ := GenerateKeyPair()
 
 	// Not base64
-	_, err := kp.OpenAnonymous("not-valid!")
+	_, err := kp.Decrypt("not-valid-base64!")
 	if err == nil {
 		t.Error("Should fail on invalid base64")
 	}
 
-	// Too short
-	_, err = kp.OpenAnonymous(base64.StdEncoding.EncodeToString([]byte("short")))
-	if err != ErrInvalidCiphertext {
-		t.Errorf("Should return ErrInvalidCiphertext, got %v", err)
+	// Valid base64 but invalid age ciphertext
+	_, err = kp.Decrypt(base64.StdEncoding.EncodeToString([]byte("not-age-ciphertext")))
+	if err == nil {
+		t.Error("Should fail on invalid ciphertext")
 	}
 
-	// Wrong recipient
+	// Encrypted for different recipient
 	other, _ := GenerateKeyPair()
-	sealed, _ := SealAnonymous([]byte("test"), kp.PublicKey)
-	_, err = other.OpenAnonymous(sealed)
+	encrypted, _ := EncryptForRecipientStatic([]byte("test"), other.PublicKey())
+	_, err = kp.Decrypt(encrypted)
 	if err != ErrDecryptionFailed {
-		t.Errorf("Should return ErrDecryptionFailed, got %v", err)
+		t.Errorf("Should return ErrDecryptionFailed for wrong recipient, got %v", err)
 	}
 }
 
@@ -316,6 +333,11 @@ func TestWorkerIdentity_CreateAndSaveLoad(t *testing.T) {
 		t.Errorf("ID mismatch: got %q, want %q", identity.ID, "test-worker-1")
 	}
 
+	// Verify public key is in age format
+	if !strings.HasPrefix(identity.PublicKey(), "age1") {
+		t.Errorf("Public key should start with 'age1', got %q", identity.PublicKey())
+	}
+
 	// Save
 	if err := identity.Save(identityPath); err != nil {
 		t.Fatalf("Save failed: %v", err)
@@ -339,11 +361,8 @@ func TestWorkerIdentity_CreateAndSaveLoad(t *testing.T) {
 	if loaded.ID != identity.ID {
 		t.Error("ID mismatch after load")
 	}
-	if loaded.PublicKey != identity.PublicKey {
+	if loaded.PublicKey() != identity.PublicKey() {
 		t.Error("PublicKey mismatch after load")
-	}
-	if loaded.PrivateKey != identity.PrivateKey {
-		t.Error("PrivateKey mismatch after load")
 	}
 }
 
@@ -355,17 +374,11 @@ func TestWorkerIdentity_PublicIdentity(t *testing.T) {
 	if pubOnly.ID != identity.ID {
 		t.Error("ID should be copied")
 	}
-	if pubOnly.PublicKey != identity.PublicKey {
-		t.Error("PublicKey should be copied")
+	if pubOnly.PublicKeyStr != identity.PublicKeyStr {
+		t.Error("PublicKeyStr should be copied")
 	}
-	if pubOnly.PrivateKeyB64 != "" {
-		t.Error("PrivateKeyB64 should be empty in public identity")
-	}
-
-	// Private key should be zeroed
-	var zero [32]byte
-	if pubOnly.PrivateKey != zero {
-		t.Error("PrivateKey should be zero in public identity")
+	if pubOnly.PrivateKeyStr != "" {
+		t.Error("PrivateKeyStr should be empty in public identity")
 	}
 }
 
@@ -373,28 +386,50 @@ func TestWorkerIdentity_ToKeyPair(t *testing.T) {
 	identity, _ := NewWorkerIdentity("worker")
 	kp := identity.ToKeyPair()
 
-	if kp.PublicKey != identity.PublicKey {
-		t.Error("PublicKey mismatch")
+	if kp == nil {
+		t.Fatal("ToKeyPair should return non-nil")
 	}
-	if kp.PrivateKey != identity.PrivateKey {
-		t.Error("PrivateKey mismatch")
+
+	if kp.PublicKey() != identity.PublicKey() {
+		t.Error("PublicKey mismatch")
 	}
 
 	// Should work for encryption
 	message := []byte("test")
 	hq, _ := GenerateKeyPair()
 
-	encrypted, err := hq.EncryptForRecipient(message, kp.PublicKey)
+	encrypted, err := hq.EncryptForRecipient(message, kp.PublicKey())
 	if err != nil {
 		t.Fatalf("Encrypt failed: %v", err)
 	}
 
-	decrypted, err := kp.DecryptFromSender(encrypted, hq.PublicKey)
+	decrypted, err := kp.Decrypt(encrypted)
 	if err != nil {
 		t.Fatalf("Decrypt failed: %v", err)
 	}
 	if !bytes.Equal(decrypted, message) {
 		t.Error("Roundtrip failed")
+	}
+}
+
+func TestWorkerIdentity_Decrypt(t *testing.T) {
+	identity, _ := NewWorkerIdentity("worker")
+	hq, _ := GenerateKeyPair()
+
+	message := []byte("secret message for worker")
+	encrypted, err := hq.EncryptForRecipient(message, identity.PublicKey())
+	if err != nil {
+		t.Fatalf("Encrypt failed: %v", err)
+	}
+
+	// Worker decrypts directly using identity
+	decrypted, err := identity.Decrypt(encrypted)
+	if err != nil {
+		t.Fatalf("Decrypt failed: %v", err)
+	}
+
+	if !bytes.Equal(decrypted, message) {
+		t.Error("Decrypted mismatch")
 	}
 }
 
@@ -435,7 +470,7 @@ func TestEnsureWorkerIdentity_LoadsExisting(t *testing.T) {
 	if loaded.ID != "original" {
 		t.Errorf("Should load existing identity, got ID %q", loaded.ID)
 	}
-	if loaded.PublicKey != first.PublicKey {
+	if loaded.PublicKey() != first.PublicKey() {
 		t.Error("Should load existing keys")
 	}
 }

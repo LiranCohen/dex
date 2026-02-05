@@ -1,56 +1,39 @@
 package crypto
 
 import (
-	"crypto/rand"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 
-	"golang.org/x/crypto/curve25519"
+	"filippo.io/age"
 )
-
-func init() {
-	// Set the scalarBaseMult function to use curve25519
-	scalarBaseMult = func(dst, scalar *[32]byte) {
-		curve25519.ScalarBaseMult(dst, scalar)
-	}
-}
 
 // WorkerIdentity represents a worker's cryptographic identity.
 // The private key is stored locally on the worker, and the public key
 // is registered with HQ during enrollment.
 type WorkerIdentity struct {
-	ID         string   `json:"id"`
-	PublicKey  [32]byte `json:"-"`
-	PrivateKey [32]byte `json:"-"`
+	ID       string `json:"id"`
+	identity *age.X25519Identity
 
-	// Base64-encoded versions for JSON serialization
-	PublicKeyB64  string `json:"public_key"`
-	PrivateKeyB64 string `json:"private_key,omitempty"` // Only in local storage
+	// String representations for JSON serialization
+	PublicKeyStr  string `json:"public_key"`
+	PrivateKeyStr string `json:"private_key,omitempty"` // Only in local storage
 }
 
 // NewWorkerIdentity generates a new worker identity with a random keypair.
 func NewWorkerIdentity(id string) (*WorkerIdentity, error) {
-	// Generate random private key
-	var privateKey [32]byte
-	if _, err := io.ReadFull(rand.Reader, privateKey[:]); err != nil {
-		return nil, fmt.Errorf("failed to generate private key: %w", err)
+	identity, err := age.GenerateX25519Identity()
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate identity: %w", err)
 	}
-
-	// Derive public key from private key using Curve25519
-	var publicKey [32]byte
-	curve25519.ScalarBaseMult(&publicKey, &privateKey)
 
 	return &WorkerIdentity{
 		ID:            id,
-		PublicKey:     publicKey,
-		PrivateKey:    privateKey,
-		PublicKeyB64:  base64.StdEncoding.EncodeToString(publicKey[:]),
-		PrivateKeyB64: base64.StdEncoding.EncodeToString(privateKey[:]),
+		identity:      identity,
+		PublicKeyStr:  identity.Recipient().String(),
+		PrivateKeyStr: identity.String(),
 	}, nil
 }
 
@@ -61,27 +44,23 @@ func LoadWorkerIdentity(path string) (*WorkerIdentity, error) {
 		return nil, fmt.Errorf("failed to read identity file: %w", err)
 	}
 
-	var identity WorkerIdentity
-	if err := json.Unmarshal(data, &identity); err != nil {
+	var wi WorkerIdentity
+	if err := json.Unmarshal(data, &wi); err != nil {
 		return nil, fmt.Errorf("failed to parse identity file: %w", err)
 	}
 
-	// Decode base64 keys
-	pub, err := base64.StdEncoding.DecodeString(identity.PublicKeyB64)
-	if err != nil || len(pub) != 32 {
-		return nil, errors.New("invalid public key in identity file")
-	}
-	copy(identity.PublicKey[:], pub)
-
-	if identity.PrivateKeyB64 != "" {
-		priv, err := base64.StdEncoding.DecodeString(identity.PrivateKeyB64)
-		if err != nil || len(priv) != 32 {
-			return nil, errors.New("invalid private key in identity file")
+	// Parse the private key to reconstruct the identity
+	if wi.PrivateKeyStr != "" {
+		identity, err := age.ParseX25519Identity(wi.PrivateKeyStr)
+		if err != nil {
+			return nil, fmt.Errorf("invalid private key in identity file: %w", err)
 		}
-		copy(identity.PrivateKey[:], priv)
+		wi.identity = identity
+		// Ensure public key matches
+		wi.PublicKeyStr = identity.Recipient().String()
 	}
 
-	return &identity, nil
+	return &wi, nil
 }
 
 // Save writes the worker identity to a file.
@@ -92,10 +71,6 @@ func (wi *WorkerIdentity) Save(path string) error {
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return fmt.Errorf("failed to create identity directory: %w", err)
 	}
-
-	// Update base64 fields
-	wi.PublicKeyB64 = base64.StdEncoding.EncodeToString(wi.PublicKey[:])
-	wi.PrivateKeyB64 = base64.StdEncoding.EncodeToString(wi.PrivateKey[:])
 
 	data, err := json.MarshalIndent(wi, "", "  ")
 	if err != nil {
@@ -109,22 +84,38 @@ func (wi *WorkerIdentity) Save(path string) error {
 	return nil
 }
 
+// PublicKey returns the public key string (age format).
+func (wi *WorkerIdentity) PublicKey() string {
+	return wi.PublicKeyStr
+}
+
 // PublicIdentity returns a copy of the identity with only public information.
 // This is safe to send to HQ during enrollment.
 func (wi *WorkerIdentity) PublicIdentity() *WorkerIdentity {
 	return &WorkerIdentity{
 		ID:           wi.ID,
-		PublicKey:    wi.PublicKey,
-		PublicKeyB64: wi.PublicKeyB64,
+		PublicKeyStr: wi.PublicKeyStr,
 	}
 }
 
 // ToKeyPair converts the WorkerIdentity to a KeyPair for encryption operations.
 func (wi *WorkerIdentity) ToKeyPair() *KeyPair {
-	return &KeyPair{
-		PublicKey:  wi.PublicKey,
-		PrivateKey: wi.PrivateKey,
+	if wi.identity == nil {
+		return nil
 	}
+	return &KeyPair{
+		identity:  wi.identity,
+		recipient: wi.identity.Recipient(),
+	}
+}
+
+// Decrypt decrypts a message encrypted for this worker.
+func (wi *WorkerIdentity) Decrypt(encoded string) ([]byte, error) {
+	kp := wi.ToKeyPair()
+	if kp == nil {
+		return nil, errors.New("worker identity has no private key")
+	}
+	return kp.Decrypt(encoded)
 }
 
 // EnsureWorkerIdentity loads or creates a worker identity.

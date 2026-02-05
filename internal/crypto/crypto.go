@@ -1,11 +1,11 @@
 // Package crypto provides encryption utilities for Dex secrets management.
-// It implements three layers of protection:
+// It implements two layers of protection:
 //   - Layer 1: Application-level encryption for secrets at rest (AES-GCM)
-//   - Layer 2: NaCl box encryption for worker payload dispatch
-//   - Layer 3: Support for encrypted worker databases
+//   - Layer 2: Age X25519 encryption for worker payload dispatch
 package crypto
 
 import (
+	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
@@ -16,7 +16,7 @@ import (
 	"io"
 	"os"
 
-	"golang.org/x/crypto/nacl/box"
+	"filippo.io/age"
 	"golang.org/x/crypto/pbkdf2"
 )
 
@@ -30,9 +30,6 @@ const (
 
 	// NonceSize is the size of AES-GCM nonces in bytes.
 	NonceSize = 12
-
-	// NaClNonceSize is the size of NaCl box nonces in bytes.
-	NaClNonceSize = 24
 
 	// SaltSize is the size of PBKDF2 salt in bytes.
 	SaltSize = 16
@@ -173,170 +170,137 @@ func (mk *MasterKey) Decrypt(encoded string) ([]byte, error) {
 	return plaintext, nil
 }
 
-// KeyPair represents a NaCl box key pair for asymmetric encryption.
+// KeyPair represents an age X25519 identity for asymmetric encryption.
+// This is used for encrypting secrets from HQ to workers.
 type KeyPair struct {
-	PublicKey  [32]byte
-	PrivateKey [32]byte
+	identity  *age.X25519Identity
+	recipient *age.X25519Recipient
 }
 
-// GenerateKeyPair generates a new NaCl box key pair.
+// GenerateKeyPair generates a new age X25519 identity.
 func GenerateKeyPair() (*KeyPair, error) {
-	pub, priv, err := box.GenerateKey(rand.Reader)
+	identity, err := age.GenerateX25519Identity()
 	if err != nil {
-		return nil, fmt.Errorf("failed to generate keypair: %w", err)
+		return nil, fmt.Errorf("failed to generate identity: %w", err)
 	}
 	return &KeyPair{
-		PublicKey:  *pub,
-		PrivateKey: *priv,
+		identity:  identity,
+		recipient: identity.Recipient(),
 	}, nil
 }
 
-// KeyPairFromPrivate reconstructs a KeyPair from a private key.
-func KeyPairFromPrivate(privateKey [32]byte) *KeyPair {
-	var publicKey [32]byte
-	// Derive public key using Curve25519 scalar base multiplication
-	// Import is at top of file via golang.org/x/crypto/curve25519
-	scalarBaseMult(&publicKey, &privateKey)
-	return &KeyPair{
-		PublicKey:  publicKey,
-		PrivateKey: privateKey,
+// KeyPairFromPrivate reconstructs a KeyPair from a private key string.
+// The private key should be in age format (AGE-SECRET-KEY-1...).
+func KeyPairFromPrivate(privateKeyStr string) (*KeyPair, error) {
+	identity, err := age.ParseX25519Identity(privateKeyStr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid private key: %w", err)
 	}
+	return &KeyPair{
+		identity:  identity,
+		recipient: identity.Recipient(),
+	}, nil
 }
 
-// scalarBaseMult computes publicKey = privateKey * basePoint using Curve25519.
-// This is implemented in the keypair.go file using golang.org/x/crypto/curve25519.
-var scalarBaseMult = func(dst, scalar *[32]byte) {
-	// This will be set by init() in keypair.go
-	// Using curve25519.ScalarBaseMult
+// PublicKey returns the public key as a string (age format).
+func (kp *KeyPair) PublicKey() string {
+	return kp.recipient.String()
+}
+
+// PrivateKey returns the private key as a string (age format).
+func (kp *KeyPair) PrivateKey() string {
+	return kp.identity.String()
 }
 
 // PublicKeyBase64 returns the public key as a base64 string.
+// This is for compatibility with existing code that expects base64.
 func (kp *KeyPair) PublicKeyBase64() string {
-	return base64.StdEncoding.EncodeToString(kp.PublicKey[:])
+	return base64.StdEncoding.EncodeToString([]byte(kp.recipient.String()))
 }
 
 // PrivateKeyBase64 returns the private key as a base64 string.
+// This is for compatibility with existing code that expects base64.
 func (kp *KeyPair) PrivateKeyBase64() string {
-	return base64.StdEncoding.EncodeToString(kp.PrivateKey[:])
+	return base64.StdEncoding.EncodeToString([]byte(kp.identity.String()))
 }
 
-// KeyPairFromBase64 creates a KeyPair from base64-encoded keys.
-func KeyPairFromBase64(publicKey, privateKey string) (*KeyPair, error) {
-	kp := &KeyPair{}
-
-	if publicKey != "" {
-		pub, err := base64.StdEncoding.DecodeString(publicKey)
-		if err != nil || len(pub) != 32 {
-			return nil, errors.New("invalid public key")
-		}
-		copy(kp.PublicKey[:], pub)
+// RecipientFromPublicKey parses a public key string into an age recipient.
+func RecipientFromPublicKey(publicKey string) (*age.X25519Recipient, error) {
+	recipient, err := age.ParseX25519Recipient(publicKey)
+	if err != nil {
+		return nil, fmt.Errorf("invalid public key: %w", err)
 	}
-
-	if privateKey != "" {
-		priv, err := base64.StdEncoding.DecodeString(privateKey)
-		if err != nil || len(priv) != 32 {
-			return nil, errors.New("invalid private key")
-		}
-		copy(kp.PrivateKey[:], priv)
-	}
-
-	return kp, nil
+	return recipient, nil
 }
 
-// PublicKeyFromBase64 decodes a base64-encoded public key.
-func PublicKeyFromBase64(encoded string) ([32]byte, error) {
-	var key [32]byte
-	data, err := base64.StdEncoding.DecodeString(encoded)
-	if err != nil || len(data) != 32 {
-		return key, errors.New("invalid public key")
-	}
-	copy(key[:], data)
-	return key, nil
-}
-
-// EncryptForRecipient encrypts a message for a specific recipient using NaCl box.
-// Returns base64-encoded ciphertext with nonce prepended.
-func (kp *KeyPair) EncryptForRecipient(message []byte, recipientPublicKey [32]byte) (string, error) {
-	var nonce [NaClNonceSize]byte
-	if _, err := io.ReadFull(rand.Reader, nonce[:]); err != nil {
-		return "", fmt.Errorf("failed to generate nonce: %w", err)
+// EncryptForRecipient encrypts a message for a specific recipient using age.
+// Returns base64-encoded ciphertext.
+func (kp *KeyPair) EncryptForRecipient(message []byte, recipientPublicKey string) (string, error) {
+	recipient, err := age.ParseX25519Recipient(recipientPublicKey)
+	if err != nil {
+		return "", fmt.Errorf("invalid recipient public key: %w", err)
 	}
 
-	ciphertext := box.Seal(nonce[:], message, &nonce, &recipientPublicKey, &kp.PrivateKey)
-	return base64.StdEncoding.EncodeToString(ciphertext), nil
+	var buf bytes.Buffer
+	w, err := age.Encrypt(&buf, recipient)
+	if err != nil {
+		return "", fmt.Errorf("failed to create encrypter: %w", err)
+	}
+
+	if _, err := w.Write(message); err != nil {
+		return "", fmt.Errorf("failed to write message: %w", err)
+	}
+
+	if err := w.Close(); err != nil {
+		return "", fmt.Errorf("failed to close encrypter: %w", err)
+	}
+
+	return base64.StdEncoding.EncodeToString(buf.Bytes()), nil
 }
 
-// DecryptFromSender decrypts a message from a specific sender using NaCl box.
-func (kp *KeyPair) DecryptFromSender(encoded string, senderPublicKey [32]byte) ([]byte, error) {
+// Decrypt decrypts a message that was encrypted for this identity.
+func (kp *KeyPair) Decrypt(encoded string) ([]byte, error) {
 	ciphertext, err := base64.StdEncoding.DecodeString(encoded)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode ciphertext: %w", err)
 	}
 
-	if len(ciphertext) < NaClNonceSize {
-		return nil, ErrInvalidCiphertext
+	r, err := age.Decrypt(bytes.NewReader(ciphertext), kp.identity)
+	if err != nil {
+		return nil, ErrDecryptionFailed
 	}
 
-	var nonce [NaClNonceSize]byte
-	copy(nonce[:], ciphertext[:NaClNonceSize])
-
-	plaintext, ok := box.Open(nil, ciphertext[NaClNonceSize:], &nonce, &senderPublicKey, &kp.PrivateKey)
-	if !ok {
-		return nil, ErrDecryptionFailed
+	plaintext, err := io.ReadAll(r)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read decrypted message: %w", err)
 	}
 
 	return plaintext, nil
 }
 
-// SealAnonymous encrypts a message for a recipient without revealing the sender.
-// This is useful for one-way encryption where the sender doesn't need to be verified.
-func SealAnonymous(message []byte, recipientPublicKey [32]byte) (string, error) {
-	// Generate ephemeral keypair
-	ephemeralPub, ephemeralPriv, err := box.GenerateKey(rand.Reader)
+// EncryptForRecipientStatic encrypts without requiring a KeyPair (static function).
+// This is useful when you only have the recipient's public key.
+func EncryptForRecipientStatic(message []byte, recipientPublicKey string) (string, error) {
+	recipient, err := age.ParseX25519Recipient(recipientPublicKey)
 	if err != nil {
-		return "", fmt.Errorf("failed to generate ephemeral key: %w", err)
+		return "", fmt.Errorf("invalid recipient public key: %w", err)
 	}
 
-	var nonce [NaClNonceSize]byte
-	if _, err := io.ReadFull(rand.Reader, nonce[:]); err != nil {
-		return "", fmt.Errorf("failed to generate nonce: %w", err)
-	}
-
-	// Prepend ephemeral public key to ciphertext so recipient can decrypt
-	ciphertext := box.Seal(nil, message, &nonce, &recipientPublicKey, ephemeralPriv)
-
-	// Format: ephemeralPubKey (32) + nonce (24) + ciphertext
-	result := make([]byte, 32+NaClNonceSize+len(ciphertext))
-	copy(result[:32], ephemeralPub[:])
-	copy(result[32:32+NaClNonceSize], nonce[:])
-	copy(result[32+NaClNonceSize:], ciphertext)
-
-	return base64.StdEncoding.EncodeToString(result), nil
-}
-
-// OpenAnonymous decrypts a message that was sealed anonymously.
-func (kp *KeyPair) OpenAnonymous(encoded string) ([]byte, error) {
-	data, err := base64.StdEncoding.DecodeString(encoded)
+	var buf bytes.Buffer
+	w, err := age.Encrypt(&buf, recipient)
 	if err != nil {
-		return nil, fmt.Errorf("failed to decode ciphertext: %w", err)
+		return "", fmt.Errorf("failed to create encrypter: %w", err)
 	}
 
-	if len(data) < 32+NaClNonceSize {
-		return nil, ErrInvalidCiphertext
+	if _, err := w.Write(message); err != nil {
+		return "", fmt.Errorf("failed to write message: %w", err)
 	}
 
-	var ephemeralPub [32]byte
-	var nonce [NaClNonceSize]byte
-	copy(ephemeralPub[:], data[:32])
-	copy(nonce[:], data[32:32+NaClNonceSize])
-	ciphertext := data[32+NaClNonceSize:]
-
-	plaintext, ok := box.Open(nil, ciphertext, &nonce, &ephemeralPub, &kp.PrivateKey)
-	if !ok {
-		return nil, ErrDecryptionFailed
+	if err := w.Close(); err != nil {
+		return "", fmt.Errorf("failed to close encrypter: %w", err)
 	}
 
-	return plaintext, nil
+	return base64.StdEncoding.EncodeToString(buf.Bytes()), nil
 }
 
 // GenerateMasterKey generates a new random master key suitable for DEX_MASTER_KEY.

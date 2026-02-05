@@ -6,6 +6,8 @@ toolchain go1.24.7
 
 require golang.org/x/crypto v0.47.0
 
+require filippo.io/age v1.2.1
+
 require (
 	github.com/WebP2P/dexnet v0.0.0-00010101000000-000000000000
 	github.com/bmatcuk/doublestar/v4 v4.10.0
