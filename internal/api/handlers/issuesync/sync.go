@@ -15,8 +15,9 @@ import (
 	"github.com/lirancohen/dex/internal/realtime"
 )
 
-// SyncService handles GitHub synchronization operations.
-// It wraps the github.SyncService with additional context about server state.
+// SyncService handles issue synchronization for both GitHub and Forgejo.
+// It wraps the github.SyncService and Forgejo gitprovider, routing to the
+// appropriate backend based on each project's configured git provider.
 type SyncService struct {
 	deps *core.Deps
 }
