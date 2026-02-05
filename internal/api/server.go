@@ -16,6 +16,7 @@ import (
 	githubhandlers "github.com/lirancohen/dex/internal/api/handlers/github"
 	githubsync "github.com/lirancohen/dex/internal/api/handlers/github"
 	"github.com/lirancohen/dex/internal/api/handlers/memory"
+	meshhandlers "github.com/lirancohen/dex/internal/api/handlers/mesh"
 	planninghandlers "github.com/lirancohen/dex/internal/api/handlers/planning"
 	"github.com/lirancohen/dex/internal/api/handlers/projects"
 	"github.com/lirancohen/dex/internal/api/handlers/quests"
@@ -25,13 +26,14 @@ import (
 	"github.com/lirancohen/dex/internal/api/middleware"
 	"github.com/lirancohen/dex/internal/api/setup"
 	"github.com/lirancohen/dex/internal/auth"
-	"github.com/lirancohen/dex/internal/realtime"
 	"github.com/lirancohen/dex/internal/db"
 	"github.com/lirancohen/dex/internal/git"
 	"github.com/lirancohen/dex/internal/github"
+	"github.com/lirancohen/dex/internal/mesh"
 	"github.com/lirancohen/dex/internal/orchestrator"
 	"github.com/lirancohen/dex/internal/planning"
 	"github.com/lirancohen/dex/internal/quest"
+	"github.com/lirancohen/dex/internal/realtime"
 	"github.com/lirancohen/dex/internal/session"
 	"github.com/lirancohen/dex/internal/task"
 	"github.com/lirancohen/dex/internal/toolbelt"
@@ -54,8 +56,9 @@ type Server struct {
 	githubSyncService *github.SyncService     // Underlying GitHub sync service
 	handlersSyncSvc   *githubsync.SyncService // Handler-level sync service wrapper
 	setupHandler      *setup.Handler
-	realtime          *realtime.Node         // Centrifuge-based realtime messaging
+	realtime          *realtime.Node // Centrifuge-based realtime messaging
 	broadcaster       *realtime.Broadcaster
+	meshClient        *mesh.Client // Campus mesh network client
 	deps              *core.Deps
 	addr              string
 	certFile          string
@@ -78,6 +81,7 @@ type Config struct {
 	StaticDir   string             // Path to frontend static files (e.g., "./frontend/dist")
 	Toolbelt    *toolbelt.Toolbelt // Toolbelt for external service integrations (optional)
 	BaseDir     string             // Base Dex directory (default: /opt/dex). Derived: {BaseDir}/repos/, {BaseDir}/worktrees/
+	Mesh        *mesh.Config       // Mesh networking configuration (optional)
 }
 
 // NewServer creates a new API server
@@ -114,6 +118,12 @@ func NewServer(database *db.DB, cfg Config) *Server {
 	// Create broadcaster for publishing events
 	broadcaster := realtime.NewBroadcaster(rtNode)
 
+	// Initialize mesh client if configured
+	var meshClient *mesh.Client
+	if cfg.Mesh != nil && cfg.Mesh.Enabled {
+		meshClient = mesh.NewClient(*cfg.Mesh)
+	}
+
 	s := &Server{
 		echo:        e,
 		db:          database,
@@ -121,6 +131,7 @@ func NewServer(database *db.DB, cfg Config) *Server {
 		taskService: task.NewService(database),
 		realtime:    rtNode,
 		broadcaster: broadcaster,
+		meshClient:  meshClient,
 		addr:        cfg.Addr,
 		certFile:    cfg.CertFile,
 		keyFile:     cfg.KeyFile,
@@ -223,6 +234,7 @@ func NewServer(database *db.DB, cfg Config) *Server {
 		QuestHandler:   s.questHandler,
 		Realtime:       rtNode,
 		Broadcaster:    broadcaster,
+		MeshClient:     meshClient,
 		TokenConfig:    cfg.TokenConfig,
 		BaseDir:        cfg.BaseDir,
 		Challenges:     s.challenges,
@@ -328,6 +340,7 @@ func (s *Server) registerRoutes() {
 	objectivesHandler := quests.NewObjectivesHandler(s.deps)
 	templatesHandler := quests.NewTemplatesHandler(s.deps)
 	githubHandler := githubhandlers.New(s.deps)
+	meshHandler := meshhandlers.New(s.deps)
 
 	// Wire up callbacks for GitHub sync
 	githubHandler.InitGitHubApp = s.initGitHubApp
@@ -385,6 +398,7 @@ func (s *Server) registerRoutes() {
 	questsHandler.RegisterRoutes(protected)
 	objectivesHandler.RegisterRoutes(protected)
 	templatesHandler.RegisterRoutes(protected)
+	meshHandler.RegisterRoutes(protected)
 
 	// Centrifuge WebSocket endpoint for real-time updates
 	// Auth is handled via Centrifuge protocol in Node.OnConnecting, not HTTP middleware
@@ -439,6 +453,15 @@ func (s *Server) setupStaticServing() {
 
 // Start begins serving HTTP/HTTPS requests
 func (s *Server) Start() error {
+	// Start mesh client if configured
+	if s.meshClient != nil {
+		ctx := context.Background()
+		if err := s.meshClient.Start(ctx); err != nil {
+			return fmt.Errorf("mesh client start failed: %w", err)
+		}
+		fmt.Println("Mesh networking started")
+	}
+
 	if s.certFile != "" && s.keyFile != "" {
 		// HTTPS mode (for Tailscale)
 		fmt.Printf("Starting HTTPS server on %s\n", s.addr)
@@ -452,7 +475,14 @@ func (s *Server) Start() error {
 
 // Shutdown gracefully stops the server
 func (s *Server) Shutdown(ctx context.Context) error {
-	// Shutdown the realtime node first
+	// Stop mesh client
+	if s.meshClient != nil {
+		if err := s.meshClient.Stop(); err != nil {
+			fmt.Printf("Warning: failed to stop mesh client: %v\n", err)
+		}
+	}
+
+	// Shutdown the realtime node
 	if s.realtime != nil {
 		if err := s.realtime.Shutdown(ctx); err != nil {
 			fmt.Printf("Warning: failed to shutdown realtime node: %v\n", err)
