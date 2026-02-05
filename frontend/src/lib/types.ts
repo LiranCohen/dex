@@ -30,6 +30,8 @@ export interface Task {
   WorktreePath: string | null;
   BranchName: string | null;
   PRNumber: number | null;
+  PRMergedAt: string | null;        // When the PR was merged
+  WorktreeCleanedAt: string | null; // When the worktree was cleaned up
   TokenBudget: number | null;
   TokenUsed: number;
   InputTokens: number;  // Computed from session_activity

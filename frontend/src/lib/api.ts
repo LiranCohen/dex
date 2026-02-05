@@ -323,3 +323,41 @@ export async function updateQuestTemplate(
 export async function deleteQuestTemplate(templateId: string): Promise<{ message: string }> {
   return api.delete(`/quest-templates/${templateId}`);
 }
+
+// Worktree management API functions
+
+export interface StaleWorktree {
+  task_id: string;
+  task_title: string;
+  worktree_path: string;
+  branch_name: string;
+  base_branch: string;
+  pr_number?: number;
+  branch_merged: boolean;
+  status: string;
+  completed_at?: string;
+}
+
+export interface StaleWorktreesResponse {
+  stale_worktrees: StaleWorktree[];
+  count: number;
+}
+
+export async function fetchStaleWorktrees(): Promise<StaleWorktreesResponse> {
+  return api.get('/worktrees/stale');
+}
+
+export interface CleanupMergedResponse {
+  cleaned: number;
+  skipped: number;
+  failed: number;
+  errors: string[];
+}
+
+export async function cleanupMergedWorktrees(): Promise<CleanupMergedResponse> {
+  return api.post('/worktrees/cleanup-merged');
+}
+
+export async function deleteWorktree(taskId: string, cleanupBranch = true): Promise<void> {
+  return api.delete(`/worktrees/${taskId}?cleanup_branch=${cleanupBranch}`);
+}

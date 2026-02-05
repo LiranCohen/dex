@@ -52,6 +52,8 @@ export const mockTask: Task = {
   WorktreePath: '/path/to/worktree',
   BranchName: 'feature/x',
   PRNumber: null,
+  PRMergedAt: null,
+  WorktreeCleanedAt: null,
   TokenBudget: 100000,
   TokenUsed: 25000,
   InputTokens: 20000,
