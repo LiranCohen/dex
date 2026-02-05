@@ -26,6 +26,7 @@ import (
 	"github.com/lirancohen/dex/internal/api/middleware"
 	"github.com/lirancohen/dex/internal/api/setup"
 	"github.com/lirancohen/dex/internal/auth"
+	"github.com/lirancohen/dex/internal/crypto"
 	"github.com/lirancohen/dex/internal/db"
 	"github.com/lirancohen/dex/internal/git"
 	"github.com/lirancohen/dex/internal/github"
@@ -60,6 +61,7 @@ type Server struct {
 	broadcaster       *realtime.Broadcaster
 	meshClient        *mesh.Client // Campus mesh network client
 	deps              *core.Deps
+	encryption        *crypto.EncryptionConfig // Encryption for secrets and worker payloads
 	addr              string
 	certFile          string
 	keyFile           string
@@ -74,14 +76,15 @@ type Server struct {
 
 // Config holds server configuration
 type Config struct {
-	Addr        string             // e.g., ":8443" or "0.0.0.0:8443"
-	CertFile    string             // Path to TLS certificate (optional for dev)
-	KeyFile     string             // Path to TLS key (optional for dev)
-	TokenConfig *auth.TokenConfig  // JWT configuration (optional for dev)
-	StaticDir   string             // Path to frontend static files (e.g., "./frontend/dist")
-	Toolbelt    *toolbelt.Toolbelt // Toolbelt for external service integrations (optional)
-	BaseDir     string             // Base Dex directory (default: /opt/dex). Derived: {BaseDir}/repos/, {BaseDir}/worktrees/
-	Mesh        *mesh.Config       // Mesh networking configuration (optional)
+	Addr        string                   // e.g., ":8443" or "0.0.0.0:8443"
+	CertFile    string                   // Path to TLS certificate (optional for dev)
+	KeyFile     string                   // Path to TLS key (optional for dev)
+	TokenConfig *auth.TokenConfig        // JWT configuration (optional for dev)
+	StaticDir   string                   // Path to frontend static files (e.g., "./frontend/dist")
+	Toolbelt    *toolbelt.Toolbelt       // Toolbelt for external service integrations (optional)
+	BaseDir     string                   // Base Dex directory (default: /opt/dex). Derived: {BaseDir}/repos/, {BaseDir}/worktrees/
+	Mesh        *mesh.Config             // Mesh networking configuration (optional)
+	Encryption  *crypto.EncryptionConfig // Encryption configuration for secrets at rest and worker payloads
 }
 
 // NewServer creates a new API server
@@ -132,6 +135,7 @@ func NewServer(database *db.DB, cfg Config) *Server {
 		realtime:    rtNode,
 		broadcaster: broadcaster,
 		meshClient:  meshClient,
+		encryption:  cfg.Encryption,
 		addr:        cfg.Addr,
 		certFile:    cfg.CertFile,
 		keyFile:     cfg.KeyFile,
