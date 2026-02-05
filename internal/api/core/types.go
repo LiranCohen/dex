@@ -327,14 +327,14 @@ func ToProjectResponses(projects []*db.Project) []ProjectResponse {
 
 // QuestResponse is the JSON response format for quests.
 type QuestResponse struct {
-	ID               string               `json:"id"`
-	ProjectID        string               `json:"project_id"`
-	Title            string               `json:"title,omitempty"`
-	Status           string               `json:"status"`
-	Model            string               `json:"model"`
-	AutoStartDefault bool                 `json:"auto_start_default"`
-	CreatedAt        time.Time            `json:"created_at"`
-	CompletedAt      *time.Time           `json:"completed_at,omitempty"`
+	ID               string                `json:"id"`
+	ProjectID        string                `json:"project_id"`
+	Title            string                `json:"title,omitempty"`
+	Status           string                `json:"status"`
+	Model            string                `json:"model"`
+	AutoStartDefault bool                  `json:"auto_start_default"`
+	CreatedAt        time.Time             `json:"created_at"`
+	CompletedAt      *time.Time            `json:"completed_at,omitempty"`
 	Summary          *QuestSummaryResponse `json:"summary,omitempty"`
 }
 

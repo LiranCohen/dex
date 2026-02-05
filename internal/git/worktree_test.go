@@ -128,6 +128,7 @@ func setupTestRepo(t *testing.T) (string, func()) {
 		{"git", "init"},
 		{"git", "config", "user.email", "test@test.com"},
 		{"git", "config", "user.name", "Test User"},
+		{"git", "config", "commit.gpgsign", "false"}, // Disable signing for tests
 	}
 
 	for _, args := range cmds {

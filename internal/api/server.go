@@ -23,9 +23,11 @@ import (
 	sessionshandlers "github.com/lirancohen/dex/internal/api/handlers/sessions"
 	"github.com/lirancohen/dex/internal/api/handlers/tasks"
 	toolbelthandlers "github.com/lirancohen/dex/internal/api/handlers/toolbelt"
+	workershandlers "github.com/lirancohen/dex/internal/api/handlers/workers"
 	"github.com/lirancohen/dex/internal/api/middleware"
 	"github.com/lirancohen/dex/internal/api/setup"
 	"github.com/lirancohen/dex/internal/auth"
+	"github.com/lirancohen/dex/internal/crypto"
 	"github.com/lirancohen/dex/internal/db"
 	"github.com/lirancohen/dex/internal/git"
 	"github.com/lirancohen/dex/internal/github"
@@ -37,6 +39,7 @@ import (
 	"github.com/lirancohen/dex/internal/session"
 	"github.com/lirancohen/dex/internal/task"
 	"github.com/lirancohen/dex/internal/toolbelt"
+	"github.com/lirancohen/dex/internal/worker"
 )
 
 // challengeEntry is an alias for core.ChallengeEntry
@@ -58,8 +61,10 @@ type Server struct {
 	setupHandler      *setup.Handler
 	realtime          *realtime.Node // Centrifuge-based realtime messaging
 	broadcaster       *realtime.Broadcaster
-	meshClient        *mesh.Client // Campus mesh network client
+	meshClient        *mesh.Client    // Campus mesh network client
+	workerManager     *worker.Manager // Worker pool manager for distributed execution
 	deps              *core.Deps
+	encryption        *crypto.EncryptionConfig // Encryption for secrets and worker payloads
 	addr              string
 	certFile          string
 	keyFile           string
@@ -74,14 +79,16 @@ type Server struct {
 
 // Config holds server configuration
 type Config struct {
-	Addr        string             // e.g., ":8443" or "0.0.0.0:8443"
-	CertFile    string             // Path to TLS certificate (optional for dev)
-	KeyFile     string             // Path to TLS key (optional for dev)
-	TokenConfig *auth.TokenConfig  // JWT configuration (optional for dev)
-	StaticDir   string             // Path to frontend static files (e.g., "./frontend/dist")
-	Toolbelt    *toolbelt.Toolbelt // Toolbelt for external service integrations (optional)
-	BaseDir     string             // Base Dex directory (default: /opt/dex). Derived: {BaseDir}/repos/, {BaseDir}/worktrees/
-	Mesh        *mesh.Config       // Mesh networking configuration (optional)
+	Addr        string                   // e.g., ":8443" or "0.0.0.0:8443"
+	CertFile    string                   // Path to TLS certificate (optional for dev)
+	KeyFile     string                   // Path to TLS key (optional for dev)
+	TokenConfig *auth.TokenConfig        // JWT configuration (optional for dev)
+	StaticDir   string                   // Path to frontend static files (e.g., "./frontend/dist")
+	Toolbelt    *toolbelt.Toolbelt       // Toolbelt for external service integrations (optional)
+	BaseDir     string                   // Base Dex directory (default: /opt/dex). Derived: {BaseDir}/repos/, {BaseDir}/worktrees/
+	Mesh        *mesh.Config             // Mesh networking configuration (optional)
+	Encryption  *crypto.EncryptionConfig // Encryption configuration for secrets at rest and worker payloads
+	Worker      *worker.ManagerConfig    // Worker pool configuration (optional)
 }
 
 // NewServer creates a new API server
@@ -124,21 +131,35 @@ func NewServer(database *db.DB, cfg Config) *Server {
 		meshClient = mesh.NewClient(*cfg.Mesh)
 	}
 
+	// Initialize worker manager if encryption is configured
+	var workerMgr *worker.Manager
+	if cfg.Encryption != nil && cfg.Encryption.HQKeyPair != nil {
+		workerMgr = worker.NewManager(database, cfg.Worker, cfg.Encryption.HQKeyPair)
+	}
+
+	// Initialize encrypted secrets store if master key is available
+	var secretsStore *db.EncryptedSecretsStore
+	if cfg.Encryption != nil && cfg.Encryption.MasterKey != nil {
+		secretsStore = db.NewEncryptedSecretsStore(database, cfg.Encryption.MasterKey)
+	}
+
 	s := &Server{
-		echo:        e,
-		db:          database,
-		toolbelt:    cfg.Toolbelt,
-		taskService: task.NewService(database),
-		realtime:    rtNode,
-		broadcaster: broadcaster,
-		meshClient:  meshClient,
-		addr:        cfg.Addr,
-		certFile:    cfg.CertFile,
-		keyFile:     cfg.KeyFile,
-		tokenConfig: cfg.TokenConfig,
-		staticDir:   cfg.StaticDir,
-		baseDir:     cfg.BaseDir,
-		challenges:  make(map[string]challengeEntry),
+		echo:          e,
+		db:            database,
+		toolbelt:      cfg.Toolbelt,
+		taskService:   task.NewService(database),
+		realtime:      rtNode,
+		broadcaster:   broadcaster,
+		meshClient:    meshClient,
+		workerManager: workerMgr,
+		encryption:    cfg.Encryption,
+		addr:          cfg.Addr,
+		certFile:      cfg.CertFile,
+		keyFile:       cfg.KeyFile,
+		tokenConfig:   cfg.TokenConfig,
+		staticDir:     cfg.StaticDir,
+		baseDir:       cfg.BaseDir,
+		challenges:    make(map[string]challengeEntry),
 	}
 
 	// Setup git service with derived paths from base directory
@@ -235,6 +256,8 @@ func NewServer(database *db.DB, cfg Config) *Server {
 		Realtime:       rtNode,
 		Broadcaster:    broadcaster,
 		MeshClient:     meshClient,
+		WorkerManager:  workerMgr,
+		SecretsStore:   secretsStore,
 		TokenConfig:    cfg.TokenConfig,
 		BaseDir:        cfg.BaseDir,
 		Challenges:     s.challenges,
@@ -309,6 +332,73 @@ func NewServer(database *db.DB, cfg Config) *Server {
 		s.handlersSyncSvc.UpdateObjectiveStatusSync(taskID, status)
 	})
 
+	// Wire up worker manager callbacks for realtime updates
+	if workerMgr != nil {
+		workerMgr.SetCallbacks(
+			// onProgress: broadcast worker progress updates
+			func(objectiveID string, progress *worker.ProgressPayload) {
+				if broadcaster != nil {
+					broadcaster.PublishWorkerProgress(objectiveID, map[string]any{
+						"objective_id":  objectiveID,
+						"session_id":    progress.SessionID,
+						"iteration":     progress.Iteration,
+						"tokens_input":  progress.TokensInput,
+						"tokens_output": progress.TokensOutput,
+						"hat":           progress.Hat,
+						"status":        progress.Status,
+					})
+				}
+			},
+			// onActivity: store activity events in DB
+			func(events []*worker.ActivityEvent) {
+				for _, evt := range events {
+					tokensIn := evt.TokensInput
+					tokensOut := evt.TokensOutput
+					_, _ = database.CreateSessionActivity(
+						evt.SessionID,
+						evt.Iteration,
+						evt.EventType,
+						evt.Hat,
+						evt.Content,
+						&tokensIn,
+						&tokensOut,
+					)
+				}
+			},
+			// onCompleted: handle task completion
+			func(report *worker.CompletionReport) {
+				// Update task status
+				_ = database.UpdateTaskStatus(report.ObjectiveID, report.Status)
+
+				// Broadcast completion
+				if broadcaster != nil {
+					broadcaster.PublishWorkerCompletion(report.ObjectiveID, map[string]any{
+						"objective_id": report.ObjectiveID,
+						"session_id":   report.SessionID,
+						"status":       report.Status,
+						"summary":      report.Summary,
+						"pr_number":    report.PRNumber,
+						"pr_url":       report.PRURL,
+						"total_tokens": report.TotalTokens,
+						"iterations":   report.Iterations,
+					})
+				}
+			},
+			// onFailed: handle task failure
+			func(objectiveID, sessionID, errMsg string) {
+				_ = database.UpdateTaskStatus(objectiveID, "failed")
+
+				if broadcaster != nil {
+					broadcaster.PublishWorkerFailed(objectiveID, map[string]any{
+						"objective_id": objectiveID,
+						"session_id":   sessionID,
+						"error":        errMsg,
+					})
+				}
+			},
+		)
+	}
+
 	// Register routes
 	s.registerRoutes()
 
@@ -341,6 +431,7 @@ func (s *Server) registerRoutes() {
 	templatesHandler := quests.NewTemplatesHandler(s.deps)
 	githubHandler := githubhandlers.New(s.deps)
 	meshHandler := meshhandlers.New(s.deps)
+	workersHandler := workershandlers.New(s.deps)
 
 	// Wire up callbacks for GitHub sync
 	githubHandler.InitGitHubApp = s.initGitHubApp
@@ -399,6 +490,7 @@ func (s *Server) registerRoutes() {
 	objectivesHandler.RegisterRoutes(protected)
 	templatesHandler.RegisterRoutes(protected)
 	meshHandler.RegisterRoutes(protected)
+	workersHandler.RegisterRoutes(protected)
 
 	// Centrifuge WebSocket endpoint for real-time updates
 	// Auth is handled via Centrifuge protocol in Node.OnConnecting, not HTTP middleware
@@ -462,6 +554,15 @@ func (s *Server) Start() error {
 		fmt.Println("Mesh networking started")
 	}
 
+	// Start worker manager if configured
+	if s.workerManager != nil {
+		ctx := context.Background()
+		if err := s.workerManager.Start(ctx); err != nil {
+			return fmt.Errorf("worker manager start failed: %w", err)
+		}
+		fmt.Println("Worker manager started")
+	}
+
 	if s.certFile != "" && s.keyFile != "" {
 		// HTTPS mode (for Tailscale)
 		fmt.Printf("Starting HTTPS server on %s\n", s.addr)
@@ -475,6 +576,13 @@ func (s *Server) Start() error {
 
 // Shutdown gracefully stops the server
 func (s *Server) Shutdown(ctx context.Context) error {
+	// Stop worker manager
+	if s.workerManager != nil {
+		if err := s.workerManager.Stop(ctx); err != nil {
+			fmt.Printf("Warning: failed to stop worker manager: %v\n", err)
+		}
+	}
+
 	// Stop mesh client
 	if s.meshClient != nil {
 		if err := s.meshClient.Stop(); err != nil {

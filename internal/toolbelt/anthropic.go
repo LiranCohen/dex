@@ -35,6 +35,12 @@ func NewAnthropicClient(config *AnthropicConfig) *AnthropicClient {
 	}
 }
 
+// GetAPIKey returns the configured API key.
+// This is used by the worker system to pass credentials to remote workers.
+func (c *AnthropicClient) GetAPIKey() string {
+	return c.apiKey
+}
+
 // doRequest performs an HTTP request to the Anthropic API
 func (c *AnthropicClient) doRequest(ctx context.Context, method, url string, body any) (*http.Response, error) {
 	var reqBody io.Reader

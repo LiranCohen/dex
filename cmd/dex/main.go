@@ -14,6 +14,7 @@ import (
 
 	"github.com/lirancohen/dex/internal/api"
 	"github.com/lirancohen/dex/internal/auth"
+	"github.com/lirancohen/dex/internal/crypto"
 	"github.com/lirancohen/dex/internal/db"
 	"github.com/lirancohen/dex/internal/mesh"
 	"github.com/lirancohen/dex/internal/toolbelt"
@@ -76,6 +77,50 @@ func main() {
 		dataDir = "/opt/dex"
 	}
 
+	// Initialize encryption
+	fmt.Println("Initializing encryption...")
+	encConfig, err := crypto.InitEncryption(dataDir, true)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error initializing encryption: %v\n", err)
+		os.Exit(1)
+	}
+	if encConfig.MasterKey != nil {
+		fmt.Println("  - Master key: INITIALIZED (secrets encrypted at rest)")
+	} else {
+		fmt.Println("  - Master key: NOT CONFIGURED (secrets stored in plaintext)")
+	}
+	if encConfig.HQKeyPair != nil {
+		fmt.Println("  - HQ keypair: INITIALIZED (worker payloads can be encrypted)")
+	}
+
+	// Create encrypted secrets store
+	secretsStore := db.NewEncryptedSecretsStore(database, encConfig.MasterKey)
+
+	// Migrate existing plaintext secrets to encrypted format
+	if encConfig.MasterKey != nil {
+		// Migrate file-based secrets first
+		migrated, err := database.MigrateSecretsFromFile(dataDir)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: Failed to migrate secrets from file: %v\n", err)
+		} else if migrated > 0 {
+			fmt.Printf("  - Migrated %d secrets from secrets.json to database\n", migrated)
+		}
+
+		// Encrypt any plaintext secrets in database
+		encrypted, err := secretsStore.MigrateToEncrypted()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: Failed to encrypt secrets: %v\n", err)
+		} else if encrypted > 0 {
+			fmt.Printf("  - Encrypted %d plaintext secrets\n", encrypted)
+		}
+
+		// Encrypt GitHub App config if present
+		githubStore := db.NewEncryptedGitHubStore(database, encConfig.MasterKey)
+		if err := githubStore.MigrateToEncrypted(); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: Failed to encrypt GitHub App config: %v\n", err)
+		}
+	}
+
 	// Load toolbelt configuration (optional)
 	var tb *toolbelt.Toolbelt
 	if *toolbeltConfig != "" {
@@ -96,8 +141,8 @@ func main() {
 			fmt.Printf("Toolbelt loaded: %d/%d services configured\n", configured, len(status))
 		}
 	} else {
-		// Try loading from database first (primary storage after onboarding)
-		secrets, err := database.GetAllSecrets()
+		// Try loading from encrypted database (primary storage after onboarding)
+		secrets, err := secretsStore.GetAllSecrets()
 		if err == nil && len(secrets) > 0 {
 			fmt.Printf("Loading toolbelt from database (%d secrets)\n", len(secrets))
 			config := &toolbelt.Config{}
@@ -204,6 +249,7 @@ func main() {
 		BaseDir:     dataDir,
 		TokenConfig: tokenConfig,
 		Mesh:        meshConfig,
+		Encryption:  encConfig,
 	})
 
 	// Start server in goroutine

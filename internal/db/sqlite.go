@@ -66,6 +66,7 @@ func (db *DB) Migrate() error {
 		migrationSecrets,
 		migrationMemories,
 		migrationEvents,
+		migrationWorkers,
 	}
 
 	for i, migration := range migrations {
@@ -106,6 +107,11 @@ func (db *DB) Migrate() error {
 		// Worktree cleanup tracking
 		"ALTER TABLE tasks ADD COLUMN worktree_cleaned_at DATETIME",
 		"ALTER TABLE tasks ADD COLUMN pr_merged_at DATETIME",
+		// Secrets encryption support
+		"ALTER TABLE secrets ADD COLUMN encrypted INTEGER DEFAULT 0",
+		"ALTER TABLE secrets ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP",
+		// GitHub App config encryption support
+		"ALTER TABLE github_app_config ADD COLUMN encrypted INTEGER DEFAULT 0",
 	}
 	for _, migration := range optionalMigrations {
 		_, _ = db.Exec(migration) // Ignore errors - column may already exist
@@ -423,8 +429,28 @@ const migrationSecrets = `
 CREATE TABLE IF NOT EXISTS secrets (
 	key TEXT PRIMARY KEY,
 	value TEXT NOT NULL,
+	encrypted INTEGER DEFAULT 0,
+	created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+	updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+`
+
+const migrationWorkers = `
+-- Worker enrollment and keypair storage
+CREATE TABLE IF NOT EXISTS workers (
+	id TEXT PRIMARY KEY,
+	hostname TEXT NOT NULL,
+	public_key TEXT NOT NULL,
+	status TEXT NOT NULL DEFAULT 'pending',
+	enrolled_at DATETIME,
+	last_seen_at DATETIME,
+	mesh_ip TEXT,
+	tags TEXT,
 	created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE INDEX IF NOT EXISTS idx_workers_status ON workers(status);
+CREATE INDEX IF NOT EXISTS idx_workers_hostname ON workers(hostname);
 `
 
 const migrationMemories = `

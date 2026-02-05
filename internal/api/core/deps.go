@@ -17,6 +17,7 @@ import (
 	"github.com/lirancohen/dex/internal/session"
 	"github.com/lirancohen/dex/internal/task"
 	"github.com/lirancohen/dex/internal/toolbelt"
+	"github.com/lirancohen/dex/internal/worker"
 )
 
 // ChallengeEntry holds a challenge and its expiry time for auth
@@ -42,9 +43,11 @@ type Deps struct {
 	GitService     *git.Service
 	Planner        *planning.Planner
 	QuestHandler   *quest.Handler
-	Realtime       *realtime.Node        // Centrifuge realtime node
-	Broadcaster    *realtime.Broadcaster // Publishes to both legacy and new systems
-	MeshClient     *mesh.Client          // Campus mesh network client
+	Realtime       *realtime.Node            // Centrifuge realtime node
+	Broadcaster    *realtime.Broadcaster     // Publishes to both legacy and new systems
+	MeshClient     *mesh.Client              // Campus mesh network client
+	WorkerManager  *worker.Manager           // Worker pool manager for distributed execution
+	SecretsStore   *db.EncryptedSecretsStore // Encrypted secrets storage
 	TokenConfig    *auth.TokenConfig
 	BaseDir        string
 
@@ -60,15 +63,15 @@ type Deps struct {
 
 	// Cross-handler callbacks for complex orchestration
 	// These allow handlers to trigger operations that span multiple services
-	StartTaskInternal         func(ctx context.Context, taskID string, baseBranch string) (*StartTaskResult, error)
-	StartTaskWithInheritance  func(ctx context.Context, taskID string, inheritedWorktree string, predecessorHandoff string) (*StartTaskResult, error)
-	HandleTaskUnblocking      func(ctx context.Context, completedTaskID string)
+	StartTaskInternal          func(ctx context.Context, taskID string, baseBranch string) (*StartTaskResult, error)
+	StartTaskWithInheritance   func(ctx context.Context, taskID string, inheritedWorktree string, predecessorHandoff string) (*StartTaskResult, error)
+	HandleTaskUnblocking       func(ctx context.Context, completedTaskID string)
 	GeneratePredecessorHandoff func(task *db.Task) string
 
 	// GitHub client fetchers
 	GetToolbeltGitHubClient func(ctx context.Context, login string) (*toolbelt.GitHubClient, error)
 
 	// Validation helpers
-	IsValidGitRepo      func(path string) bool
-	IsValidProjectPath  func(path string) bool
+	IsValidGitRepo     func(path string) bool
+	IsValidProjectPath func(path string) bool
 }

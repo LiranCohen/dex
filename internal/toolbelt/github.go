@@ -32,6 +32,12 @@ func NewGitHubClient(config *GitHubConfig) *GitHubClient {
 	}
 }
 
+// GetToken returns the configured GitHub token.
+// This is used by the worker system to pass credentials to remote workers.
+func (c *GitHubClient) GetToken() string {
+	return c.token
+}
+
 // NewGitHubClientFromToken creates a new GitHubClient from a token string.
 // This is useful for GitHub App installation tokens.
 // accountType should be "User" or "Organization" to determine how repos are created.

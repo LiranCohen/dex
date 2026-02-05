@@ -95,6 +95,33 @@ func (b *Broadcaster) PublishHatEvent(eventType, sessionID, taskID, projectID st
 	b.Publish(eventType, payload)
 }
 
+// PublishWorkerProgress publishes a worker progress update event
+func (b *Broadcaster) PublishWorkerProgress(objectiveID string, payload map[string]any) {
+	if payload == nil {
+		payload = make(map[string]any)
+	}
+	payload["objective_id"] = objectiveID
+	b.Publish(EventWorkerProgress, payload)
+}
+
+// PublishWorkerCompletion publishes a worker completion event
+func (b *Broadcaster) PublishWorkerCompletion(objectiveID string, payload map[string]any) {
+	if payload == nil {
+		payload = make(map[string]any)
+	}
+	payload["objective_id"] = objectiveID
+	b.Publish(EventWorkerCompleted, payload)
+}
+
+// PublishWorkerFailed publishes a worker failure event
+func (b *Broadcaster) PublishWorkerFailed(objectiveID string, payload map[string]any) {
+	if payload == nil {
+		payload = make(map[string]any)
+	}
+	payload["objective_id"] = objectiveID
+	b.Publish(EventWorkerFailed, payload)
+}
+
 // Event types as constants for consistency.
 //
 // Events are published to channels based on their prefix:
@@ -167,4 +194,9 @@ const (
 	EventHatReviewRejected     = "hat.review_rejected"
 	EventHatTaskBlocked        = "hat.task_blocked"
 	EventHatResolved           = "hat.resolved"
+
+	// Worker events (distributed execution)
+	EventWorkerProgress  = "worker.progress"
+	EventWorkerCompleted = "worker.completed"
+	EventWorkerFailed    = "worker.failed"
 )
