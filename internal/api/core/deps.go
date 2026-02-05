@@ -43,10 +43,11 @@ type Deps struct {
 	GitService     *git.Service
 	Planner        *planning.Planner
 	QuestHandler   *quest.Handler
-	Realtime       *realtime.Node        // Centrifuge realtime node
-	Broadcaster    *realtime.Broadcaster // Publishes to both legacy and new systems
-	MeshClient     *mesh.Client          // Campus mesh network client
-	WorkerManager  *worker.Manager       // Worker pool manager for distributed execution
+	Realtime       *realtime.Node            // Centrifuge realtime node
+	Broadcaster    *realtime.Broadcaster     // Publishes to both legacy and new systems
+	MeshClient     *mesh.Client              // Campus mesh network client
+	WorkerManager  *worker.Manager           // Worker pool manager for distributed execution
+	SecretsStore   *db.EncryptedSecretsStore // Encrypted secrets storage
 	TokenConfig    *auth.TokenConfig
 	BaseDir        string
 

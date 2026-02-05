@@ -38,6 +38,7 @@ type Manager struct {
 
 type dispatchRequest struct {
 	payload  *ObjectivePayload
+	secrets  *WorkerSecrets // Unencrypted secrets (will be encrypted per-worker)
 	response chan error
 }
 
@@ -237,18 +238,40 @@ func (m *Manager) dispatchLoop() {
 		case <-m.ctx.Done():
 			return
 		case req := <-m.queue:
-			err := m.dispatchToWorker(req.payload)
+			err := m.dispatchToWorkerWithSecrets(req.payload, req.secrets)
 			req.response <- err
 		}
 	}
 }
 
 // dispatchToWorker finds an available worker and dispatches the objective.
+// Deprecated: Use dispatchToWorkerWithSecrets instead.
 func (m *Manager) dispatchToWorker(payload *ObjectivePayload) error {
+	return m.dispatchToWorkerWithSecrets(payload, nil)
+}
+
+// dispatchToWorkerWithSecrets finds an available worker, encrypts secrets, and dispatches.
+func (m *Manager) dispatchToWorkerWithSecrets(payload *ObjectivePayload, secrets *WorkerSecrets) error {
 	// Find an idle worker
 	worker := m.getIdleWorker()
 	if worker == nil {
 		return fmt.Errorf("no idle workers available")
+	}
+
+	// If secrets are provided and worker has a public key, encrypt them
+	if secrets != nil && worker.PublicKey() != "" {
+		dispatcher := NewDispatcher(m.hqKeyPair)
+		encPayload, err := dispatcher.PreparePayload(
+			payload.Objective,
+			payload.Project,
+			*secrets,
+			worker.PublicKey(),
+			payload.Sync,
+		)
+		if err != nil {
+			return fmt.Errorf("failed to encrypt payload: %w", err)
+		}
+		payload = encPayload
 	}
 
 	return worker.Dispatch(m.ctx, payload)
@@ -278,9 +301,17 @@ func (m *Manager) getIdleWorker() Worker {
 
 // Dispatch queues an objective for dispatch to an available worker.
 // This is the main entry point for HQ to send work to workers.
+// Deprecated: Use DispatchWithSecrets instead.
 func (m *Manager) Dispatch(ctx context.Context, payload *ObjectivePayload) error {
+	return m.DispatchWithSecrets(ctx, payload, nil)
+}
+
+// DispatchWithSecrets queues an objective with secrets for dispatch.
+// Secrets are encrypted per-worker using their public key.
+func (m *Manager) DispatchWithSecrets(ctx context.Context, payload *ObjectivePayload, secrets *WorkerSecrets) error {
 	req := &dispatchRequest{
 		payload:  payload,
+		secrets:  secrets,
 		response: make(chan error, 1),
 	}
 
@@ -301,7 +332,12 @@ func (m *Manager) Dispatch(ctx context.Context, payload *ObjectivePayload) error
 // DispatchImmediate dispatches an objective immediately without queuing.
 // Returns an error if no worker is available.
 func (m *Manager) DispatchImmediate(ctx context.Context, payload *ObjectivePayload) error {
-	return m.dispatchToWorker(payload)
+	return m.dispatchToWorkerWithSecrets(payload, nil)
+}
+
+// DispatchImmediateWithSecrets dispatches an objective with secrets immediately.
+func (m *Manager) DispatchImmediateWithSecrets(ctx context.Context, payload *ObjectivePayload, secrets *WorkerSecrets) error {
+	return m.dispatchToWorkerWithSecrets(payload, secrets)
 }
 
 // healthCheckLoop periodically checks worker health and restarts failed workers.

@@ -137,6 +137,12 @@ func NewServer(database *db.DB, cfg Config) *Server {
 		workerMgr = worker.NewManager(database, cfg.Worker, cfg.Encryption.HQKeyPair)
 	}
 
+	// Initialize encrypted secrets store if master key is available
+	var secretsStore *db.EncryptedSecretsStore
+	if cfg.Encryption != nil && cfg.Encryption.MasterKey != nil {
+		secretsStore = db.NewEncryptedSecretsStore(database, cfg.Encryption.MasterKey)
+	}
+
 	s := &Server{
 		echo:          e,
 		db:            database,
@@ -251,6 +257,7 @@ func NewServer(database *db.DB, cfg Config) *Server {
 		Broadcaster:    broadcaster,
 		MeshClient:     meshClient,
 		WorkerManager:  workerMgr,
+		SecretsStore:   secretsStore,
 		TokenConfig:    cfg.TokenConfig,
 		BaseDir:        cfg.BaseDir,
 		Challenges:     s.challenges,
@@ -324,6 +331,71 @@ func NewServer(database *db.DB, cfg Config) *Server {
 	sessionMgr.SetOnTaskStatus(func(taskID string, status string) {
 		s.handlersSyncSvc.UpdateObjectiveStatusSync(taskID, status)
 	})
+
+	// Wire up worker manager callbacks for realtime updates
+	if workerMgr != nil {
+		workerMgr.SetCallbacks(
+			// onProgress: broadcast worker progress updates
+			func(objectiveID string, progress *worker.ProgressPayload) {
+				if broadcaster != nil {
+					broadcaster.PublishWorkerProgress(objectiveID, map[string]any{
+						"objective_id": objectiveID,
+						"iteration":    progress.Iteration,
+						"tokens_used":  progress.TokensUsed,
+						"progress":     progress.Progress,
+						"status":       progress.Status,
+					})
+				}
+			},
+			// onActivity: store activity events in DB
+			func(events []*worker.ActivityEvent) {
+				for _, evt := range events {
+					_ = database.InsertActivity(&db.Activity{
+						ID:           evt.ID,
+						SessionID:    evt.SessionID,
+						Iteration:    evt.Iteration,
+						Type:         evt.EventType,
+						Content:      evt.Content,
+						TokensInput:  evt.TokensInput,
+						TokensOutput: evt.TokensOutput,
+						Hat:          evt.Hat,
+						CreatedAt:    evt.CreatedAt,
+					})
+				}
+			},
+			// onCompleted: handle task completion
+			func(report *worker.CompletionReport) {
+				// Update task status
+				_ = database.UpdateTaskStatus(report.ObjectiveID, report.Status)
+
+				// Broadcast completion
+				if broadcaster != nil {
+					broadcaster.PublishWorkerCompletion(report.ObjectiveID, map[string]any{
+						"objective_id": report.ObjectiveID,
+						"session_id":   report.SessionID,
+						"status":       report.Status,
+						"summary":      report.Summary,
+						"pr_number":    report.PRNumber,
+						"pr_url":       report.PRURL,
+						"total_tokens": report.TotalTokens,
+						"iterations":   report.Iterations,
+					})
+				}
+			},
+			// onFailed: handle task failure
+			func(objectiveID, sessionID, errMsg string) {
+				_ = database.UpdateTaskStatus(objectiveID, "failed")
+
+				if broadcaster != nil {
+					broadcaster.PublishWorkerFailed(objectiveID, map[string]any{
+						"objective_id": objectiveID,
+						"session_id":   sessionID,
+						"error":        errMsg,
+					})
+				}
+			},
+		)
+	}
 
 	// Register routes
 	s.registerRoutes()

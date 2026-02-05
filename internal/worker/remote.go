@@ -263,13 +263,12 @@ func (w *RemoteWorker) Events() <-chan *Message {
 	return w.eventChan
 }
 
-// PublicKey returns the worker's public key for encryption.
-func (w *RemoteWorker) PublicKey() [32]byte {
-	return w.pubKey
+// PublicKey returns the worker's public key as base64 for encryption.
+func (w *RemoteWorker) PublicKey() string {
+	return base64.StdEncoding.EncodeToString(w.pubKey[:])
 }
 
 // EncryptPayload encrypts an objective payload for this specific remote worker.
 func (w *RemoteWorker) EncryptPayload(dispatcher *Dispatcher, objective Objective, project Project, secrets WorkerSecrets, syncConfig SyncConfig) (*ObjectivePayload, error) {
-	pubKeyB64 := base64.StdEncoding.EncodeToString(w.pubKey[:])
-	return dispatcher.PreparePayload(objective, project, secrets, pubKeyB64, syncConfig)
+	return dispatcher.PreparePayload(objective, project, secrets, w.PublicKey(), syncConfig)
 }

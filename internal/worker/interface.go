@@ -29,6 +29,10 @@ type Worker interface {
 	// For subprocesses, this sends a shutdown signal and waits for clean exit.
 	// For remote workers, this disconnects from the mesh.
 	Stop(ctx context.Context) error
+
+	// PublicKey returns the worker's public key for encrypting payloads.
+	// Returns empty string if the worker doesn't have a key yet (not ready).
+	PublicKey() string
 }
 
 // WorkerType identifies how the worker is connected.

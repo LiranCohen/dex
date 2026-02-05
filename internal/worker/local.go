@@ -406,6 +406,13 @@ func (w *LocalWorker) Stop(ctx context.Context) error {
 	return nil
 }
 
+// PublicKey returns the worker's public key for encrypting payloads.
+func (w *LocalWorker) PublicKey() string {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	return w.workerPubKey
+}
+
 // Events returns a channel for receiving worker events.
 // The manager uses this to receive activity, progress, and completion events.
 func (w *LocalWorker) Events() <-chan *Message {
