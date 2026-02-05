@@ -63,7 +63,8 @@ type Server struct {
 	realtime          *realtime.Node // Centrifuge-based realtime messaging
 	broadcaster       *realtime.Broadcaster
 	meshClient        *mesh.Client    // Campus mesh network client
-	workerManager     *worker.Manager // Worker pool manager for distributed execution
+	workerManager     *worker.Manager    // Worker pool manager for distributed execution
+	meshProxy         *mesh.ServiceProxy // Reverse proxy for mesh-exposed services
 	forgejoManager    *forgejo.Manager // Embedded Forgejo instance manager
 	deps              *core.Deps
 	encryption        *crypto.EncryptionConfig // Encryption for secrets and worker payloads
@@ -591,6 +592,32 @@ func (s *Server) Start() error {
 		}
 	}
 
+	// Expose services on mesh network if both mesh and services are available
+	if s.meshClient != nil && s.meshClient.IsRunning() {
+		sp := mesh.NewServiceProxy(s.meshClient)
+		s.meshProxy = sp
+
+		// Expose Forgejo on mesh port 3000
+		if s.forgejoManager != nil && s.forgejoManager.IsRunning() {
+			if err := sp.Expose("forgejo", 3000, s.forgejoManager.BaseURL()); err != nil {
+				fmt.Printf("Warning: failed to expose Forgejo on mesh: %v\n", err)
+			}
+		}
+
+		// Expose Dex API on mesh port 8080
+		dexAddr := s.addr
+		if dexAddr == "" || dexAddr[0] == ':' {
+			dexAddr = "127.0.0.1" + dexAddr
+		}
+		dexScheme := "http"
+		if s.certFile != "" {
+			dexScheme = "https"
+		}
+		if err := sp.Expose("dex-api", 8080, fmt.Sprintf("%s://%s", dexScheme, dexAddr)); err != nil {
+			fmt.Printf("Warning: failed to expose Dex API on mesh: %v\n", err)
+		}
+	}
+
 	if s.certFile != "" && s.keyFile != "" {
 		// HTTPS mode (for Tailscale)
 		fmt.Printf("Starting HTTPS server on %s\n", s.addr)
@@ -609,6 +636,11 @@ func (s *Server) Shutdown(ctx context.Context) error {
 		if err := s.workerManager.Stop(ctx); err != nil {
 			fmt.Printf("Warning: failed to stop worker manager: %v\n", err)
 		}
+	}
+
+	// Stop mesh proxy first (before stopping the services it proxies)
+	if s.meshProxy != nil {
+		s.meshProxy.Stop()
 	}
 
 	// Stop embedded Forgejo
