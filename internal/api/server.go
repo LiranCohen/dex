@@ -14,7 +14,7 @@ import (
 	"github.com/lirancohen/dex/internal/api/handlers/approvals"
 	authhandlers "github.com/lirancohen/dex/internal/api/handlers/auth"
 	githubhandlers "github.com/lirancohen/dex/internal/api/handlers/github"
-	githubsync "github.com/lirancohen/dex/internal/api/handlers/github"
+	"github.com/lirancohen/dex/internal/api/handlers/issuesync"
 	"github.com/lirancohen/dex/internal/api/handlers/memory"
 	forgejohandlers "github.com/lirancohen/dex/internal/api/handlers/forgejo"
 	meshhandlers "github.com/lirancohen/dex/internal/api/handlers/mesh"
@@ -59,7 +59,7 @@ type Server struct {
 	questHandler      *quest.Handler
 	githubApp         *github.AppManager
 	githubSyncService *github.SyncService     // Underlying GitHub sync service
-	handlersSyncSvc   *githubsync.SyncService // Handler-level sync service wrapper
+	handlersSyncSvc   *issuesync.SyncService // Handler-level sync service wrapper
 	setupHandler      *setup.Handler
 	realtime          *realtime.Node // Centrifuge-based realtime messaging
 	broadcaster       *realtime.Broadcaster
@@ -326,7 +326,7 @@ func NewServer(database *db.DB, cfg Config) *Server {
 	}
 
 	// Create handler-level sync service (uses deps for cross-service coordination)
-	s.handlersSyncSvc = githubsync.NewSyncService(s.deps)
+	s.handlersSyncSvc = issuesync.NewSyncService(s.deps)
 
 	// Wire up GitHub sync callbacks now that handlersSyncSvc exists
 	sessionMgr.SetOnTaskCompleted(func(taskID string) {

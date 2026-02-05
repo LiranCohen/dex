@@ -77,7 +77,7 @@ func (db *DB) CreateTaskForQuest(questID, projectID, title, description, hat, ta
 func (db *DB) GetTaskByID(id string) (*Task, error) {
 	task := &Task{}
 	err := db.QueryRow(
-		`SELECT id, project_id, quest_id, github_issue_number, title, description, parent_id,
+		`SELECT id, project_id, quest_id, issue_number, title, description, parent_id,
 		        type, hat, model, priority, autonomy_level, status, base_branch,
 		        worktree_path, branch_name, content_path, pr_number, pr_merged_at, worktree_cleaned_at,
 		        token_budget, time_budget_min, time_used_min,
@@ -85,7 +85,7 @@ func (db *DB) GetTaskByID(id string) (*Task, error) {
 		 FROM tasks WHERE id = ?`,
 		id,
 	).Scan(
-		&task.ID, &task.ProjectID, &task.QuestID, &task.GitHubIssueNumber, &task.Title, &task.Description, &task.ParentID,
+		&task.ID, &task.ProjectID, &task.QuestID, &task.IssueNumber, &task.Title, &task.Description, &task.ParentID,
 		&task.Type, &task.Hat, &task.Model, &task.Priority, &task.AutonomyLevel, &task.Status, &task.BaseBranch,
 		&task.WorktreePath, &task.BranchName, &task.ContentPath, &task.PRNumber, &task.PRMergedAt, &task.WorktreeCleanedAt,
 		&task.TokenBudget, &task.TimeBudgetMin, &task.TimeUsedMin,
@@ -125,7 +125,7 @@ func (db *DB) ListAllTasks() ([]*Task, error) {
 // listTasks is a helper for listing tasks with a WHERE clause
 // Note: Token counts are computed from session_activity, not stored in tasks table
 func (db *DB) listTasks(whereClause string, args ...any) ([]*Task, error) {
-	query := `SELECT id, project_id, quest_id, github_issue_number, title, description, parent_id,
+	query := `SELECT id, project_id, quest_id, issue_number, title, description, parent_id,
 	                 type, hat, model, priority, autonomy_level, status, base_branch,
 	                 worktree_path, branch_name, content_path, pr_number, pr_merged_at, worktree_cleaned_at,
 	                 token_budget, time_budget_min, time_used_min,
@@ -142,7 +142,7 @@ func (db *DB) listTasks(whereClause string, args ...any) ([]*Task, error) {
 	for rows.Next() {
 		task := &Task{}
 		err := rows.Scan(
-			&task.ID, &task.ProjectID, &task.QuestID, &task.GitHubIssueNumber, &task.Title, &task.Description, &task.ParentID,
+			&task.ID, &task.ProjectID, &task.QuestID, &task.IssueNumber, &task.Title, &task.Description, &task.ParentID,
 			&task.Type, &task.Hat, &task.Model, &task.Priority, &task.AutonomyLevel, &task.Status, &task.BaseBranch,
 			&task.WorktreePath, &task.BranchName, &task.ContentPath, &task.PRNumber, &task.PRMergedAt, &task.WorktreeCleanedAt,
 			&task.TokenBudget, &task.TimeBudgetMin, &task.TimeUsedMin,
@@ -296,11 +296,11 @@ func (db *DB) GetTasksReadyForWorktreeCleanup() ([]*Task, error) {
 	`)
 }
 
-// UpdateTaskGitHubIssue sets the GitHub Issue number for a task/objective
-func (db *DB) UpdateTaskGitHubIssue(id string, issueNumber int64) error {
-	result, err := db.Exec(`UPDATE tasks SET github_issue_number = ? WHERE id = ?`, issueNumber, id)
+// UpdateTaskIssueNumber sets the issue number for a task/objective.
+func (db *DB) UpdateTaskIssueNumber(id string, issueNumber int64) error {
+	result, err := db.Exec(`UPDATE tasks SET issue_number = ? WHERE id = ?`, issueNumber, id)
 	if err != nil {
-		return fmt.Errorf("failed to update task GitHub issue: %w", err)
+		return fmt.Errorf("failed to update task issue number: %w", err)
 	}
 
 	rows, _ := result.RowsAffected()
@@ -503,7 +503,7 @@ func (db *DB) CreateTaskForQuestWithStatus(questID, projectID, title, descriptio
 func (db *DB) GetTasksUnblockedBy(completedTaskID string) ([]*Task, error) {
 	// Find tasks that were blocked by the completed task and are now ready
 	query := `
-		SELECT DISTINCT t.id, t.project_id, t.quest_id, t.github_issue_number, t.title, t.description, t.parent_id,
+		SELECT DISTINCT t.id, t.project_id, t.quest_id, t.issue_number, t.title, t.description, t.parent_id,
 		       t.type, t.hat, t.model, t.priority, t.autonomy_level, t.status, t.base_branch,
 		       t.worktree_path, t.branch_name, t.content_path, t.pr_number, t.pr_merged_at, t.worktree_cleaned_at,
 		       t.token_budget, t.time_budget_min, t.time_used_min,
@@ -530,7 +530,7 @@ func (db *DB) GetTasksUnblockedBy(completedTaskID string) ([]*Task, error) {
 	for rows.Next() {
 		task := &Task{}
 		err := rows.Scan(
-			&task.ID, &task.ProjectID, &task.QuestID, &task.GitHubIssueNumber, &task.Title, &task.Description, &task.ParentID,
+			&task.ID, &task.ProjectID, &task.QuestID, &task.IssueNumber, &task.Title, &task.Description, &task.ParentID,
 			&task.Type, &task.Hat, &task.Model, &task.Priority, &task.AutonomyLevel, &task.Status, &task.BaseBranch,
 			&task.WorktreePath, &task.BranchName, &task.ContentPath, &task.PRNumber, &task.PRMergedAt, &task.WorktreeCleanedAt,
 			&task.TokenBudget, &task.TimeBudgetMin, &task.TimeUsedMin,
@@ -601,7 +601,7 @@ func (db *DB) GetIncompleteBlockerIDs(taskID string) ([]string, error) {
 // Note: Token counts are computed from session_activity, not stored in tasks table
 func (db *DB) GetTasksReadyToAutoStart(completedTaskID string) ([]*Task, error) {
 	query := `
-		SELECT DISTINCT t.id, t.project_id, t.quest_id, t.github_issue_number, t.title, t.description, t.parent_id,
+		SELECT DISTINCT t.id, t.project_id, t.quest_id, t.issue_number, t.title, t.description, t.parent_id,
 		       t.type, t.hat, t.model, t.priority, t.autonomy_level, t.status, t.base_branch,
 		       t.worktree_path, t.branch_name, t.content_path, t.pr_number, t.pr_merged_at, t.worktree_cleaned_at,
 		       t.token_budget, t.time_budget_min, t.time_used_min,
@@ -629,7 +629,7 @@ func (db *DB) GetTasksReadyToAutoStart(completedTaskID string) ([]*Task, error) 
 	for rows.Next() {
 		task := &Task{}
 		err := rows.Scan(
-			&task.ID, &task.ProjectID, &task.QuestID, &task.GitHubIssueNumber, &task.Title, &task.Description, &task.ParentID,
+			&task.ID, &task.ProjectID, &task.QuestID, &task.IssueNumber, &task.Title, &task.Description, &task.ParentID,
 			&task.Type, &task.Hat, &task.Model, &task.Priority, &task.AutonomyLevel, &task.Status, &task.BaseBranch,
 			&task.WorktreePath, &task.BranchName, &task.ContentPath, &task.PRNumber, &task.PRMergedAt, &task.WorktreeCleanedAt,
 			&task.TokenBudget, &task.TimeBudgetMin, &task.TimeUsedMin,

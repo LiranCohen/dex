@@ -39,7 +39,7 @@ export const mockTask: Task = {
   ProjectID: 'project-1',
   QuestID: 'quest-1',
   QuestTitle: 'Test Quest',
-  GitHubIssueNumber: null,
+  IssueNumber: null,
   Title: 'Implement feature X',
   Description: 'A detailed description of the task',
   ParentID: null,

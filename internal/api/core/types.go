@@ -14,7 +14,7 @@ type TaskResponse struct {
 	ID                string   `json:"ID"`
 	ProjectID         string   `json:"ProjectID"`
 	QuestID           *string  `json:"QuestID"`
-	GitHubIssueNumber *int64   `json:"GitHubIssueNumber"`
+	IssueNumber       *int64   `json:"IssueNumber"`
 	Title             string   `json:"Title"`
 	Description       *string  `json:"Description"`
 	ParentID          *string  `json:"ParentID"`
@@ -65,8 +65,8 @@ func ToTaskResponse(t *db.Task) TaskResponse {
 	if t.QuestID.Valid {
 		resp.QuestID = &t.QuestID.String
 	}
-	if t.GitHubIssueNumber.Valid {
-		resp.GitHubIssueNumber = &t.GitHubIssueNumber.Int64
+	if t.IssueNumber.Valid {
+		resp.IssueNumber = &t.IssueNumber.Int64
 	}
 	if t.Description.Valid {
 		resp.Description = &t.Description.String

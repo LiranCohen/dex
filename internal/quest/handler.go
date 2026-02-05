@@ -15,6 +15,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/lirancohen/dex/internal/db"
+	"github.com/lirancohen/dex/internal/pathutil"
 	"github.com/lirancohen/dex/internal/realtime"
 	"github.com/lirancohen/dex/internal/session"
 	"github.com/lirancohen/dex/internal/toolbelt"
@@ -986,28 +987,9 @@ func (h *Handler) RunPreflightChecks(projectID string) (*PreflightCheck, error) 
 	return check, nil
 }
 
-// isValidProjectPath checks if a path is appropriate for use as a project directory
+// isValidProjectPath checks if a path is appropriate for use as a project directory.
 func (h *Handler) isValidProjectPath(path string) bool {
-	if path == "" || path == "." || path == ".." {
-		return false
-	}
-
-	// System directories that should never be used (including subdirectories)
-	systemPrefixes := []string{
-		"/usr/",
-		"/bin/",
-		"/sbin/",
-		"/lib/",
-		"/etc/",
-	}
-
-	for _, prefix := range systemPrefixes {
-		if strings.HasPrefix(path, prefix) {
-			return false
-		}
-	}
-
-	return true
+	return pathutil.IsValidProjectPath(path, h.baseDir)
 }
 
 // GetPreflightCheck performs preflight checks for a quest's project

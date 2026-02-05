@@ -171,7 +171,10 @@ func (s *Service) CloneRepo(cloneURL, name string) (string, error) {
 	if s.repos == nil {
 		return "", fmt.Errorf("repository manager not configured")
 	}
-	return s.repos.Clone(cloneURL, name)
+	return s.repos.CloneWithOptions(CloneOptions{
+		URL:  cloneURL,
+		Name: name,
+	})
 }
 
 // GetRepoPath returns the full path for a repository name

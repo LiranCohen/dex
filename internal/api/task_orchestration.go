@@ -9,6 +9,7 @@ import (
 
 	"github.com/lirancohen/dex/internal/db"
 	"github.com/lirancohen/dex/internal/git"
+	"github.com/lirancohen/dex/internal/pathutil"
 	"github.com/lirancohen/dex/internal/realtime"
 )
 
@@ -345,50 +346,8 @@ func (s *Server) isValidGitRepo(path string) bool {
 	return git.IsBareRepo(path)
 }
 
-// isValidProjectPath checks if the given path is appropriate for use as a project directory
-// Returns false for system directories and the dex installation directory itself
+// isValidProjectPath checks if the given path is appropriate for use as a project directory.
+// Returns false for system directories and the dex installation directory itself.
 func (s *Server) isValidProjectPath(path string) bool {
-	if path == "" || path == "." || path == ".." {
-		return false
-	}
-
-	absPath, err := filepath.Abs(path)
-	if err != nil {
-		return false
-	}
-
-	// System directories that should never be used for project code
-	// Note: We allow subdirectories of /opt/ (like /opt/dex/repos/) but not /opt/ itself
-	systemPaths := []string{
-		"/usr",
-		"/bin",
-		"/sbin",
-		"/lib",
-		"/lib64",
-		"/etc",
-		"/var",
-		"/root",
-		"/boot",
-		"/dev",
-		"/proc",
-		"/sys",
-	}
-
-	for _, sysPath := range systemPaths {
-		// Reject exact match or if path is under system directory
-		if absPath == sysPath || strings.HasPrefix(absPath, sysPath+"/") {
-			return false
-		}
-	}
-
-	// Reject the dex base directory itself (but allow subdirectories like repos/)
-	// s.baseDir is typically /opt/dex
-	if s.baseDir != "" {
-		dexBase, err := filepath.Abs(s.baseDir)
-		if err == nil && absPath == dexBase {
-			return false
-		}
-	}
-
-	return true
+	return pathutil.IsValidProjectPath(path, s.baseDir)
 }

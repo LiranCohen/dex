@@ -32,7 +32,6 @@ func main() {
 	staticDir := flag.String("static", "", "Path to frontend static files (e.g., ./frontend/dist)")
 	toolbeltConfig := flag.String("toolbelt", "", "Path to toolbelt.yaml config file (optional)")
 	baseDir := flag.String("base-dir", "", "Base Dex directory (default: /opt/dex). Repos at {base-dir}/repos/, worktrees at {base-dir}/worktrees/")
-	jwtSecret := flag.String("jwt-secret", "", "JWT signing secret (auto-generated if not provided)")
 	showVersion := flag.Bool("version", false, "Show version and exit")
 
 	// Mesh networking flags
@@ -217,8 +216,6 @@ func main() {
 		SigningKey:   privKey,
 		VerifyingKey: pubKey,
 	}
-	_ = *jwtSecret // Reserved for future use (loading keys from file)
-
 	// Configure mesh networking if enabled
 	var meshConfig *mesh.Config
 	if *meshEnabled {

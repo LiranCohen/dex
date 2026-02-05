@@ -176,15 +176,6 @@ type CloneOptions struct {
 	Name   string // Repository name (extracted from URL if empty)
 }
 
-// Clone clones a repository from a URL
-// Deprecated: Use CloneWithOptions for owner/repo structure support
-func (m *RepoManager) Clone(cloneURL, name string) (string, error) {
-	return m.CloneWithOptions(CloneOptions{
-		URL:  cloneURL,
-		Name: name,
-	})
-}
-
 // CloneWithOptions clones a repository with full options including owner/repo structure
 func (m *RepoManager) CloneWithOptions(opts CloneOptions) (string, error) {
 	name := opts.Name

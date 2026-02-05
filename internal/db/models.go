@@ -108,7 +108,7 @@ type Task struct {
 	ID                string
 	ProjectID         string
 	QuestID           sql.NullString // Optional: the Quest that spawned this task
-	GitHubIssueNumber sql.NullInt64  // GitHub Issue number for this Objective
+	IssueNumber sql.NullInt64 // Issue number on the git provider (GitHub or Forgejo)
 	Title             string
 	Description       sql.NullString
 	ParentID          sql.NullString
@@ -366,7 +366,7 @@ type Quest struct {
 	Model             string
 	AutoStartDefault  bool
 	ConversationPath  sql.NullString // Path to git conversation file: quests/{quest-id}/conversation.md
-	GitHubIssueNumber sql.NullInt64  // GitHub Issue number for this Quest
+	IssueNumber sql.NullInt64 // Issue number on the git provider (GitHub or Forgejo)
 	CreatedAt         time.Time
 	CompletedAt       sql.NullTime
 }

@@ -37,13 +37,13 @@ func (db *DB) GetQuestByID(id string) (*Quest, error) {
 
 	err := db.QueryRow(
 		`SELECT id, project_id, title, status, model, auto_start_default, conversation_path,
-		        github_issue_number, created_at, completed_at
+		        issue_number, created_at, completed_at
 		 FROM quests WHERE id = ?`,
 		id,
 	).Scan(
 		&quest.ID, &quest.ProjectID, &quest.Title, &quest.Status,
 		&quest.Model, &quest.AutoStartDefault, &quest.ConversationPath,
-		&quest.GitHubIssueNumber, &quest.CreatedAt, &quest.CompletedAt,
+		&quest.IssueNumber, &quest.CreatedAt, &quest.CompletedAt,
 	)
 
 	if err == sql.ErrNoRows {
@@ -60,7 +60,7 @@ func (db *DB) GetQuestByID(id string) (*Quest, error) {
 func (db *DB) GetQuestsByProjectID(projectID string) ([]*Quest, error) {
 	rows, err := db.Query(
 		`SELECT id, project_id, title, status, model, auto_start_default, conversation_path,
-		        github_issue_number, created_at, completed_at
+		        issue_number, created_at, completed_at
 		 FROM quests WHERE project_id = ? ORDER BY created_at DESC`,
 		projectID,
 	)
@@ -75,7 +75,7 @@ func (db *DB) GetQuestsByProjectID(projectID string) ([]*Quest, error) {
 		err := rows.Scan(
 			&quest.ID, &quest.ProjectID, &quest.Title, &quest.Status,
 			&quest.Model, &quest.AutoStartDefault, &quest.ConversationPath,
-			&quest.GitHubIssueNumber, &quest.CreatedAt, &quest.CompletedAt,
+			&quest.IssueNumber, &quest.CreatedAt, &quest.CompletedAt,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan quest: %w", err)
@@ -94,7 +94,7 @@ func (db *DB) GetQuestsByProjectID(projectID string) ([]*Quest, error) {
 func (db *DB) GetActiveQuests(projectID string) ([]*Quest, error) {
 	rows, err := db.Query(
 		`SELECT id, project_id, title, status, model, auto_start_default, conversation_path,
-		        github_issue_number, created_at, completed_at
+		        issue_number, created_at, completed_at
 		 FROM quests WHERE project_id = ? AND status = ? ORDER BY created_at DESC`,
 		projectID, QuestStatusActive,
 	)
@@ -109,7 +109,7 @@ func (db *DB) GetActiveQuests(projectID string) ([]*Quest, error) {
 		err := rows.Scan(
 			&quest.ID, &quest.ProjectID, &quest.Title, &quest.Status,
 			&quest.Model, &quest.AutoStartDefault, &quest.ConversationPath,
-			&quest.GitHubIssueNumber, &quest.CreatedAt, &quest.CompletedAt,
+			&quest.IssueNumber, &quest.CreatedAt, &quest.CompletedAt,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan quest: %w", err)
@@ -160,14 +160,14 @@ func (db *DB) UpdateQuestConversationPath(id, conversationPath string) error {
 	return nil
 }
 
-// UpdateQuestGitHubIssue updates the GitHub Issue number for a Quest
-func (db *DB) UpdateQuestGitHubIssue(id string, issueNumber int64) error {
+// UpdateQuestIssueNumber updates the issue number for a Quest.
+func (db *DB) UpdateQuestIssueNumber(id string, issueNumber int64) error {
 	result, err := db.Exec(
-		`UPDATE quests SET github_issue_number = ? WHERE id = ?`,
+		`UPDATE quests SET issue_number = ? WHERE id = ?`,
 		issueNumber, id,
 	)
 	if err != nil {
-		return fmt.Errorf("failed to update quest GitHub issue: %w", err)
+		return fmt.Errorf("failed to update quest issue number: %w", err)
 	}
 
 	rows, _ := result.RowsAffected()
@@ -351,7 +351,7 @@ func (db *DB) DeleteQuestMessages(questID string) error {
 // Note: Token counts are computed from session_activity, not stored in tasks table
 func (db *DB) GetTasksByQuestID(questID string) ([]*Task, error) {
 	rows, err := db.Query(
-		`SELECT id, project_id, quest_id, github_issue_number, title, description, parent_id, type, hat, model,
+		`SELECT id, project_id, quest_id, issue_number, title, description, parent_id, type, hat, model,
 		        priority, autonomy_level, status, base_branch, worktree_path, branch_name, content_path, pr_number,
 		        pr_merged_at, worktree_cleaned_at, token_budget, time_budget_min, time_used_min, dollar_budget, dollar_used,
 		        created_at, started_at, completed_at
@@ -367,7 +367,7 @@ func (db *DB) GetTasksByQuestID(questID string) ([]*Task, error) {
 	for rows.Next() {
 		task := &Task{}
 		err := rows.Scan(
-			&task.ID, &task.ProjectID, &task.QuestID, &task.GitHubIssueNumber, &task.Title, &task.Description,
+			&task.ID, &task.ProjectID, &task.QuestID, &task.IssueNumber, &task.Title, &task.Description,
 			&task.ParentID, &task.Type, &task.Hat, &task.Model, &task.Priority, &task.AutonomyLevel, &task.Status,
 			&task.BaseBranch, &task.WorktreePath, &task.BranchName, &task.ContentPath, &task.PRNumber,
 			&task.PRMergedAt, &task.WorktreeCleanedAt, &task.TokenBudget, &task.TimeBudgetMin, &task.TimeUsedMin,
