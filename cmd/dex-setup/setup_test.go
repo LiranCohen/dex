@@ -77,7 +77,7 @@ func TestPINVerification(t *testing.T) {
 			t.Errorf("Expected 200, got %d: %s", w.Code, w.Body.String())
 		}
 
-		// Check state advanced
+		// Check state advanced to mesh_setup
 		req = httptest.NewRequest(http.MethodGet, "/api/state", nil)
 		w = httptest.NewRecorder()
 		server.handleGetState(w, req)
@@ -85,34 +85,11 @@ func TestPINVerification(t *testing.T) {
 		var state SetupState
 		_ = json.NewDecoder(w.Body).Decode(&state)
 
-		if state.Phase != PhaseAccessChoice {
-			t.Errorf("Expected phase access_choice, got %s", state.Phase)
+		if state.Phase != PhaseMeshSetup {
+			t.Errorf("Expected phase mesh_setup, got %s", state.Phase)
 		}
-	})
-
-	t.Run("choose tailscale", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodPost, "/api/choose-tailscale", nil)
-		w := httptest.NewRecorder()
-
-		server.handleChooseTailscale(w, req)
-
-		if w.Code != http.StatusOK {
-			t.Errorf("Expected 200, got %d", w.Code)
-		}
-
-		// Check state
-		req = httptest.NewRequest(http.MethodGet, "/api/state", nil)
-		w = httptest.NewRecorder()
-		server.handleGetState(w, req)
-
-		var state SetupState
-		_ = json.NewDecoder(w.Body).Decode(&state)
-
-		if state.Phase != PhaseTailscaleSetup {
-			t.Errorf("Expected phase tailscale_setup, got %s", state.Phase)
-		}
-		if state.AccessMethod != "tailscale" {
-			t.Errorf("Expected access method tailscale, got %s", state.AccessMethod)
+		if !state.PINVerified {
+			t.Error("Expected PINVerified to be true")
 		}
 	})
 }
