@@ -17,28 +17,28 @@ type MessageType string
 
 const (
 	// HQ -> Worker messages
-	MsgTypeDispatch  MessageType = "dispatch"  // Send objective to worker
-	MsgTypeCancel    MessageType = "cancel"    // Cancel current objective
-	MsgTypeShutdown  MessageType = "shutdown"  // Gracefully stop worker
-	MsgTypePing      MessageType = "ping"      // Health check
+	MsgTypeDispatch MessageType = "dispatch" // Send objective to worker
+	MsgTypeCancel   MessageType = "cancel"   // Cancel current objective
+	MsgTypeShutdown MessageType = "shutdown" // Gracefully stop worker
+	MsgTypePing     MessageType = "ping"     // Health check
 
 	// Worker -> HQ messages
-	MsgTypeReady      MessageType = "ready"      // Worker is ready to receive work
-	MsgTypeAccepted   MessageType = "accepted"   // Objective accepted, starting execution
-	MsgTypeProgress   MessageType = "progress"   // Progress update (iteration complete)
-	MsgTypeActivity   MessageType = "activity"   // Activity events to sync
-	MsgTypeCompleted  MessageType = "completed"  // Objective completed
-	MsgTypeFailed     MessageType = "failed"     // Objective failed
-	MsgTypeCancelled  MessageType = "cancelled"  // Objective was cancelled
-	MsgTypePong       MessageType = "pong"       // Health check response
-	MsgTypeError      MessageType = "error"      // Protocol or worker error
+	MsgTypeReady       MessageType = "ready"        // Worker is ready to receive work
+	MsgTypeAccepted    MessageType = "accepted"     // Objective accepted, starting execution
+	MsgTypeProgress    MessageType = "progress"     // Progress update (iteration complete)
+	MsgTypeActivity    MessageType = "activity"     // Activity events to sync
+	MsgTypeCompleted   MessageType = "completed"    // Objective completed
+	MsgTypeFailed      MessageType = "failed"       // Objective failed
+	MsgTypeCancelled   MessageType = "cancelled"    // Objective was cancelled
+	MsgTypePong        MessageType = "pong"         // Health check response
+	MsgTypeError       MessageType = "error"        // Protocol or worker error
 	MsgTypeShutdownAck MessageType = "shutdown_ack" // Acknowledging shutdown
 )
 
 // Message is the envelope for all protocol messages.
 type Message struct {
 	Type      MessageType     `json:"type"`
-	ID        string          `json:"id,omitempty"`        // Message ID for correlation
+	ID        string          `json:"id,omitempty"` // Message ID for correlation
 	Timestamp time.Time       `json:"timestamp"`
 	Payload   json.RawMessage `json:"payload,omitempty"`
 }
@@ -69,13 +69,13 @@ type AcceptedPayload struct {
 
 // ProgressPayload is the payload for MsgTypeProgress.
 type ProgressPayload struct {
-	ObjectiveID  string  `json:"objective_id"`
-	SessionID    string  `json:"session_id"`
-	Iteration    int     `json:"iteration"`
-	TokensInput  int     `json:"tokens_input"`
-	TokensOutput int     `json:"tokens_output"`
-	Hat          string  `json:"hat,omitempty"`
-	Status       string  `json:"status,omitempty"` // Current status description
+	ObjectiveID  string `json:"objective_id"`
+	SessionID    string `json:"session_id"`
+	Iteration    int    `json:"iteration"`
+	TokensInput  int    `json:"tokens_input"`
+	TokensOutput int    `json:"tokens_output"`
+	Hat          string `json:"hat,omitempty"`
+	Status       string `json:"status,omitempty"` // Current status description
 }
 
 // ActivityPayload is the payload for MsgTypeActivity.

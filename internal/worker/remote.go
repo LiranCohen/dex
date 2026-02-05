@@ -11,12 +11,12 @@ import (
 
 // RemoteWorker manages a worker connected via mesh network.
 type RemoteWorker struct {
-	id        string
-	hostname  string
-	meshIP    string
-	pubKey    [32]byte
-	conn      net.Conn
-	protocol  *Conn
+	id       string
+	hostname string
+	meshIP   string
+	pubKey   [32]byte
+	conn     net.Conn
+	protocol *Conn
 
 	state        WorkerState
 	objectiveID  string

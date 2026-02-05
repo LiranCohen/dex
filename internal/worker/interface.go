@@ -59,19 +59,19 @@ const (
 
 // WorkerStatus contains the current status of a worker.
 type WorkerStatus struct {
-	ID           string       `json:"id"`
-	Type         WorkerType   `json:"type"`
-	State        WorkerState  `json:"state"`
-	Hostname     string       `json:"hostname,omitempty"`
-	MeshIP       string       `json:"mesh_ip,omitempty"`
-	ObjectiveID  string       `json:"objective_id,omitempty"`  // Current objective (if running)
-	SessionID    string       `json:"session_id,omitempty"`    // Current session (if running)
-	Iteration    int          `json:"iteration,omitempty"`     // Current iteration
-	TokensUsed   int          `json:"tokens_used,omitempty"`   // Tokens used in current objective
-	LastActivity time.Time    `json:"last_activity,omitempty"` // Last activity timestamp
-	StartedAt    time.Time    `json:"started_at,omitempty"`    // When worker started
-	Error        string       `json:"error,omitempty"`         // Error message if in error state
-	Version      string       `json:"version,omitempty"`       // Worker binary version
+	ID           string      `json:"id"`
+	Type         WorkerType  `json:"type"`
+	State        WorkerState `json:"state"`
+	Hostname     string      `json:"hostname,omitempty"`
+	MeshIP       string      `json:"mesh_ip,omitempty"`
+	ObjectiveID  string      `json:"objective_id,omitempty"`  // Current objective (if running)
+	SessionID    string      `json:"session_id,omitempty"`    // Current session (if running)
+	Iteration    int         `json:"iteration,omitempty"`     // Current iteration
+	TokensUsed   int         `json:"tokens_used,omitempty"`   // Tokens used in current objective
+	LastActivity time.Time   `json:"last_activity,omitempty"` // Last activity timestamp
+	StartedAt    time.Time   `json:"started_at,omitempty"`    // When worker started
+	Error        string      `json:"error,omitempty"`         // Error message if in error state
+	Version      string      `json:"version,omitempty"`       // Worker binary version
 }
 
 // WorkerConfig contains configuration for spawning a worker.
@@ -84,10 +84,10 @@ type WorkerConfig struct {
 	Type WorkerType
 
 	// For local workers:
-	BinaryPath string // Path to dex-worker binary (default: find in PATH)
-	DataDir    string // Worker's data directory
-	MaxMemoryMB int   // Memory limit in MB (0 = no limit)
-	MaxCPU     float64 // CPU limit as fraction (0 = no limit)
+	BinaryPath  string  // Path to dex-worker binary (default: find in PATH)
+	DataDir     string  // Worker's data directory
+	MaxMemoryMB int     // Memory limit in MB (0 = no limit)
+	MaxCPU      float64 // CPU limit as fraction (0 = no limit)
 
 	// For remote workers:
 	MeshIP    string // Mesh IP address of remote worker

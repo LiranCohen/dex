@@ -98,20 +98,20 @@ type StatusUpdate struct {
 
 // CompletionReport represents the final report sent to HQ when an objective completes.
 type CompletionReport struct {
-	ObjectiveID   string         `json:"objective_id"`
-	SessionID     string         `json:"session_id"`
-	Status        string         `json:"status"` // completed, failed, cancelled
-	Summary       string         `json:"summary"`
-	PRNumber      int            `json:"pr_number,omitempty"`
-	PRURL         string         `json:"pr_url,omitempty"`
-	BranchName    string         `json:"branch_name,omitempty"`
-	TotalTokens   int            `json:"total_tokens"`
-	TotalCost     float64        `json:"total_cost"`
-	Iterations    int            `json:"iterations"`
-	ChecklistDone []string       `json:"checklist_done,omitempty"`
-	Errors        []string       `json:"errors,omitempty"`
+	ObjectiveID   string          `json:"objective_id"`
+	SessionID     string          `json:"session_id"`
+	Status        string          `json:"status"` // completed, failed, cancelled
+	Summary       string          `json:"summary"`
+	PRNumber      int             `json:"pr_number,omitempty"`
+	PRURL         string          `json:"pr_url,omitempty"`
+	BranchName    string          `json:"branch_name,omitempty"`
+	TotalTokens   int             `json:"total_tokens"`
+	TotalCost     float64         `json:"total_cost"`
+	Iterations    int             `json:"iterations"`
+	ChecklistDone []string        `json:"checklist_done,omitempty"`
+	Errors        []string        `json:"errors,omitempty"`
 	Activities    []ActivityEvent `json:"activities"` // Final batch of unsynced activities
-	CompletedAt   time.Time      `json:"completed_at"`
+	CompletedAt   time.Time       `json:"completed_at"`
 }
 
 // HeartbeatMessage is sent periodically to HQ to indicate the worker is alive.
@@ -129,11 +129,11 @@ type Heartbeat struct {
 
 // EnrollmentRequest is sent by a worker to HQ to request enrollment.
 type EnrollmentRequest struct {
-	WorkerID  string   `json:"worker_id"`
-	Hostname  string   `json:"hostname"`
-	PublicKey string   `json:"public_key"` // Base64-encoded NaCl public key
-	MeshIP    string   `json:"mesh_ip"`
-	Tags      []string `json:"tags,omitempty"`
+	WorkerID  string    `json:"worker_id"`
+	Hostname  string    `json:"hostname"`
+	PublicKey string    `json:"public_key"` // Base64-encoded NaCl public key
+	MeshIP    string    `json:"mesh_ip"`
+	Tags      []string  `json:"tags,omitempty"`
 	Timestamp time.Time `json:"timestamp"`
 }
 

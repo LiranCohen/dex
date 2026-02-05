@@ -12,24 +12,24 @@ import (
 
 // LocalWorker manages a worker running as a subprocess on the same machine.
 type LocalWorker struct {
-	id        string
-	config    *WorkerConfig
-	cmd       *exec.Cmd
-	conn      *Conn
-	stdin     io.WriteCloser
-	stdout    io.ReadCloser
-	stderr    io.ReadCloser
+	id     string
+	config *WorkerConfig
+	cmd    *exec.Cmd
+	conn   *Conn
+	stdin  io.WriteCloser
+	stdout io.ReadCloser
+	stderr io.ReadCloser
 
-	state       WorkerState
-	objectiveID string
-	sessionID   string
-	iteration   int
-	tokensUsed  int
+	state        WorkerState
+	objectiveID  string
+	sessionID    string
+	iteration    int
+	tokensUsed   int
 	lastActivity time.Time
-	startedAt   time.Time
+	startedAt    time.Time
 	workerPubKey string
-	version     string
-	err         error
+	version      string
+	err          error
 
 	mu        sync.RWMutex
 	done      chan struct{}

@@ -18,22 +18,22 @@ type Manager struct {
 	config    *ManagerConfig
 	hqKeyPair *crypto.KeyPair
 
-	workers     map[string]Worker      // All workers by ID
-	localPool   []*LocalWorker         // Local subprocess workers
-	remotePool  []*RemoteWorker        // Remote mesh workers
-	queue       chan *dispatchRequest  // Pending dispatch requests
+	workers    map[string]Worker     // All workers by ID
+	localPool  []*LocalWorker        // Local subprocess workers
+	remotePool []*RemoteWorker       // Remote mesh workers
+	queue      chan *dispatchRequest // Pending dispatch requests
 
 	// Callbacks for events
-	onProgress   func(objectiveID string, progress *ProgressPayload)
-	onActivity   func(events []*ActivityEvent)
-	onCompleted  func(report *CompletionReport)
-	onFailed     func(objectiveID, sessionID, error string)
+	onProgress  func(objectiveID string, progress *ProgressPayload)
+	onActivity  func(events []*ActivityEvent)
+	onCompleted func(report *CompletionReport)
+	onFailed    func(objectiveID, sessionID, error string)
 
-	mu       sync.RWMutex
-	ctx      context.Context
-	cancel   context.CancelFunc
-	wg       sync.WaitGroup
-	started  bool
+	mu      sync.RWMutex
+	ctx     context.Context
+	cancel  context.CancelFunc
+	wg      sync.WaitGroup
+	started bool
 }
 
 type dispatchRequest struct {

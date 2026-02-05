@@ -16,8 +16,10 @@ import (
 // It uses application-level encryption for sensitive data.
 //
 // For full-database encryption, SQLCipher can be used as an alternative:
-//   import _ "github.com/mutecomm/go-sqlcipher"
-//   sql.Open("sqlite3", "worker.db?_pragma_key=passphrase")
+//
+//	import _ "github.com/mutecomm/go-sqlcipher"
+//	sql.Open("sqlite3", "worker.db?_pragma_key=passphrase")
+//
 // This requires CGO and the SQLCipher library.
 type LocalDB struct {
 	db        *sql.DB
