@@ -1,0 +1,23 @@
+[package]
+name = "dex-client"
+version = "0.1.0"
+description = "Dex Thin Client"
+authors = ["Liran Cohen"]
+edition = "2021"
+
+[lib]
+name = "dex_client_lib"
+crate-type = ["lib", "cdylib", "staticlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-notification = "2"
+tauri-plugin-shell = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+keyring = { version = "3", features = ["apple-native", "windows-native", "linux-native"] }
