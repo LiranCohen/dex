@@ -266,6 +266,15 @@ func (m *WorktreeManager) IsBranchMerged(projectPath, branchName, baseBranch str
 	fetchCmd.Dir = projectPath
 	_, _ = fetchCmd.CombinedOutput() // Ignore fetch errors - may not have network
 
+	// Determine which base ref to use (prefer remote, fall back to local)
+	baseRef := "origin/" + baseBranch
+	checkBaseCmd := exec.Command("git", "rev-parse", "--verify", "--quiet", baseRef)
+	checkBaseCmd.Dir = projectPath
+	if checkBaseCmd.Run() != nil {
+		// Remote base doesn't exist, use local branch
+		baseRef = baseBranch
+	}
+
 	// Check if branch exists locally
 	checkCmd := exec.Command("git", "rev-parse", "--verify", "--quiet", branchName)
 	checkCmd.Dir = projectPath
@@ -284,7 +293,7 @@ func (m *WorktreeManager) IsBranchMerged(projectPath, branchName, baseBranch str
 
 	// Check if branchName is an ancestor of baseBranch (i.e., merged)
 	// git merge-base --is-ancestor <branch> <base> returns 0 if true
-	cmd := exec.Command("git", "merge-base", "--is-ancestor", branchName, "origin/"+baseBranch)
+	cmd := exec.Command("git", "merge-base", "--is-ancestor", branchName, baseRef)
 	cmd.Dir = projectPath
 	err := cmd.Run()
 
