@@ -352,17 +352,17 @@ func NewServer(database *db.DB, cfg Config) *Server {
 			// onActivity: store activity events in DB
 			func(events []*worker.ActivityEvent) {
 				for _, evt := range events {
-					_ = database.InsertActivity(&db.Activity{
-						ID:           evt.ID,
-						SessionID:    evt.SessionID,
-						Iteration:    evt.Iteration,
-						Type:         evt.EventType,
-						Content:      evt.Content,
-						TokensInput:  evt.TokensInput,
-						TokensOutput: evt.TokensOutput,
-						Hat:          evt.Hat,
-						CreatedAt:    evt.CreatedAt,
-					})
+					tokensIn := evt.TokensInput
+					tokensOut := evt.TokensOutput
+					_, _ = database.CreateSessionActivity(
+						evt.SessionID,
+						evt.Iteration,
+						evt.EventType,
+						evt.Hat,
+						evt.Content,
+						&tokensIn,
+						&tokensOut,
+					)
 				}
 			},
 			// onCompleted: handle task completion

@@ -193,9 +193,9 @@ func (h *Handler) handleDispatch(c echo.Context) error {
 	projectInfo := worker.Project{
 		ID:          project.ID,
 		Name:        project.Name,
-		GitHubOwner: project.GitHubOwner,
-		GitHubRepo:  project.GitHubRepo,
-		CloneURL:    fmt.Sprintf("https://github.com/%s/%s.git", project.GitHubOwner, project.GitHubRepo),
+		GitHubOwner: project.GetOwner(),
+		GitHubRepo:  project.GetRepo(),
+		CloneURL:    fmt.Sprintf("https://github.com/%s/%s.git", project.GetOwner(), project.GetRepo()),
 	}
 
 	// Build sync config

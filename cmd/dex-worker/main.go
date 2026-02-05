@@ -64,7 +64,7 @@ func main() {
 	}
 
 	fmt.Fprintf(os.Stderr, "Worker %s starting (mode: %s)\n", identity.ID, *mode)
-	fmt.Fprintf(os.Stderr, "Public key: %s\n", identity.PublicKeyB64)
+	fmt.Fprintf(os.Stderr, "Public key: %s\n", identity.PublicKey())
 
 	// Set up context with signal handling
 	ctx, cancel := context.WithCancel(context.Background())
@@ -117,7 +117,7 @@ func runSubprocessMode(ctx context.Context, identity *crypto.WorkerIdentity, dat
 	}
 
 	// Send ready message
-	if err := conn.SendReady(identity.ID, version, identity.PublicKeyB64); err != nil {
+	if err := conn.SendReady(identity.ID, version, identity.PublicKey()); err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to send ready: %v\n", err)
 		os.Exit(1)
 	}
