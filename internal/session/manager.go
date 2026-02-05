@@ -1072,6 +1072,34 @@ func (m *Manager) createPRForTask(taskID, worktreePath string) {
 		if onPRCreated != nil {
 			go onPRCreated(taskID, pr.Number)
 		}
+
+		// Auto-merge the PR unless autonomy_level is 0 (requires manual approval)
+		if task.AutonomyLevel == 0 {
+			fmt.Printf("createPRForTask: autonomy_level=0 for task %s, skipping auto-merge\n", taskID)
+			return
+		}
+
+		if err := forgejoProvider.MergePR(ctx, owner, repo, pr.Number, gitprovider.MergeSquash); err != nil {
+			fmt.Printf("createPRForTask: failed to merge Forgejo PR #%d for task %s: %v (left open for manual merge)\n", pr.Number, taskID, err)
+			return
+		}
+		fmt.Printf("createPRForTask: merged Forgejo PR #%d for task %s\n", pr.Number, taskID)
+
+		// Cleanup worktree after successful merge
+		m.mu.RLock()
+		gitService := m.gitService
+		m.mu.RUnlock()
+
+		if gitService != nil {
+			if err := gitService.CleanupTaskWorktree(project.RepoPath, taskID, true); err != nil {
+				fmt.Printf("createPRForTask: failed to cleanup worktree for task %s: %v\n", taskID, err)
+			} else {
+				if err := m.db.MarkTaskWorktreeCleaned(taskID); err != nil {
+					fmt.Printf("createPRForTask: failed to mark worktree cleaned for task %s: %v\n", taskID, err)
+				}
+				fmt.Printf("createPRForTask: cleaned up worktree for task %s after merge\n", taskID)
+			}
+		}
 		return
 	}
 
