@@ -143,7 +143,8 @@ func fileExists(path string) bool {
 
 func checksumMatches(path, expected string) bool {
 	if expected == "" {
-		return true // No checksum to verify
+		fmt.Printf("Warning: no checksum configured for %s, skipping verification\n", filepath.Base(path))
+		return true
 	}
 
 	f, err := os.Open(path)

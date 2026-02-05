@@ -161,6 +161,11 @@ CREATE TABLE IF NOT EXISTS projects (
 	repo_path TEXT NOT NULL,
 	github_owner TEXT,
 	github_repo TEXT,
+	git_provider TEXT,       -- "forgejo" or "github" (default: github for backwards compat)
+	git_owner TEXT,          -- Owner/org on the git provider
+	git_repo TEXT,           -- Repo name on the git provider
+	remote_origin TEXT,      -- git remote origin URL
+	remote_upstream TEXT,    -- git remote upstream URL (if fork)
 	default_branch TEXT DEFAULT 'main',
 	services TEXT,  -- JSON blob for ProjectServices
 	created_at DATETIME DEFAULT CURRENT_TIMESTAMP

@@ -91,19 +91,19 @@ func (s *ActiveSession) Cost() float64 {
 // This allows the session manager to get installation-specific clients for GitHub Apps
 type GitHubClientFetcher func(ctx context.Context, login string) (*toolbelt.GitHubClient, error)
 
-// TaskCompletedCallback is called when a task completes (for GitHub sync)
+// TaskCompletedCallback is called when a task completes (for issue sync)
 type TaskCompletedCallback func(taskID string)
 
-// TaskFailedCallback is called when a task fails or is cancelled (for GitHub sync)
+// TaskFailedCallback is called when a task fails or is cancelled (for issue sync)
 type TaskFailedCallback func(taskID string, reason string)
 
-// PRCreatedCallback is called when a PR is created for a task (for GitHub sync)
+// PRCreatedCallback is called when a PR is created for a task (for issue sync)
 type PRCreatedCallback func(taskID string, prNumber int)
 
-// ChecklistUpdatedCallback is called when a checklist item is updated (for GitHub sync)
+// ChecklistUpdatedCallback is called when a checklist item is updated (for issue sync)
 type ChecklistUpdatedCallback func(taskID string)
 
-// TaskStatusCallback is called when a task status changes (for GitHub sync)
+// TaskStatusCallback is called when a task status changes (for issue sync)
 type TaskStatusCallback func(taskID string, status string)
 
 type Manager struct {
@@ -610,13 +610,8 @@ func (m *Manager) runSession(ctx context.Context, session *ActiveSession) {
 				fmt.Printf("runSession: warning - failed to get project for executor: %v\n", err)
 			}
 			if project != nil {
-				var owner, repo string
-				if project.GitHubOwner.Valid {
-					owner = project.GitHubOwner.String
-				}
-				if project.GitHubRepo.Valid {
-					repo = project.GitHubRepo.String
-				}
+				owner := project.GetOwner()
+				repo := project.GetRepo()
 
 				// Get GitHub client - try static client first, then fetcher
 				githubClient := m.githubClient

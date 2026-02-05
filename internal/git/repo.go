@@ -23,7 +23,7 @@ func NewRepoManager(reposDir string) *RepoManager {
 
 // CreateOptions configures a new repository
 type CreateOptions struct {
-	Owner         string // GitHub owner/org (used for path: {reposDir}/{owner}/{repo})
+	Owner         string // Repository owner/org (used for path: {reposDir}/{owner}/{repo})
 	Name          string // Repository name (will be sanitized)
 	Description   string // For README
 	DefaultBranch string // Default: "main"
@@ -172,7 +172,7 @@ func (m *RepoManager) GetReposDir() string {
 // CloneOptions configures a clone operation
 type CloneOptions struct {
 	URL    string // Clone URL
-	Owner  string // GitHub owner/org (for path: {reposDir}/{owner}/{repo})
+	Owner  string // Repository owner/org (for path: {reposDir}/{owner}/{repo})
 	Name   string // Repository name (extracted from URL if empty)
 }
 
