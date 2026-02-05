@@ -36,7 +36,7 @@ func main() {
 	// Mesh networking flags
 	meshEnabled := flag.Bool("mesh", false, "Enable mesh networking")
 	meshHostname := flag.String("mesh-hostname", "", "Hostname for this node on the mesh network")
-	meshControlURL := flag.String("mesh-control-url", "https://central.dex.dev", "Central coordination service URL")
+	meshControlURL := flag.String("mesh-control-url", "https://central.enbox.id", "Central coordination service URL")
 	meshAuthKey := flag.String("mesh-auth-key", "", "Pre-auth key for automatic mesh registration")
 	meshStateDir := flag.String("mesh-state-dir", "", "Directory for mesh state (default: {base-dir}/mesh)")
 

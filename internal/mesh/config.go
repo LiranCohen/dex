@@ -12,7 +12,7 @@ type Config struct {
 	StateDir string `yaml:"state_dir"`
 
 	// ControlURL is the Central coordination service URL.
-	// Production: https://central.dex.dev
+	// Production: https://central.enbox.id
 	// For local development, use http://localhost:8080 or similar.
 	ControlURL string `yaml:"control_url"`
 
@@ -31,7 +31,7 @@ func DefaultConfig() Config {
 	return Config{
 		Enabled:    false,
 		StateDir:   "/var/lib/dex/mesh",
-		ControlURL: "https://central.dex.dev",
+		ControlURL: "https://central.enbox.id",
 		IsHQ:       true, // dex server instances are typically HQ
 	}
 }

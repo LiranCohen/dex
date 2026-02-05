@@ -176,7 +176,7 @@ func (s *SetupServer) handleVerifyPIN(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	s.state.PINVerified = true
 	s.state.Phase = PhaseMeshSetup
-	s.state.MeshControlURL = "https://central.dex.dev" // Default
+	s.state.MeshControlURL = "https://central.enbox.id" // Default
 	hostname, _ := os.Hostname()
 	s.state.MeshHostname = hostname
 	s.mu.Unlock()
@@ -213,7 +213,7 @@ func (s *SetupServer) handleMeshConfigure(w http.ResponseWriter, r *http.Request
 		req.Hostname, _ = os.Hostname()
 	}
 	if req.ControlURL == "" {
-		req.ControlURL = "https://central.dex.dev"
+		req.ControlURL = "https://central.enbox.id"
 	}
 
 	// Save mesh configuration
