@@ -21,7 +21,7 @@ const (
 type Worker struct {
 	ID         string       `json:"id"`
 	Hostname   string       `json:"hostname"`
-	PublicKey  string       `json:"public_key"` // Base64-encoded NaCl public key
+	PublicKey  string       `json:"public_key"` // age X25519 public key (age1...)
 	Status     WorkerStatus `json:"status"`
 	EnrolledAt *time.Time   `json:"enrolled_at,omitempty"`
 	LastSeenAt *time.Time   `json:"last_seen_at,omitempty"`

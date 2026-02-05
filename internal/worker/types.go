@@ -16,7 +16,7 @@ type ObjectivePayload struct {
 	// Project contains project metadata needed for execution
 	Project Project `json:"project"`
 
-	// SecretsEncrypted contains NaCl-encrypted secrets
+	// SecretsEncrypted contains age-encrypted secrets (X25519)
 	// Only the target worker can decrypt this using their private key
 	SecretsEncrypted string `json:"secrets_encrypted"`
 
@@ -131,7 +131,7 @@ type Heartbeat struct {
 type EnrollmentRequest struct {
 	WorkerID  string    `json:"worker_id"`
 	Hostname  string    `json:"hostname"`
-	PublicKey string    `json:"public_key"` // Base64-encoded NaCl public key
+	PublicKey string    `json:"public_key"` // age X25519 public key (age1...)
 	MeshIP    string    `json:"mesh_ip"`
 	Tags      []string  `json:"tags,omitempty"`
 	Timestamp time.Time `json:"timestamp"`
