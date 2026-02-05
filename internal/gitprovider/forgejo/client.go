@@ -112,6 +112,9 @@ func (c *Client) UpdateIssue(ctx context.Context, owner, repo string, number int
 	if opts.Body != nil {
 		body["body"] = *opts.Body
 	}
+	if opts.State != nil {
+		body["state"] = *opts.State
+	}
 
 	_, err := c.patch(ctx, fmt.Sprintf("/api/v1/repos/%s/%s/issues/%d", owner, repo, number), body)
 	return err

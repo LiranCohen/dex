@@ -580,6 +580,15 @@ func (s *Server) Start() error {
 		if err := s.forgejoManager.Start(ctx); err != nil {
 			return fmt.Errorf("forgejo start failed: %w", err)
 		}
+		// Pass Forgejo credentials to session manager for PR creation
+		if s.sessionManager != nil {
+			botToken, err := s.forgejoManager.BotToken()
+			if err == nil {
+				s.sessionManager.SetForgejoCredentials(s.forgejoManager.BaseURL(), botToken)
+			} else {
+				fmt.Printf("Warning: Forgejo started but bot token unavailable: %v\n", err)
+			}
+		}
 	}
 
 	if s.certFile != "" && s.keyFile != "" {

@@ -10,6 +10,8 @@ import (
 
 	"github.com/lirancohen/dex/internal/db"
 	"github.com/lirancohen/dex/internal/git"
+	"github.com/lirancohen/dex/internal/gitprovider"
+	forgejoclient "github.com/lirancohen/dex/internal/gitprovider/forgejo"
 	"github.com/lirancohen/dex/internal/orchestrator"
 	"github.com/lirancohen/dex/internal/realtime"
 	"github.com/lirancohen/dex/internal/toolbelt"
@@ -113,12 +115,14 @@ type Manager struct {
 	anthropicClient *toolbelt.AnthropicClient
 	broadcaster     *realtime.Broadcaster   // Publishes to both legacy and new systems
 
-	// Git and GitHub for PR creation on completion
+	// Git and GitHub/Forgejo for PR creation on completion
 	gitOps              *git.Operations
 	gitService          *git.Service           // For worktree cleanup after merge
 	repoManager         *git.RepoManager       // For cloning repos to permanent location
 	githubClient        *toolbelt.GitHubClient // Static client (PAT-based)
 	githubClientFetcher GitHubClientFetcher    // Dynamic client fetcher (GitHub App)
+	forgejoBaseURL      string                 // Forgejo API base URL (e.g., http://127.0.0.1:3000)
+	forgejoBotToken     string                 // Forgejo bot account API token
 
 	// Event callbacks for GitHub sync
 	onTaskCompleted    TaskCompletedCallback
@@ -277,6 +281,14 @@ func (m *Manager) SetOnTaskStatus(callback TaskStatusCallback) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.onTaskStatus = callback
+}
+
+// SetForgejoCredentials sets the Forgejo API credentials for PR creation.
+func (m *Manager) SetForgejoCredentials(baseURL, botToken string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.forgejoBaseURL = baseURL
+	m.forgejoBotToken = botToken
 }
 
 // notifyTaskStatus notifies listeners of a task status change
@@ -1023,10 +1035,48 @@ func (m *Manager) createPRForTask(taskID, worktreePath string) {
 	}
 
 	// For Forgejo projects, PRs are created via the Forgejo API.
-	// The push is a no-op (bare repo worktrees), so we just need the PR.
+	// The push is a no-op (bare repo worktrees), so we just create the PR.
 	if project.IsForgejo() {
-		fmt.Printf("createPRForTask: Forgejo project %s — push is no-op, PR creation via Forgejo API not yet wired\n", project.ID)
-		// TODO: Wire Forgejo gitprovider.CreatePR here in Phase 6 (quest sync)
+		m.mu.RLock()
+		baseURL := m.forgejoBaseURL
+		botToken := m.forgejoBotToken
+		m.mu.RUnlock()
+
+		if baseURL == "" || botToken == "" {
+			fmt.Printf("createPRForTask: Forgejo credentials not configured, skipping PR for task %s\n", taskID)
+			return
+		}
+
+		branchName, err := gitOps.GetCurrentBranch(worktreePath)
+		if err != nil {
+			fmt.Printf("createPRForTask: failed to get branch for task %s: %v\n", taskID, err)
+			return
+		}
+
+		forgejoProvider := forgejoclient.New(baseURL, botToken)
+		pr, err := forgejoProvider.CreatePR(ctx, owner, repo, gitprovider.CreatePROpts{
+			Title: task.Title,
+			Body:  fmt.Sprintf("Closes task: %s\n\n%s", taskID, task.GetDescription()),
+			Head:  branchName,
+			Base:  project.DefaultBranch,
+		})
+		if err != nil {
+			fmt.Printf("createPRForTask: failed to create Forgejo PR for task %s: %v\n", taskID, err)
+			return
+		}
+
+		if err := m.db.UpdateTaskPRNumber(taskID, pr.Number); err != nil {
+			fmt.Printf("createPRForTask: failed to update task %s with PR number: %v\n", taskID, err)
+			return
+		}
+		fmt.Printf("createPRForTask: created Forgejo PR #%d for task %s\n", pr.Number, taskID)
+
+		m.mu.RLock()
+		onPRCreated := m.onPRCreated
+		m.mu.RUnlock()
+		if onPRCreated != nil {
+			go onPRCreated(taskID, pr.Number)
+		}
 		return
 	}
 

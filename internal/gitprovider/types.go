@@ -61,6 +61,7 @@ type CreateIssueOpts struct {
 type UpdateIssueOpts struct {
 	Title *string `json:"title,omitempty"`
 	Body  *string `json:"body,omitempty"`
+	State *string `json:"state,omitempty"` // "open" or "closed"
 }
 
 // CreatePROpts contains options for creating a pull request.
