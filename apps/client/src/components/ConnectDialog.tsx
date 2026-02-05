@@ -11,7 +11,7 @@ interface ConnectDialogProps {
 }
 
 export function ConnectDialog({ onConnect, onCancel }: ConnectDialogProps) {
-  const [controlURL, setControlURL] = useState("https://central.dex.dev");
+  const [controlURL, setControlURL] = useState("https://central.enbox.id");
   const [authKey, setAuthKey] = useState("");
   const [hostname, setHostname] = useState("");
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -64,7 +64,7 @@ export function ConnectDialog({ onConnect, onCancel }: ConnectDialogProps) {
                   type="url"
                   value={controlURL}
                   onChange={(e) => setControlURL(e.target.value)}
-                  placeholder="https://central.dex.dev"
+                  placeholder="https://central.enbox.id"
                 />
               </div>
 
