@@ -26,9 +26,10 @@ const (
 
 // Checksums for supported platforms, keyed by "os-arch".
 // These must be updated whenever ForgejoVersion changes.
+// Checksums from: https://codeberg.org/forgejo/forgejo/releases/tag/v9.0.3
 var forgejoChecksums = map[string]string{
-	"linux-amd64": "", // TODO: populate when mirror is set up
-	"linux-arm64": "", // TODO: populate when mirror is set up
+	"linux-amd64": "51b3a6c0b397c66bd4adfc482b7d582b1b60a53f3205486ada9e6357afb03ebb",
+	"linux-arm64": "295677cffa6fab4535b626686ddea1e5eb5ca1a964c84f04167a7d381efe2aa0",
 }
 
 // ensureBinary downloads the Forgejo binary if it doesn't exist or

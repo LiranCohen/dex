@@ -68,13 +68,14 @@ func (m *Manager) bootstrap(ctx context.Context) error {
 		return fmt.Errorf("failed to store bot token: %w", err)
 	}
 
-	// 5. Create default "dex" organization so projects have a home
-	if err := m.apiCreateOrg(ctx, adminToken, "dex"); err != nil {
+	// 5. Create default organization so projects have a home
+	orgName := m.config.GetDefaultOrgName()
+	if err := m.apiCreateOrg(ctx, adminToken, orgName); err != nil {
 		return fmt.Errorf("failed to create default org: %w", err)
 	}
 
 	// 6. Add bot user to the org so it can create repos and PRs
-	if err := m.apiAddOrgMember(ctx, adminToken, "dex", botUsername); err != nil {
+	if err := m.apiAddOrgMember(ctx, adminToken, orgName, botUsername); err != nil {
 		return fmt.Errorf("failed to add bot to org: %w", err)
 	}
 

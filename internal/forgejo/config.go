@@ -29,15 +29,20 @@ type Config struct {
 	// RootURL is the external-facing URL for Forgejo.
 	// Used in generated links, clone URLs, etc.
 	RootURL string
+
+	// DefaultOrgName is the name of the default organization created during bootstrap.
+	// Projects are created under this org. Defaults to "workspace".
+	DefaultOrgName string
 }
 
 // DefaultConfig returns a Config with sensible defaults.
 func DefaultConfig(dataDir string) Config {
 	return Config{
-		DataDir:  filepath.Join(dataDir, "forgejo"),
-		HTTPAddr: "127.0.0.1",
-		HTTPPort: 3000,
-		RootURL:  "http://127.0.0.1:3000",
+		DataDir:        filepath.Join(dataDir, "forgejo"),
+		HTTPAddr:       "127.0.0.1",
+		HTTPPort:       3000,
+		RootURL:        "http://127.0.0.1:3000",
+		DefaultOrgName: "workspace",
 	}
 }
 
@@ -62,6 +67,14 @@ func (c *Config) GetRepoRoot() string {
 // GetDBPath returns the path to Forgejo's SQLite database.
 func (c *Config) GetDBPath() string {
 	return filepath.Join(c.DataDir, "forgejo.db")
+}
+
+// GetDefaultOrgName returns the default organization name.
+func (c *Config) GetDefaultOrgName() string {
+	if c.DefaultOrgName != "" {
+		return c.DefaultOrgName
+	}
+	return "workspace"
 }
 
 // WriteAppIni generates and writes the Forgejo configuration file.
