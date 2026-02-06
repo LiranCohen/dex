@@ -514,8 +514,11 @@ BANNER
         echo ""
 
         if [ -n "$namespace" ]; then
+            # Get hostname from config (defaults to "hq" if not set)
+            local hostname
+            hostname=$(jq -r '.hostname // "hq"' "$DATA_DIR/config.json" 2>/dev/null || echo "hq")
             echo -e "    ${BOLD}Access your Dex:${NC}"
-            echo -e "      ${CYAN}https://${namespace}.enbox.id${NC}"
+            echo -e "      ${CYAN}https://${hostname}.${namespace}.enbox.id${NC}"
             echo ""
         fi
     else

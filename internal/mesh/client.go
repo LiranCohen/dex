@@ -109,6 +109,7 @@ func (c *Client) startTunnel(ctx context.Context) error {
 		Logf:        c.logf,
 		ACME:        acmeSettings,
 		CoordURL:    c.config.ControlURL,
+		APIToken:    c.config.Tunnel.Token, // Use tunnel token for DNS API auth
 		StateDir:    c.config.StateDir,
 		BaseDomain:  "enbox.id", // TODO: make configurable
 	})

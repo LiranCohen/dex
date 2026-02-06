@@ -27,6 +27,7 @@ type EnrollmentResponse struct {
 	AccountID string `json:"account_id"`
 	NetworkID string `json:"network_id"`
 	Namespace string `json:"namespace"`
+	Hostname  string `json:"hostname"` // Server hostname (e.g., "hq")
 	PublicURL string `json:"public_url"`
 
 	// Top-level fields (for convenience)
@@ -158,7 +159,7 @@ func runEnroll(args []string) error {
 	fmt.Println()
 	fmt.Println("Enrollment successful!")
 	fmt.Println()
-	fmt.Printf("   Namespace:  %s\n", resp.Namespace)
+	fmt.Printf("   Server:     %s.%s\n", resp.Hostname, resp.Namespace)
 	fmt.Printf("   Public URL: %s\n", resp.PublicURL)
 	fmt.Printf("   Config:     %s\n", configPath)
 	fmt.Println()
@@ -217,6 +218,12 @@ func callEnrollmentAPI(centralURL string, req EnrollmentRequest) (*EnrollmentRes
 }
 
 func buildConfigFromResponse(resp *EnrollmentResponse) *Config {
+	// Use hostname from response, default to "hq" if not set
+	hostname := resp.Hostname
+	if hostname == "" {
+		hostname = "hq"
+	}
+
 	config := &Config{
 		Namespace: resp.Namespace,
 		PublicURL: resp.PublicURL,
@@ -231,7 +238,7 @@ func buildConfigFromResponse(resp *EnrollmentResponse) *Config {
 			Token:       resp.Tunnel.Token,
 			Endpoints: []EndpointConfig{
 				{
-					Hostname:  "hq." + resp.Namespace + ".enbox.id",
+					Hostname:  hostname + "." + resp.Namespace + ".enbox.id",
 					LocalPort: 8080,
 				},
 			},
