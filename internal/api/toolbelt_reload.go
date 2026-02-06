@@ -82,14 +82,6 @@ func (s *Server) ReloadToolbelt() error {
 			fmt.Println("ReloadToolbelt: Quest handler created")
 		}
 	}
-	if tb.GitHub != nil {
-		fmt.Println("ReloadToolbelt: GitHub client initialized, updating session manager")
-		s.sessionManager.SetGitHubClient(tb.GitHub)
-		if s.questHandler != nil {
-			s.questHandler.SetGitHubClient(tb.GitHub)
-			fmt.Println("ReloadToolbelt: Quest handler GitHub client updated")
-		}
-	}
 
 	// Log status
 	status := tb.Status()

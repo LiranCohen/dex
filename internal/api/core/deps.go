@@ -8,7 +8,6 @@ import (
 	"github.com/lirancohen/dex/internal/db"
 	"github.com/lirancohen/dex/internal/forgejo"
 	"github.com/lirancohen/dex/internal/git"
-	"github.com/lirancohen/dex/internal/github"
 	"github.com/lirancohen/dex/internal/mesh"
 	"github.com/lirancohen/dex/internal/planning"
 	"github.com/lirancohen/dex/internal/quest"
@@ -42,14 +41,12 @@ type Deps struct {
 	MeshClient     *mesh.Client              // Campus mesh network client
 	WorkerManager  *worker.Manager           // Worker pool manager for distributed execution
 	SecretsStore   *db.EncryptedSecretsStore // Encrypted secrets storage
-	TokenConfig *auth.TokenConfig
-	BaseDir     string
+	TokenConfig    *auth.TokenConfig
+	BaseDir        string
 
 	// Thread-safe accessors for dynamically reloadable services
 	// These are closures that handle the mutex locking internally
-	GetToolbelt   func() *toolbelt.Toolbelt
-	GetGitHubApp  func() *github.AppManager
-	GetGitHubSync func() *github.SyncService
+	GetToolbelt func() *toolbelt.Toolbelt
 
 	// Cross-handler callbacks for complex orchestration
 	// These allow handlers to trigger operations that span multiple services
@@ -57,9 +54,6 @@ type Deps struct {
 	StartTaskWithInheritance   func(ctx context.Context, taskID string, inheritedWorktree string, predecessorHandoff string) (*StartTaskResult, error)
 	HandleTaskUnblocking       func(ctx context.Context, completedTaskID string)
 	GeneratePredecessorHandoff func(task *db.Task) string
-
-	// GitHub client fetchers
-	GetToolbeltGitHubClient func(ctx context.Context, login string) (*toolbelt.GitHubClient, error)
 
 	// Validation helpers
 	IsValidGitRepo     func(path string) bool

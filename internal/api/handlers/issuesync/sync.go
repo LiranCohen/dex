@@ -1,4 +1,4 @@
-// Package issuesync provides issue-sync services that route to GitHub or Forgejo.
+// Package issuesync provides issue-sync services for Forgejo.
 package issuesync
 
 import (
@@ -9,15 +9,12 @@ import (
 
 	"github.com/lirancohen/dex/internal/api/core"
 	"github.com/lirancohen/dex/internal/db"
-	"github.com/lirancohen/dex/internal/github"
 	"github.com/lirancohen/dex/internal/gitprovider"
 	forgejoclient "github.com/lirancohen/dex/internal/gitprovider/forgejo"
 	"github.com/lirancohen/dex/internal/realtime"
 )
 
-// SyncService handles issue synchronization for both GitHub and Forgejo.
-// It wraps the github.SyncService and Forgejo gitprovider, routing to the
-// appropriate backend based on each project's configured git provider.
+// SyncService handles issue synchronization for Forgejo projects.
 type SyncService struct {
 	deps *core.Deps
 }
@@ -150,86 +147,31 @@ func (s *SyncService) getForgejoProjectInfo(project *db.Project) (string, string
 	return owner, repo, provider
 }
 
-// getSyncConfig returns the GitHub sync configuration, or nil if not configured.
-func (s *SyncService) getSyncConfig(ctx context.Context) *github.SyncConfig {
-	appManager := s.deps.GetGitHubApp()
-	if appManager == nil {
-		return nil
-	}
-
-	progress, err := s.deps.DB.GetOnboardingProgress()
-	if err != nil || progress == nil {
-		return nil
-	}
-
-	orgName := progress.GetGitHubOrgName()
-	if orgName == "" {
-		return nil
-	}
-
-	installID, err := appManager.GetInstallationIDForLogin(ctx, orgName)
-	if err != nil {
-		fmt.Printf("getSyncConfig: failed to get installation ID: %v\n", err)
-		return nil
-	}
-
-	return &github.SyncConfig{
-		OrgName:        orgName,
-		InstallationID: installID,
-	}
-}
-
-// SyncQuestToGitHubIssue creates or updates an issue for a quest.
-// Routes to Forgejo or GitHub based on the quest's project provider.
+// SyncQuestToGitHubIssue creates or updates an issue for a quest on Forgejo.
 func (s *SyncService) SyncQuestToGitHubIssue(questID string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	// Check if this quest's project uses Forgejo
 	quest, err := s.deps.DB.GetQuestByID(questID)
 	if err != nil || quest == nil {
 		fmt.Printf("SyncQuestToGitHubIssue: failed to get quest %s: %v\n", questID, err)
 		return
 	}
 	project, err := s.deps.DB.GetProjectByID(quest.ProjectID)
-	if err == nil && project != nil {
-		if owner, repo, provider := s.getForgejoProjectInfo(project); provider != nil {
-			s.syncForgejoQuestIssue(ctx, questID, owner, repo, provider)
-			return
-		}
-	}
-
-	// GitHub path
-	syncConfig := s.getSyncConfig(ctx)
-	if syncConfig == nil || !syncConfig.IsConfigured() {
+	if err != nil || project == nil {
+		fmt.Printf("SyncQuestToGitHubIssue: failed to get project for quest %s: %v\n", questID, err)
 		return
 	}
 
-	syncService := s.deps.GetGitHubSync()
-	if syncService == nil {
+	owner, repo, provider := s.getForgejoProjectInfo(project)
+	if provider == nil {
+		// Not a Forgejo project, skip sync
 		return
 	}
-
-	workspaceRepo := syncConfig.GetWorkspaceRepo()
-	repo, err := syncService.GetRepoInfoForQuest(quest, workspaceRepo)
-	if err != nil {
-		fmt.Printf("SyncQuestToGitHubIssue: failed to get repo for quest %s: %v\n", questID, err)
-		return
-	}
-
-	if err := syncService.EnsureRepoLabels(ctx, repo, syncConfig.InstallationID); err != nil {
-		fmt.Printf("SyncQuestToGitHubIssue: failed to ensure labels for %s/%s: %v\n", repo.Owner, repo.Repo, err)
-	}
-
-	if err := syncService.SyncQuestToIssue(ctx, questID, repo, syncConfig.InstallationID); err != nil {
-		fmt.Printf("SyncQuestToGitHubIssue: failed to sync quest %s: %v\n", questID, err)
-		return
-	}
-
-	fmt.Printf("SyncQuestToGitHubIssue: synced quest %s to %s/%s\n", questID, repo.Owner, repo.Repo)
+	s.syncForgejoQuestIssue(ctx, questID, owner, repo, provider)
 }
 
-// CloseQuestGitHubIssue closes the issue for a completed quest.
+// CloseQuestGitHubIssue closes the issue for a completed quest on Forgejo.
 func (s *SyncService) CloseQuestGitHubIssue(questID string, summary *db.QuestSummary) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -249,45 +191,24 @@ func (s *SyncService) CloseQuestGitHubIssue(questID string, summary *db.QuestSum
 		}
 	}
 
-	// Forgejo path
 	project, err := s.deps.DB.GetProjectByID(quest.ProjectID)
-	if err == nil && project != nil {
-		if owner, repo, provider := s.getForgejoProjectInfo(project); provider != nil {
-			if quest.IssueNumber.Valid {
-				s.closeForgejoIssue(ctx, owner, repo, int(quest.IssueNumber.Int64), summaryText, provider)
-				fmt.Printf("CloseQuestGitHubIssue: closed Forgejo issue #%d for quest %s\n", quest.IssueNumber.Int64, questID)
-			}
-			return
-		}
-	}
-
-	// GitHub path
-	syncConfig := s.getSyncConfig(ctx)
-	if syncConfig == nil || !syncConfig.IsConfigured() {
+	if err != nil || project == nil {
+		fmt.Printf("CloseQuestGitHubIssue: failed to get project for quest %s: %v\n", questID, err)
 		return
 	}
 
-	syncService := s.deps.GetGitHubSync()
-	if syncService == nil {
+	owner, repo, provider := s.getForgejoProjectInfo(project)
+	if provider == nil {
 		return
 	}
 
-	workspaceRepo := syncConfig.GetWorkspaceRepo()
-	repo, rerr := syncService.GetRepoInfoForQuest(quest, workspaceRepo)
-	if rerr != nil {
-		fmt.Printf("CloseQuestGitHubIssue: failed to get repo for quest %s: %v\n", questID, rerr)
-		return
+	if quest.IssueNumber.Valid {
+		s.closeForgejoIssue(ctx, owner, repo, int(quest.IssueNumber.Int64), summaryText, provider)
+		fmt.Printf("CloseQuestGitHubIssue: closed Forgejo issue #%d for quest %s\n", quest.IssueNumber.Int64, questID)
 	}
-
-	if err := syncService.CompleteQuestIssue(ctx, questID, summaryText, repo, syncConfig.InstallationID); err != nil {
-		fmt.Printf("CloseQuestGitHubIssue: failed to close issue for quest %s: %v\n", questID, err)
-		return
-	}
-
-	fmt.Printf("CloseQuestGitHubIssue: closed issue for quest %s\n", questID)
 }
 
-// ReopenQuestGitHubIssue reopens the issue for a reopened quest.
+// ReopenQuestGitHubIssue reopens the issue for a reopened quest on Forgejo.
 func (s *SyncService) ReopenQuestGitHubIssue(questID string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -298,50 +219,28 @@ func (s *SyncService) ReopenQuestGitHubIssue(questID string) {
 		return
 	}
 
-	// Forgejo path
 	project, err := s.deps.DB.GetProjectByID(quest.ProjectID)
-	if err == nil && project != nil {
-		if owner, repo, provider := s.getForgejoProjectInfo(project); provider != nil {
-			if quest.IssueNumber.Valid {
-				openState := "open"
-				if err := provider.UpdateIssue(ctx, owner, repo, int(quest.IssueNumber.Int64), gitprovider.UpdateIssueOpts{State: &openState}); err != nil {
-					fmt.Printf("ReopenQuestGitHubIssue: failed to reopen Forgejo issue #%d for quest %s: %v\n", quest.IssueNumber.Int64, questID, err)
-				} else {
-					fmt.Printf("ReopenQuestGitHubIssue: reopened Forgejo issue #%d for quest %s\n", quest.IssueNumber.Int64, questID)
-				}
-			}
-			return
+	if err != nil || project == nil {
+		fmt.Printf("ReopenQuestGitHubIssue: failed to get project for quest %s: %v\n", questID, err)
+		return
+	}
+
+	owner, repo, provider := s.getForgejoProjectInfo(project)
+	if provider == nil {
+		return
+	}
+
+	if quest.IssueNumber.Valid {
+		openState := "open"
+		if err := provider.UpdateIssue(ctx, owner, repo, int(quest.IssueNumber.Int64), gitprovider.UpdateIssueOpts{State: &openState}); err != nil {
+			fmt.Printf("ReopenQuestGitHubIssue: failed to reopen Forgejo issue #%d for quest %s: %v\n", quest.IssueNumber.Int64, questID, err)
+		} else {
+			fmt.Printf("ReopenQuestGitHubIssue: reopened Forgejo issue #%d for quest %s\n", quest.IssueNumber.Int64, questID)
 		}
 	}
-
-	// GitHub path
-	syncConfig := s.getSyncConfig(ctx)
-	if syncConfig == nil || !syncConfig.IsConfigured() {
-		return
-	}
-
-	syncService := s.deps.GetGitHubSync()
-	if syncService == nil {
-		return
-	}
-
-	workspaceRepo := syncConfig.GetWorkspaceRepo()
-	repo, rerr := syncService.GetRepoInfoForQuest(quest, workspaceRepo)
-	if rerr != nil {
-		fmt.Printf("ReopenQuestGitHubIssue: failed to get repo for quest %s: %v\n", questID, rerr)
-		return
-	}
-
-	if err := syncService.ReopenQuestIssue(ctx, questID, repo, syncConfig.InstallationID); err != nil {
-		fmt.Printf("ReopenQuestGitHubIssue: failed to reopen issue for quest %s: %v\n", questID, err)
-		return
-	}
-
-	fmt.Printf("ReopenQuestGitHubIssue: reopened issue for quest %s\n", questID)
 }
 
-// SyncObjectiveToGitHubIssue creates an issue for an objective (task).
-// Routes to Forgejo or GitHub based on the task's project provider.
+// SyncObjectiveToGitHubIssue creates an issue for an objective (task) on Forgejo.
 func (s *SyncService) SyncObjectiveToGitHubIssue(taskID string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -358,55 +257,15 @@ func (s *SyncService) SyncObjectiveToGitHubIssue(taskID string) {
 		return
 	}
 
-	// Forgejo path
-	if owner, repo, provider := s.getForgejoProjectInfo(project); provider != nil {
-		s.syncForgejoObjectiveIssue(ctx, taskID, owner, repo, provider)
-		// Also update parent quest issue on Forgejo
-		if task.QuestID.Valid {
-			s.syncForgejoQuestIssue(ctx, task.QuestID.String, owner, repo, provider)
-		}
+	owner, repo, provider := s.getForgejoProjectInfo(project)
+	if provider == nil {
 		return
 	}
 
-	// GitHub path
-	syncConfig := s.getSyncConfig(ctx)
-	if syncConfig == nil || !syncConfig.IsConfigured() {
-		return
-	}
-
-	syncService := s.deps.GetGitHubSync()
-	if syncService == nil {
-		return
-	}
-
-	repo, ok := github.GetRepoInfoFromProject(project)
-	if !ok {
-		repo = syncConfig.GetWorkspaceRepo()
-	}
-
-	if err := syncService.EnsureRepoLabels(ctx, repo, syncConfig.InstallationID); err != nil {
-		fmt.Printf("SyncObjectiveToGitHubIssue: failed to ensure labels: %v\n", err)
-	}
-
-	if err := syncService.SyncObjectiveToIssue(ctx, taskID, repo, syncConfig.InstallationID); err != nil {
-		fmt.Printf("SyncObjectiveToGitHubIssue: failed to sync task %s: %v\n", taskID, err)
-		return
-	}
-
-	fmt.Printf("SyncObjectiveToGitHubIssue: synced task %s to %s/%s\n", taskID, repo.Owner, repo.Repo)
-
-	// Also update the quest issue
+	s.syncForgejoObjectiveIssue(ctx, taskID, owner, repo, provider)
+	// Also update parent quest issue on Forgejo
 	if task.QuestID.Valid {
-		quest, err := s.deps.DB.GetQuestByID(task.QuestID.String)
-		if err == nil && quest != nil && quest.IssueNumber.Valid {
-			workspaceRepo := syncConfig.GetWorkspaceRepo()
-			questRepo, err := syncService.GetRepoInfoForQuest(quest, workspaceRepo)
-			if err == nil {
-				if err := syncService.SyncQuestToIssue(ctx, quest.ID, questRepo, syncConfig.InstallationID); err != nil {
-					fmt.Printf("SyncObjectiveToGitHubIssue: failed to update quest issue: %v\n", err)
-				}
-			}
-		}
+		s.syncForgejoQuestIssue(ctx, task.QuestID.String, owner, repo, provider)
 	}
 }
 
@@ -431,40 +290,15 @@ func (s *SyncService) OnTaskCompleted(taskID string) {
 		return
 	}
 
-	// Forgejo path
-	if owner, repo, provider := s.getForgejoProjectInfo(project); provider != nil {
-		if task.IssueNumber.Valid {
-			s.closeForgejoIssue(ctx, owner, repo, int(task.IssueNumber.Int64), "Task completed.", provider)
-			fmt.Printf("OnTaskCompleted: closed Forgejo issue #%d for task %s\n", task.IssueNumber.Int64, taskID)
-		}
+	owner, repo, provider := s.getForgejoProjectInfo(project)
+	if provider == nil {
 		return
 	}
 
-	// GitHub path
-	syncConfig := s.getSyncConfig(ctx)
-	if syncConfig == nil || !syncConfig.IsConfigured() {
-		return
+	if task.IssueNumber.Valid {
+		s.closeForgejoIssue(ctx, owner, repo, int(task.IssueNumber.Int64), "Task completed.", provider)
+		fmt.Printf("OnTaskCompleted: closed Forgejo issue #%d for task %s\n", task.IssueNumber.Int64, taskID)
 	}
-
-	syncService := s.deps.GetGitHubSync()
-	if syncService == nil {
-		return
-	}
-
-	repo, ok := github.GetRepoInfoFromProject(project)
-	if !ok {
-		repo = syncConfig.GetWorkspaceRepo()
-	}
-
-	if err := syncService.CompleteObjectiveIssue(ctx, taskID, repo, syncConfig.InstallationID); err != nil {
-		fmt.Printf("OnTaskCompleted: failed to close issue for task %s: %v\n", taskID, err)
-		return
-	}
-
-	fmt.Printf("OnTaskCompleted: closed issue for task %s\n", taskID)
-
-	// Update parent quest issue
-	s.updateQuestIssueForTask(ctx, task, syncService, syncConfig)
 }
 
 // handleTaskUnblocking finds tasks that are ready to auto-start because the given task completed.
@@ -542,32 +376,6 @@ func (s *SyncService) handleTaskUnblocking(ctx context.Context, completedTaskID 
 	}
 }
 
-// updateQuestIssueForTask updates the parent quest's GitHub issue.
-func (s *SyncService) updateQuestIssueForTask(ctx context.Context, task *db.Task, syncService *github.SyncService, syncConfig *github.SyncConfig) {
-	if !task.QuestID.Valid {
-		return
-	}
-
-	quest, err := s.deps.DB.GetQuestByID(task.QuestID.String)
-	if err != nil || quest == nil || !quest.IssueNumber.Valid {
-		return
-	}
-
-	workspaceRepo := syncConfig.GetWorkspaceRepo()
-	repo, err := syncService.GetRepoInfoForQuest(quest, workspaceRepo)
-	if err != nil {
-		fmt.Printf("updateQuestIssueForTask: failed to get repo for quest %s: %v\n", quest.ID, err)
-		return
-	}
-
-	if err := syncService.SyncQuestToIssue(ctx, quest.ID, repo, syncConfig.InstallationID); err != nil {
-		fmt.Printf("updateQuestIssueForTask: failed to update quest issue %s: %v\n", quest.ID, err)
-		return
-	}
-
-	fmt.Printf("updateQuestIssueForTask: updated quest issue for %s\n", quest.ID)
-}
-
 // OnTaskFailed handles task failure for issue sync.
 func (s *SyncService) OnTaskFailed(taskID string, reason string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -585,40 +393,16 @@ func (s *SyncService) OnTaskFailed(taskID string, reason string) {
 		return
 	}
 
-	// Forgejo path
-	if owner, repo, provider := s.getForgejoProjectInfo(project); provider != nil {
-		if task.IssueNumber.Valid {
-			comment := fmt.Sprintf("Task failed: %s", reason)
-			s.closeForgejoIssue(ctx, owner, repo, int(task.IssueNumber.Int64), comment, provider)
-			fmt.Printf("OnTaskFailed: closed Forgejo issue #%d for task %s\n", task.IssueNumber.Int64, taskID)
-		}
+	owner, repo, provider := s.getForgejoProjectInfo(project)
+	if provider == nil {
 		return
 	}
 
-	// GitHub path
-	syncConfig := s.getSyncConfig(ctx)
-	if syncConfig == nil || !syncConfig.IsConfigured() {
-		return
+	if task.IssueNumber.Valid {
+		comment := fmt.Sprintf("Task failed: %s", reason)
+		s.closeForgejoIssue(ctx, owner, repo, int(task.IssueNumber.Int64), comment, provider)
+		fmt.Printf("OnTaskFailed: closed Forgejo issue #%d for task %s\n", task.IssueNumber.Int64, taskID)
 	}
-
-	syncService := s.deps.GetGitHubSync()
-	if syncService == nil {
-		return
-	}
-
-	repo, ok := github.GetRepoInfoFromProject(project)
-	if !ok {
-		repo = syncConfig.GetWorkspaceRepo()
-	}
-
-	if err := syncService.FailObjectiveIssue(ctx, taskID, reason, repo, syncConfig.InstallationID); err != nil {
-		fmt.Printf("OnTaskFailed: failed to fail issue for task %s: %v\n", taskID, err)
-		return
-	}
-
-	fmt.Printf("OnTaskFailed: failed issue for task %s\n", taskID)
-
-	s.updateQuestIssueForTask(ctx, task, syncService, syncConfig)
 }
 
 // OnPRCreated handles PR creation for issue sync.
@@ -638,44 +422,22 @@ func (s *SyncService) OnPRCreated(taskID string, prNumber int) {
 		return
 	}
 
-	// Forgejo path: link PR to objective issue via comment
-	if owner, repo, provider := s.getForgejoProjectInfo(project); provider != nil {
-		if task.IssueNumber.Valid {
-			comment := fmt.Sprintf("Pull request !%d created for this objective.", prNumber)
-			if _, err := provider.AddComment(ctx, owner, repo, int(task.IssueNumber.Int64), comment); err != nil {
-				fmt.Printf("OnPRCreated: failed to link Forgejo PR to task %s: %v\n", taskID, err)
-			} else {
-				fmt.Printf("OnPRCreated: linked Forgejo PR !%d to task %s\n", prNumber, taskID)
-			}
+	owner, repo, provider := s.getForgejoProjectInfo(project)
+	if provider == nil {
+		return
+	}
+
+	if task.IssueNumber.Valid {
+		comment := fmt.Sprintf("Pull request !%d created for this objective.", prNumber)
+		if _, err := provider.AddComment(ctx, owner, repo, int(task.IssueNumber.Int64), comment); err != nil {
+			fmt.Printf("OnPRCreated: failed to link Forgejo PR to task %s: %v\n", taskID, err)
+		} else {
+			fmt.Printf("OnPRCreated: linked Forgejo PR !%d to task %s\n", prNumber, taskID)
 		}
-		return
 	}
-
-	// GitHub path
-	syncConfig := s.getSyncConfig(ctx)
-	if syncConfig == nil || !syncConfig.IsConfigured() {
-		return
-	}
-
-	syncService := s.deps.GetGitHubSync()
-	if syncService == nil {
-		return
-	}
-
-	repo, ok := github.GetRepoInfoFromProject(project)
-	if !ok {
-		repo = syncConfig.GetWorkspaceRepo()
-	}
-
-	if err := syncService.LinkPRToObjective(ctx, taskID, prNumber, repo, syncConfig.InstallationID); err != nil {
-		fmt.Printf("OnPRCreated: failed to link PR to task %s: %v\n", taskID, err)
-		return
-	}
-
-	fmt.Printf("OnPRCreated: linked PR #%d to task %s\n", prNumber, taskID)
 }
 
-// CancelObjectiveGitHubIssue closes the issue for a cancelled task.
+// CancelObjectiveGitHubIssue closes the issue for a cancelled task on Forgejo.
 func (s *SyncService) CancelObjectiveGitHubIssue(taskID string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -692,42 +454,18 @@ func (s *SyncService) CancelObjectiveGitHubIssue(taskID string) {
 		return
 	}
 
-	// Forgejo path
-	if owner, repo, provider := s.getForgejoProjectInfo(project); provider != nil {
-		if task.IssueNumber.Valid {
-			s.closeForgejoIssue(ctx, owner, repo, int(task.IssueNumber.Int64), "Task cancelled.", provider)
-			fmt.Printf("CancelObjectiveGitHubIssue: closed Forgejo issue #%d for task %s\n", task.IssueNumber.Int64, taskID)
-		}
+	owner, repo, provider := s.getForgejoProjectInfo(project)
+	if provider == nil {
 		return
 	}
 
-	// GitHub path
-	syncConfig := s.getSyncConfig(ctx)
-	if syncConfig == nil || !syncConfig.IsConfigured() {
-		return
+	if task.IssueNumber.Valid {
+		s.closeForgejoIssue(ctx, owner, repo, int(task.IssueNumber.Int64), "Task cancelled.", provider)
+		fmt.Printf("CancelObjectiveGitHubIssue: closed Forgejo issue #%d for task %s\n", task.IssueNumber.Int64, taskID)
 	}
-
-	syncService := s.deps.GetGitHubSync()
-	if syncService == nil {
-		return
-	}
-
-	repo, ok := github.GetRepoInfoFromProject(project)
-	if !ok {
-		repo = syncConfig.GetWorkspaceRepo()
-	}
-
-	if err := syncService.CancelObjectiveIssue(ctx, taskID, repo, syncConfig.InstallationID); err != nil {
-		fmt.Printf("CancelObjectiveGitHubIssue: failed to cancel issue for task %s: %v\n", taskID, err)
-		return
-	}
-
-	fmt.Printf("CancelObjectiveGitHubIssue: cancelled issue for task %s\n", taskID)
-
-	s.updateQuestIssueForTask(ctx, task, syncService, syncConfig)
 }
 
-// UpdateObjectiveStatusSync adds a status comment to the objective's issue.
+// UpdateObjectiveStatusSync adds a status comment to the objective's issue on Forgejo.
 func (s *SyncService) UpdateObjectiveStatusSync(taskID string, status string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -744,42 +482,20 @@ func (s *SyncService) UpdateObjectiveStatusSync(taskID string, status string) {
 		return
 	}
 
-	// Forgejo path
-	if owner, repo, provider := s.getForgejoProjectInfo(project); provider != nil {
-		if task.IssueNumber.Valid {
-			comment := fmt.Sprintf("Status: **%s**", status)
-			if _, err := provider.AddComment(ctx, owner, repo, int(task.IssueNumber.Int64), comment); err != nil {
-				fmt.Printf("UpdateObjectiveStatusSync: failed to add Forgejo comment for task %s: %v\n", taskID, err)
-			}
+	owner, repo, provider := s.getForgejoProjectInfo(project)
+	if provider == nil {
+		return
+	}
+
+	if task.IssueNumber.Valid {
+		comment := fmt.Sprintf("Status: **%s**", status)
+		if _, err := provider.AddComment(ctx, owner, repo, int(task.IssueNumber.Int64), comment); err != nil {
+			fmt.Printf("UpdateObjectiveStatusSync: failed to add Forgejo comment for task %s: %v\n", taskID, err)
 		}
-		return
 	}
-
-	// GitHub path
-	syncConfig := s.getSyncConfig(ctx)
-	if syncConfig == nil || !syncConfig.IsConfigured() {
-		return
-	}
-
-	syncService := s.deps.GetGitHubSync()
-	if syncService == nil {
-		return
-	}
-
-	repo, ok := github.GetRepoInfoFromProject(project)
-	if !ok {
-		repo = syncConfig.GetWorkspaceRepo()
-	}
-
-	if err := syncService.AddObjectiveStatusComment(ctx, taskID, status, repo, syncConfig.InstallationID); err != nil {
-		fmt.Printf("UpdateObjectiveStatusSync: failed to add status comment for task %s: %v\n", taskID, err)
-		return
-	}
-
-	fmt.Printf("UpdateObjectiveStatusSync: added %s status comment for task %s\n", status, taskID)
 }
 
-// UpdateObjectiveChecklistSync updates the objective's issue with checklist progress.
+// UpdateObjectiveChecklistSync updates the objective's issue with checklist progress on Forgejo.
 func (s *SyncService) UpdateObjectiveChecklistSync(taskID string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -796,55 +512,33 @@ func (s *SyncService) UpdateObjectiveChecklistSync(taskID string) {
 		return
 	}
 
-	// Forgejo path: update the issue body with current checklist
-	if owner, repo, provider := s.getForgejoProjectInfo(project); provider != nil {
-		if task.IssueNumber.Valid {
-			checklist, cerr := s.deps.DB.GetChecklistByTaskID(taskID)
-			if cerr != nil || checklist == nil {
-				return
-			}
-			items, ierr := s.deps.DB.GetChecklistItems(checklist.ID)
-			if ierr != nil || len(items) == 0 {
-				return
-			}
-			var body string
-			body = task.GetDescription() + "\n\n## Checklist\n"
-			for _, item := range items {
-				if item.Status == "done" {
-					body += fmt.Sprintf("- [x] %s\n", item.Description)
-				} else {
-					body += fmt.Sprintf("- [ ] %s\n", item.Description)
-				}
-			}
-			if err := provider.UpdateIssue(ctx, owner, repo, int(task.IssueNumber.Int64), gitprovider.UpdateIssueOpts{Body: &body}); err != nil {
-				fmt.Printf("UpdateObjectiveChecklistSync: failed to update Forgejo issue for task %s: %v\n", taskID, err)
+	owner, repo, provider := s.getForgejoProjectInfo(project)
+	if provider == nil {
+		return
+	}
+
+	if task.IssueNumber.Valid {
+		checklist, cerr := s.deps.DB.GetChecklistByTaskID(taskID)
+		if cerr != nil || checklist == nil {
+			return
+		}
+		items, ierr := s.deps.DB.GetChecklistItems(checklist.ID)
+		if ierr != nil || len(items) == 0 {
+			return
+		}
+		var body string
+		body = task.GetDescription() + "\n\n## Checklist\n"
+		for _, item := range items {
+			if item.Status == "done" {
+				body += fmt.Sprintf("- [x] %s\n", item.Description)
+			} else {
+				body += fmt.Sprintf("- [ ] %s\n", item.Description)
 			}
 		}
-		return
+		if err := provider.UpdateIssue(ctx, owner, repo, int(task.IssueNumber.Int64), gitprovider.UpdateIssueOpts{Body: &body}); err != nil {
+			fmt.Printf("UpdateObjectiveChecklistSync: failed to update Forgejo issue for task %s: %v\n", taskID, err)
+		}
 	}
-
-	// GitHub path
-	syncConfig := s.getSyncConfig(ctx)
-	if syncConfig == nil || !syncConfig.IsConfigured() {
-		return
-	}
-
-	syncService := s.deps.GetGitHubSync()
-	if syncService == nil {
-		return
-	}
-
-	repo, ok := github.GetRepoInfoFromProject(project)
-	if !ok {
-		repo = syncConfig.GetWorkspaceRepo()
-	}
-
-	if err := syncService.UpdateObjectiveIssueChecklist(ctx, taskID, repo, syncConfig.InstallationID); err != nil {
-		fmt.Printf("UpdateObjectiveChecklistSync: failed to update issue for task %s: %v\n", taskID, err)
-		return
-	}
-
-	fmt.Printf("UpdateObjectiveChecklistSync: updated issue checklist for task %s\n", taskID)
 }
 
 // GeneratePredecessorHandoff creates a handoff summary for a completed task.

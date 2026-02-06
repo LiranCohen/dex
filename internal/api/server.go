@@ -14,7 +14,6 @@ import (
 	"github.com/lirancohen/dex/internal/api/handlers/approvals"
 	authhandlers "github.com/lirancohen/dex/internal/api/handlers/auth"
 	forgejohandlers "github.com/lirancohen/dex/internal/api/handlers/forgejo"
-	githubhandlers "github.com/lirancohen/dex/internal/api/handlers/github"
 	"github.com/lirancohen/dex/internal/api/handlers/issuesync"
 	"github.com/lirancohen/dex/internal/api/handlers/memory"
 	meshhandlers "github.com/lirancohen/dex/internal/api/handlers/mesh"
@@ -32,7 +31,6 @@ import (
 	"github.com/lirancohen/dex/internal/db"
 	"github.com/lirancohen/dex/internal/forgejo"
 	"github.com/lirancohen/dex/internal/git"
-	"github.com/lirancohen/dex/internal/github"
 	"github.com/lirancohen/dex/internal/mesh"
 	"github.com/lirancohen/dex/internal/orchestrator"
 	"github.com/lirancohen/dex/internal/planning"
@@ -46,24 +44,22 @@ import (
 
 // Server represents the API server
 type Server struct {
-	echo              *echo.Echo
-	db                *db.DB
-	toolbelt          *toolbelt.Toolbelt
-	taskService       *task.Service
-	gitService        *git.Service
-	sessionManager    *session.Manager
-	planner           *planning.Planner
-	questHandler      *quest.Handler
-	githubApp         *github.AppManager
-	githubSyncService *github.SyncService    // Underlying GitHub sync service
-	handlersSyncSvc   *issuesync.SyncService // Handler-level sync service wrapper
-	setupHandler      *setup.Handler
-	realtime          *realtime.Node // Centrifuge-based realtime messaging
-	broadcaster       *realtime.Broadcaster
-	meshClient        *mesh.Client       // Campus mesh network client
-	workerManager     *worker.Manager    // Worker pool manager for distributed execution
-	meshProxy         *mesh.ServiceProxy // Reverse proxy for mesh-exposed services
-	forgejoManager    *forgejo.Manager                // Embedded Forgejo instance manager
+	echo            *echo.Echo
+	db              *db.DB
+	toolbelt        *toolbelt.Toolbelt
+	taskService     *task.Service
+	gitService      *git.Service
+	sessionManager  *session.Manager
+	planner         *planning.Planner
+	questHandler    *quest.Handler
+	handlersSyncSvc *issuesync.SyncService // Handler-level sync service wrapper
+	setupHandler    *setup.Handler
+	realtime        *realtime.Node // Centrifuge-based realtime messaging
+	broadcaster     *realtime.Broadcaster
+	meshClient      *mesh.Client       // Campus mesh network client
+	workerManager   *worker.Manager    // Worker pool manager for distributed execution
+	meshProxy       *mesh.ServiceProxy // Reverse proxy for mesh-exposed services
+	forgejoManager  *forgejo.Manager   // Embedded Forgejo instance manager
 	oidcHandler       *authhandlers.OIDCHandler      // OIDC provider for SSO
 	oidcLoginHandler  *authhandlers.OIDCLoginHandler // Passkey login for OIDC
 	deps              *core.Deps
@@ -73,9 +69,8 @@ type Server struct {
 	keyFile           string
 	tokenConfig       *auth.TokenConfig
 	staticDir         string
-	baseDir    string           // Base Dex directory (e.g., /opt/dex)
-	toolbeltMu sync.RWMutex     // Protects toolbelt updates
-	githubAppMu       sync.RWMutex // Protects GitHub App manager
+	baseDir    string       // Base Dex directory (e.g., /opt/dex)
+	toolbeltMu sync.RWMutex // Protects toolbelt updates
 }
 
 // Config holds server configuration
@@ -191,11 +186,6 @@ func NewServer(database *db.DB, cfg Config) *Server {
 		sessionMgr.SetGitService(s.gitService) // For worktree cleanup after merge
 	}
 
-	// Wire up GitHub client if toolbelt has it configured
-	if cfg.Toolbelt != nil && cfg.Toolbelt.GitHub != nil {
-		sessionMgr.SetGitHubClient(cfg.Toolbelt.GitHub)
-	}
-
 	// Wire up broadcaster for real-time updates (dual-publishes to legacy and new systems)
 	sessionMgr.SetBroadcaster(broadcaster)
 
@@ -213,15 +203,6 @@ func NewServer(database *db.DB, cfg Config) *Server {
 		s.questHandler = quest.NewHandler(database, cfg.Toolbelt.Anthropic, broadcaster)
 		s.questHandler.SetPromptLoader(sessionMgr.GetPromptLoader())
 		s.questHandler.SetBaseDir(cfg.BaseDir)
-		if cfg.Toolbelt.GitHub != nil {
-			s.questHandler.SetGitHubClient(cfg.Toolbelt.GitHub)
-		}
-	}
-
-	// Initialize GitHub App manager if configured (also sets up session manager fetcher)
-	if err := s.initGitHubApp(); err != nil {
-		// Not an error - GitHub App may not be configured yet during onboarding
-		fmt.Printf("GitHub App not initialized at startup: %v\n", err)
 	}
 
 	// Initialize setup handler
@@ -234,11 +215,6 @@ func NewServer(database *db.DB, cfg Config) *Server {
 			return s.toolbelt
 		},
 		ReloadToolbelt: s.ReloadToolbelt,
-		GetGitHubClient: func(ctx context.Context, login string) (*toolbelt.GitHubClient, error) {
-			return s.GetToolbeltGitHubClient(ctx, login)
-		},
-		HasGitHubApp:  s.db.HasGitHubApp,
-		InitGitHubApp: s.initGitHubApp,
 		GetGitService: func() setup.GitService {
 			return s.gitService
 		},
@@ -275,16 +251,6 @@ func NewServer(database *db.DB, cfg Config) *Server {
 			defer s.toolbeltMu.RUnlock()
 			return s.toolbelt
 		},
-		GetGitHubApp: func() *github.AppManager {
-			s.githubAppMu.RLock()
-			defer s.githubAppMu.RUnlock()
-			return s.githubApp
-		},
-		GetGitHubSync: func() *github.SyncService {
-			s.githubAppMu.RLock()
-			defer s.githubAppMu.RUnlock()
-			return s.githubSyncService
-		},
 		StartTaskInternal: func(ctx context.Context, taskID string, baseBranch string) (*core.StartTaskResult, error) {
 			result, err := s.startTaskInternal(ctx, taskID, baseBranch)
 			if err != nil {
@@ -312,9 +278,6 @@ func NewServer(database *db.DB, cfg Config) *Server {
 		},
 		GeneratePredecessorHandoff: func(t *db.Task) string {
 			return s.generatePredecessorHandoff(t)
-		},
-		GetToolbeltGitHubClient: func(ctx context.Context, login string) (*toolbelt.GitHubClient, error) {
-			return s.GetToolbeltGitHubClient(ctx, login)
 		},
 		IsValidGitRepo:     s.isValidGitRepo,
 		IsValidProjectPath: s.isValidProjectPath,
@@ -451,17 +414,15 @@ func (s *Server) registerRoutes() {
 	questsHandler := quests.New(s.deps)
 	objectivesHandler := quests.NewObjectivesHandler(s.deps)
 	templatesHandler := quests.NewTemplatesHandler(s.deps)
-	githubHandler := githubhandlers.New(s.deps)
 	meshHandler := meshhandlers.New(s.deps)
 	workersHandler := workershandlers.New(s.deps)
 	forgejoHandler := forgejohandlers.New(s.deps)
 
-	// Wire up callbacks for GitHub sync
-	githubHandler.InitGitHubApp = s.initGitHubApp
-	questsHandler.SyncQuestToGitHubIssue = s.syncQuestToGitHubIssue
-	questsHandler.CloseQuestGitHubIssue = s.closeQuestGitHubIssue
-	questsHandler.ReopenQuestGitHubIssue = s.reopenQuestGitHubIssue
-	objectivesHandler.SyncObjectiveToGitHubIssue = s.syncObjectiveToGitHubIssue
+	// Wire up callbacks for issue sync (Forgejo)
+	questsHandler.SyncQuestToGitHubIssue = s.handlersSyncSvc.SyncQuestToGitHubIssue
+	questsHandler.CloseQuestGitHubIssue = s.handlersSyncSvc.CloseQuestGitHubIssue
+	questsHandler.ReopenQuestGitHubIssue = s.handlersSyncSvc.ReopenQuestGitHubIssue
+	objectivesHandler.SyncObjectiveToGitHubIssue = s.handlersSyncSvc.SyncObjectiveToGitHubIssue
 
 	// Public endpoints (no auth required)
 	v1.GET("/system/status", s.handleHealthCheck)
@@ -469,11 +430,9 @@ func (s *Server) registerRoutes() {
 	// Register public routes
 	toolbeltHandler.RegisterPublicRoutes(v1)
 	passkeyHandler.RegisterRoutes(v1)
-	githubHandler.RegisterRoutes(v1)
 
 	// Setup endpoints (for onboarding flow - public during initial setup)
 	v1.GET("/setup/status", s.setupHandler.HandleStatus)
-	v1.POST("/setup/github-token", s.setupHandler.HandleSetGitHubToken) // Legacy
 	v1.POST("/setup/anthropic-key", s.setupHandler.HandleSetAnthropicKey)
 	v1.POST("/setup/complete", s.setupHandler.HandleComplete)
 	v1.POST("/setup/workspace", s.setupHandler.HandleWorkspaceSetup)
@@ -481,13 +440,9 @@ func (s *Server) registerRoutes() {
 	// New onboarding step endpoints
 	v1.POST("/setup/steps/welcome", s.setupHandler.HandleAdvanceWelcome)
 	v1.POST("/setup/steps/passkey", s.setupHandler.HandleCompletePasskey)
-	v1.POST("/setup/steps/github-org", s.setupHandler.HandleSetGitHubOrg)
-	v1.POST("/setup/steps/github-app", s.setupHandler.HandleCompleteGitHubApp)
-	v1.POST("/setup/steps/github-install", s.setupHandler.HandleCompleteGitHubInstall)
 	v1.POST("/setup/steps/anthropic", s.setupHandler.HandleSetAnthropicKey)
 
 	// Validation endpoints
-	v1.POST("/setup/validate/github-org", s.setupHandler.HandleValidateGitHubOrg)
 	v1.POST("/setup/validate/anthropic-key", s.setupHandler.HandleValidateAnthropicKey)
 
 	// Protected endpoints (require JWT auth)

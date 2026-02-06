@@ -12,13 +12,12 @@ import (
 	"strings"
 	"time"
 
-	gogithub "github.com/google/go-github/v68/github"
 	"github.com/google/uuid"
 	"github.com/lirancohen/dex/internal/db"
-	"github.com/lirancohen/dex/internal/realtime"
 	"github.com/lirancohen/dex/internal/git"
-	"github.com/lirancohen/dex/internal/github"
+	"github.com/lirancohen/dex/internal/gitprovider"
 	"github.com/lirancohen/dex/internal/hints"
+	"github.com/lirancohen/dex/internal/realtime"
 	"github.com/lirancohen/dex/internal/security"
 	"github.com/lirancohen/dex/internal/toolbelt"
 	"github.com/lirancohen/dex/internal/tools"
@@ -168,9 +167,9 @@ type RalphLoop struct {
 	failedAt     string // Where failure occurred: "tool", "api", "validation"
 	recoveryHint string // Hint for recovery attempt
 
-	// Issue activity sync
-	issueCommenter *github.IssueCommenter
-	githubClient   *gogithub.Client
+	// Issue activity sync (uses gitprovider interface)
+	issueCommenter  *gitprovider.IssueCommenter
+	forgejoProvider gitprovider.Provider
 }
 
 // NewRalphLoop creates a new RalphLoop for the given session
@@ -209,14 +208,14 @@ func (r *RalphLoop) SetOnRepoCreated(callback func(owner, repo string)) {
 	}
 }
 
-// SetGitHubClient sets the GitHub client for issue commenting
-func (r *RalphLoop) SetGitHubClient(client *gogithub.Client) {
-	r.githubClient = client
+// SetForgejoProvider sets the Forgejo provider for issue commenting
+func (r *RalphLoop) SetForgejoProvider(provider gitprovider.Provider) {
+	r.forgejoProvider = provider
 }
 
 // initIssueCommenter initializes the issue commenter if task has a linked issue
 func (r *RalphLoop) initIssueCommenter(task *db.Task) {
-	if r.githubClient == nil {
+	if r.forgejoProvider == nil {
 		return
 	}
 
@@ -225,22 +224,24 @@ func (r *RalphLoop) initIssueCommenter(task *db.Task) {
 		return
 	}
 
-	// Get project for GitHub owner/repo
+	// Get project for owner/repo
 	project, err := r.db.GetProjectByID(task.ProjectID)
 	if err != nil || project == nil {
 		return
 	}
 
-	if !project.GitHubOwner.Valid || !project.GitHubRepo.Valid {
+	owner := project.GetOwner()
+	repo := project.GetRepo()
+	if owner == "" || repo == "" {
 		return
 	}
 
-	r.issueCommenter = github.NewIssueCommenter(
-		r.githubClient,
-		project.GitHubOwner.String,
-		project.GitHubRepo.String,
+	r.issueCommenter = gitprovider.NewIssueCommenter(
+		r.forgejoProvider,
+		owner,
+		repo,
 		int(task.IssueNumber.Int64),
-		github.DefaultIssueCommenterConfig(),
+		gitprovider.DefaultIssueCommenterConfig(),
 	)
 }
 
@@ -255,19 +256,19 @@ func (r *RalphLoop) postIssueComment(ctx context.Context, comment string) {
 	}
 }
 
-// postQualityGateComment posts a comment about quality gate results to the linked GitHub issue
+// postQualityGateComment posts a comment about quality gate results to the linked issue
 func (r *RalphLoop) postQualityGateComment(ctx context.Context, result *GateResult) {
 	if r.issueCommenter == nil || result == nil {
 		return
 	}
 
-	// Convert GateResult to github.QualityGateResult
-	qgResult := &github.QualityGateResult{
+	// Convert GateResult to gitprovider.QualityGateResult
+	qgResult := &gitprovider.QualityGateResult{
 		Passed: result.Passed,
 	}
 
 	if result.Tests != nil {
-		qgResult.Tests = &github.CheckResultSummary{
+		qgResult.Tests = &gitprovider.CheckResultSummary{
 			Passed:  result.Tests.Passed,
 			Skipped: result.Tests.Skipped,
 		}
@@ -278,14 +279,14 @@ func (r *RalphLoop) postQualityGateComment(ctx context.Context, result *GateResu
 	}
 
 	if result.Lint != nil {
-		qgResult.Lint = &github.CheckResultSummary{
+		qgResult.Lint = &gitprovider.CheckResultSummary{
 			Passed:  result.Lint.Passed,
 			Skipped: result.Lint.Skipped,
 		}
 	}
 
 	if result.Build != nil {
-		qgResult.Build = &github.CheckResultSummary{
+		qgResult.Build = &gitprovider.CheckResultSummary{
 			Passed:  result.Build.Passed,
 			Skipped: result.Build.Skipped,
 		}
@@ -294,7 +295,7 @@ func (r *RalphLoop) postQualityGateComment(ctx context.Context, result *GateResu
 	commentData := r.buildCommentData(ctx)
 	commentData.QualityResult = qgResult
 
-	comment := github.BuildQualityGateComment(commentData)
+	comment := gitprovider.BuildQualityGateComment(commentData)
 	r.postIssueComment(ctx, comment)
 }
 
@@ -544,11 +545,11 @@ Please either:
 		fmt.Printf("RalphLoop.Run: warning - failed to record completion: %v\n", err)
 	}
 
-	// Post completion comment to GitHub issue
+	// Post completion comment to issue
 	if r.issueCommenter != nil {
 		commentData := r.buildCommentData(ctx)
 		summary := r.getCompletionSummary()
-		comment := github.BuildCompletedComment(commentData, summary)
+		comment := gitprovider.BuildCompletedComment(commentData, summary)
 		r.postIssueComment(ctx, comment)
 	}
 
@@ -596,12 +597,12 @@ func (r *RalphLoop) handleEventTransition(ctx context.Context, event *Event) boo
 			fmt.Printf("RalphLoop.Run: warning - failed to record hat transition: %v\n", err)
 		}
 
-		// Post hat transition comment to GitHub issue (with debouncing)
+		// Post hat transition comment to issue (with debouncing)
 		if r.issueCommenter != nil && r.issueCommenter.ShouldPostHatTransition(r.session.IterationCount) {
 			commentData := r.buildCommentData(ctx)
 			commentData.Hat = nextHat
 			commentData.PreviousHat = oldHat
-			comment := github.BuildHatTransitionComment(commentData)
+			comment := gitprovider.BuildHatTransitionComment(commentData)
 			r.postIssueComment(ctx, comment)
 		}
 
@@ -674,9 +675,9 @@ func (r *RalphLoop) Run(ctx context.Context) error {
 		"worktree_path": r.session.WorktreePath,
 	})
 
-	// Post "started" comment to linked GitHub issue
+	// Post "started" comment to linked issue
 	if r.issueCommenter != nil && len(r.messages) == 0 {
-		commentData := &github.CommentData{
+		commentData := &gitprovider.CommentData{
 			Iteration:   0,
 			TotalTokens: 0,
 			Hat:         r.session.Hat,
@@ -684,7 +685,7 @@ func (r *RalphLoop) Run(ctx context.Context) error {
 		if task != nil {
 			commentData.Branch = task.GetBranchName()
 		}
-		comment := github.BuildStartedComment(commentData)
+		comment := gitprovider.BuildStartedComment(commentData)
 		r.postIssueComment(ctx, comment)
 	}
 
@@ -1881,9 +1882,9 @@ func toNullString(s string) sql.NullString {
 	return sql.NullString{String: s, Valid: true}
 }
 
-// buildCommentData builds a CommentData struct for GitHub issue comments
-func (r *RalphLoop) buildCommentData(ctx context.Context) *github.CommentData {
-	data := &github.CommentData{
+// buildCommentData builds a CommentData struct for issue comments
+func (r *RalphLoop) buildCommentData(ctx context.Context) *gitprovider.CommentData {
+	data := &gitprovider.CommentData{
 		SessionID:   r.session.ID,
 		Iteration:   r.session.IterationCount,
 		TotalTokens: r.session.InputTokens + r.session.OutputTokens,
@@ -1898,7 +1899,7 @@ func (r *RalphLoop) buildCommentData(ctx context.Context) *github.CommentData {
 		if checklist, err := r.db.GetChecklistByTaskID(task.ID); err == nil && checklist != nil {
 			if items, err := r.db.GetChecklistItems(checklist.ID); err == nil {
 				for _, item := range items {
-					data.ChecklistItems = append(data.ChecklistItems, github.ChecklistItemStatus{
+					data.ChecklistItems = append(data.ChecklistItems, gitprovider.ChecklistItemStatus{
 						Description: item.Description,
 						Status:      item.Status,
 					})
