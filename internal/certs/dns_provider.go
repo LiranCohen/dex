@@ -142,8 +142,9 @@ func (d *DexDNSProvider) Timeout() (timeout, interval time.Duration) {
 }
 
 // parseChallengeDomain extracts hostname and namespace from an ACME challenge domain.
-// Input: _acme-challenge.myapp.alice.enbox.id
-// Output: myapp, alice, true
+// Supports two formats:
+// - _acme-challenge.myapp.alice.enbox.id -> hostname=myapp, namespace=alice
+// - _acme-challenge.alice.enbox.id -> hostname="", namespace=alice (namespace-level cert)
 func (d *DexDNSProvider) parseChallengeDomain(domain string) (hostname, namespace string, ok bool) {
 	// Remove _acme-challenge. prefix
 	const prefix = "_acme-challenge."
@@ -159,11 +160,13 @@ func (d *DexDNSProvider) parseChallengeDomain(domain string) (hostname, namespac
 	}
 	withoutBase := strings.TrimSuffix(fullHostname, suffix)
 
-	// Split into hostname.namespace
+	// Split into parts
 	parts := strings.SplitN(withoutBase, ".", 2)
-	if len(parts) != 2 {
-		return "", "", false
+	if len(parts) == 1 {
+		// Single level: namespace.enbox.id (no hostname)
+		return "", parts[0], true
 	}
 
+	// Two levels: hostname.namespace.enbox.id
 	return parts[0], parts[1], true
 }
