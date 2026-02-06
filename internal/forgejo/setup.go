@@ -11,11 +11,12 @@ import (
 	"time"
 )
 
+// User account constants for Forgejo bootstrap.
 const (
-	adminUsername = "dex-admin"
-	adminEmail   = "admin@hq.local"
-	botUsername   = "dex-bot"
-	botEmail     = "bot@hq.local"
+	AdminUsername = "dex-admin"
+	AdminEmail    = "admin@hq.local"
+	BotUsername   = "dex-bot"
+	BotEmail      = "bot@hq.local"
 )
 
 // bootstrap performs first-run setup: creates admin and bot accounts,
@@ -27,7 +28,7 @@ func (m *Manager) bootstrap(ctx context.Context) error {
 		return fmt.Errorf("failed to generate admin password: %w", err)
 	}
 
-	if err := m.cliCreateUser(ctx, adminUsername, adminEmail, adminPassword, true); err != nil {
+	if err := m.cliCreateUser(ctx, AdminUsername, AdminEmail, adminPassword, true); err != nil {
 		return fmt.Errorf("failed to create admin user: %w", err)
 	}
 
@@ -37,7 +38,7 @@ func (m *Manager) bootstrap(ctx context.Context) error {
 	}
 
 	// 2. Generate admin API token via CLI
-	adminToken, err := m.cliCreateToken(ctx, adminUsername, "dex-admin-token")
+	adminToken, err := m.cliCreateToken(ctx, AdminUsername, "dex-admin-token")
 	if err != nil {
 		return fmt.Errorf("failed to create admin token: %w", err)
 	}
@@ -53,12 +54,12 @@ func (m *Manager) bootstrap(ctx context.Context) error {
 		return fmt.Errorf("failed to generate bot password: %w", err)
 	}
 
-	if err := m.apiCreateUser(ctx, adminToken, botUsername, botEmail, botPassword); err != nil {
+	if err := m.apiCreateUser(ctx, adminToken, BotUsername, BotEmail, botPassword); err != nil {
 		return fmt.Errorf("failed to create bot user: %w", err)
 	}
 
 	// 4. Generate bot API token via CLI
-	botToken, err := m.cliCreateToken(ctx, botUsername, "dex-bot-token")
+	botToken, err := m.cliCreateToken(ctx, BotUsername, "dex-bot-token")
 	if err != nil {
 		return fmt.Errorf("failed to create bot token: %w", err)
 	}
@@ -75,7 +76,7 @@ func (m *Manager) bootstrap(ctx context.Context) error {
 	}
 
 	// 6. Add bot user to the org so it can create repos and PRs
-	if err := m.apiAddOrgMember(ctx, adminToken, orgName, botUsername); err != nil {
+	if err := m.apiAddOrgMember(ctx, adminToken, orgName, BotUsername); err != nil {
 		return fmt.Errorf("failed to add bot to org: %w", err)
 	}
 
@@ -106,7 +107,7 @@ func (m *Manager) AddBotToOrg(ctx context.Context, org string) error {
 	if err != nil {
 		return err
 	}
-	return m.apiAddOrgMember(ctx, adminToken, org, botUsername)
+	return m.apiAddOrgMember(ctx, adminToken, org, BotUsername)
 }
 
 // --- CLI helpers ---
@@ -150,10 +151,7 @@ func (m *Manager) runCLI(ctx context.Context, args ...string) (string, error) {
 	}, args...)
 
 	cmd := exec.CommandContext(ctx, binaryPath, fullArgs...)
-	cmd.Env = append(cmd.Environ(),
-		"FORGEJO_WORK_DIR="+m.config.DataDir,
-		"FORGEJO_CUSTOM="+m.config.DataDir+"/custom",
-	)
+	cmd.Env = append(cmd.Environ(), m.config.EnvVars()...)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

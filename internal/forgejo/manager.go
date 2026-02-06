@@ -193,7 +193,7 @@ func (m *Manager) WebAccess() (*AccessInfo, error) {
 	}
 	return &AccessInfo{
 		URL:      m.BaseURL(),
-		Username: adminUsername,
+		Username: AdminUsername,
 		Password: password,
 	}, nil
 }
@@ -222,10 +222,7 @@ func (m *Manager) startProcess(ctx context.Context) error {
 	cmd.Stderr = os.Stderr
 
 	// Set FORGEJO_WORK_DIR so Forgejo can find its data
-	cmd.Env = append(os.Environ(),
-		"FORGEJO_WORK_DIR="+m.config.DataDir,
-		"FORGEJO_CUSTOM="+m.config.DataDir+"/custom",
-	)
+	cmd.Env = append(os.Environ(), m.config.EnvVars()...)
 
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("failed to start forgejo: %w", err)

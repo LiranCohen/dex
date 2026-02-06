@@ -77,6 +77,14 @@ func (c *Config) GetDefaultOrgName() string {
 	return "workspace"
 }
 
+// EnvVars returns the environment variables needed for Forgejo processes.
+func (c *Config) EnvVars() []string {
+	return []string{
+		"FORGEJO_WORK_DIR=" + c.DataDir,
+		"FORGEJO_CUSTOM=" + c.DataDir + "/custom",
+	}
+}
+
 // WriteAppIni generates and writes the Forgejo configuration file.
 // This is called on first run and whenever config needs updating.
 func (c *Config) WriteAppIni() error {

@@ -170,7 +170,20 @@ func (c *Client) CreatePR(ctx context.Context, owner, repo string, opts gitprovi
 		return nil, fmt.Errorf("create PR: %w", err)
 	}
 
-	return parsePR(resp)
+	pr, err := parsePR(resp)
+	if err != nil {
+		return nil, err
+	}
+
+	// Apply labels if specified (PRs are issues in Forgejo, so we use the issues API)
+	if len(opts.Labels) > 0 {
+		if err := c.SetLabels(ctx, owner, repo, pr.Number, opts.Labels); err != nil {
+			// Log but don't fail PR creation if labels fail
+			fmt.Printf("warning: failed to set PR labels: %v\n", err)
+		}
+	}
+
+	return pr, nil
 }
 
 func (c *Client) MergePR(ctx context.Context, owner, repo string, number int, method gitprovider.MergeMethod) error {
@@ -224,13 +237,45 @@ func (c *Client) resolveLabelIDs(ctx context.Context, owner, repo string, labelN
 	}
 
 	ids := make([]int64, 0, len(labelNames))
+	var missing []string
 	for _, name := range labelNames {
 		if id, ok := nameToID[name]; ok {
 			ids = append(ids, id)
+		} else {
+			missing = append(missing, name)
 		}
-		// Skip labels that don't exist yet — caller can create them separately
 	}
+
+	// Auto-create missing labels with default color
+	for _, name := range missing {
+		id, err := c.createLabel(ctx, owner, repo, name)
+		if err != nil {
+			return nil, fmt.Errorf("create label %q: %w", name, err)
+		}
+		ids = append(ids, id)
+	}
+
 	return ids, nil
+}
+
+// createLabel creates a new label in the repository and returns its ID.
+func (c *Client) createLabel(ctx context.Context, owner, repo, name string) (int64, error) {
+	body := map[string]interface{}{
+		"name":  name,
+		"color": "e0e0e0", // Light gray default
+	}
+	resp, err := c.post(ctx, fmt.Sprintf("/api/v1/repos/%s/%s/labels", owner, repo), body)
+	if err != nil {
+		return 0, err
+	}
+
+	var created struct {
+		ID int64 `json:"id"`
+	}
+	if err := json.Unmarshal(resp, &created); err != nil {
+		return 0, fmt.Errorf("parse created label: %w", err)
+	}
+	return created.ID, nil
 }
 
 // --- HTTP helpers ---

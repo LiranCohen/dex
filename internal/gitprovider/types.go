@@ -66,10 +66,11 @@ type UpdateIssueOpts struct {
 
 // CreatePROpts contains options for creating a pull request.
 type CreatePROpts struct {
-	Title string `json:"title"`
-	Body  string `json:"body"`
-	Head  string `json:"head"` // Source branch
-	Base  string `json:"base"` // Target branch
+	Title  string   `json:"title"`
+	Body   string   `json:"body"`
+	Head   string   `json:"head"`             // Source branch
+	Base   string   `json:"base"`             // Target branch
+	Labels []string `json:"labels,omitempty"` // Labels to apply after creation
 }
 
 // CreateWebhookOpts contains options for creating a webhook.
