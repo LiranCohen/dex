@@ -16,6 +16,7 @@ import (
 type Client struct {
 	mu     sync.RWMutex
 	server *tsnet.Server
+	tunnel *TunnelClient
 	config Config
 	logf   func(format string, args ...any)
 }
@@ -40,11 +41,11 @@ func (c *Client) SetLogf(logf func(format string, args ...any)) {
 func (c *Client) Start(ctx context.Context) error {
 	if !c.config.Enabled {
 		c.logf("mesh: networking disabled")
-		return nil
+		// Even if mesh is disabled, we can still use tunnel
+		return c.startTunnel(ctx)
 	}
 
 	c.mu.Lock()
-	defer c.mu.Unlock()
 
 	c.server = &tsnet.Server{
 		Hostname:   c.config.Hostname,
@@ -55,14 +56,69 @@ func (c *Client) Start(ctx context.Context) error {
 	}
 
 	if err := c.server.Start(); err != nil {
+		c.mu.Unlock()
 		return fmt.Errorf("mesh start failed: %w", err)
 	}
 
 	c.logf("mesh: connected to %s, waiting for IP...", c.config.ControlURL)
+	c.mu.Unlock()
 
 	// Wait for mesh IP assignment in background
 	go c.waitForIP(ctx)
 
+	// Start tunnel if configured
+	return c.startTunnel(ctx)
+}
+
+// startTunnel starts the tunnel client if configured.
+func (c *Client) startTunnel(ctx context.Context) error {
+	if !c.config.Tunnel.Enabled {
+		return nil
+	}
+
+	if c.config.Tunnel.IngressAddr == "" {
+		c.logf("tunnel: ingress address not configured")
+		return nil
+	}
+
+	if len(c.config.Tunnel.Endpoints) == 0 {
+		c.logf("tunnel: no endpoints configured")
+		return nil
+	}
+
+	// Convert endpoint mappings to tunnel endpoints
+	endpoints := make([]TunnelEndpoint, len(c.config.Tunnel.Endpoints))
+	for i, ep := range c.config.Tunnel.Endpoints {
+		endpoints[i] = TunnelEndpoint{
+			Hostname:  ep.Hostname,
+			LocalPort: ep.LocalPort,
+		}
+	}
+
+	// Prepare ACME config if enabled
+	var acmeSettings *ACMESettings
+	if c.config.Tunnel.ACME.Enabled {
+		acmeSettings = &c.config.Tunnel.ACME
+	}
+
+	c.mu.Lock()
+	c.tunnel = NewTunnelClient(TunnelConfig{
+		IngressAddr: c.config.Tunnel.IngressAddr,
+		Token:       c.config.Tunnel.Token,
+		Endpoints:   endpoints,
+		Logf:        c.logf,
+		ACME:        acmeSettings,
+		CoordURL:    c.config.ControlURL,
+		StateDir:    c.config.StateDir,
+		BaseDomain:  "enbox.id", // TODO: make configurable
+	})
+	c.mu.Unlock()
+
+	if err := c.tunnel.Start(ctx); err != nil {
+		return fmt.Errorf("tunnel start failed: %w", err)
+	}
+
+	c.logf("tunnel: started with %d endpoints", len(endpoints))
 	return nil
 }
 
@@ -102,11 +158,28 @@ func (c *Client) Stop() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	var errs []error
+
+	// Stop tunnel first
+	if c.tunnel != nil {
+		c.logf("tunnel: shutting down")
+		if err := c.tunnel.Stop(); err != nil {
+			errs = append(errs, err)
+		}
+		c.tunnel = nil
+	}
+
+	// Stop mesh
 	if c.server != nil {
 		c.logf("mesh: shutting down")
-		err := c.server.Close()
+		if err := c.server.Close(); err != nil {
+			errs = append(errs, err)
+		}
 		c.server = nil
-		return err
+	}
+
+	if len(errs) > 0 {
+		return errs[0]
 	}
 	return nil
 }
@@ -123,37 +196,40 @@ func (c *Client) Status() *Status {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	if c.server == nil {
-		return &Status{
-			Connected: false,
-			IsHQ:      c.config.IsHQ,
-		}
-	}
-
 	status := &Status{
-		Connected: true,
-		Hostname:  c.config.Hostname,
-		IsHQ:      c.config.IsHQ,
-		Online:    true,
+		IsHQ: c.config.IsHQ,
 	}
 
-	// Get mesh IP
-	ip4, _ := c.server.TailscaleIPs()
-	if ip4.IsValid() {
-		status.MeshIP = ip4.String()
-	}
+	// Mesh status
+	if c.server != nil {
+		status.Connected = true
+		status.Hostname = c.config.Hostname
+		status.Online = true
 
-	// Get additional status info via LocalClient
-	lc, err := c.server.LocalClient()
-	if err == nil {
-		ctx := context.Background()
-		if s, err := lc.StatusWithoutPeers(ctx); err == nil && s != nil && s.Self != nil {
-			// Get DERP relay info from Self peer status
-			if s.Self.Relay != "" {
-				// Relay is a string like "nyc" or "1" representing the DERP region
-				status.DERPRegion = 0 // We don't have numeric region here
+		// Get mesh IP
+		ip4, _ := c.server.TailscaleIPs()
+		if ip4.IsValid() {
+			status.MeshIP = ip4.String()
+		}
+
+		// Get additional status info via LocalClient
+		lc, err := c.server.LocalClient()
+		if err == nil {
+			ctx := context.Background()
+			if s, err := lc.StatusWithoutPeers(ctx); err == nil && s != nil && s.Self != nil {
+				// Get DERP relay info from Self peer status
+				if s.Self.Relay != "" {
+					// Relay is a string like "nyc" or "1" representing the DERP region
+					status.DERPRegion = 0 // We don't have numeric region here
+				}
 			}
 		}
+	}
+
+	// Tunnel status
+	if c.tunnel != nil {
+		status.TunnelConnected = c.tunnel.IsConnected()
+		status.TunnelEndpoints = len(c.config.Tunnel.Endpoints)
 	}
 
 	return status

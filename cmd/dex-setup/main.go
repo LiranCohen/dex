@@ -47,6 +47,14 @@ type SetupState struct {
 	MeshConnected  bool   `json:"mesh_connected,omitempty"`
 	MeshIP         string `json:"mesh_ip,omitempty"`
 
+	// Tunnel setup state
+	TunnelEnabled     bool   `json:"tunnel_enabled,omitempty"`
+	TunnelIngressAddr string `json:"tunnel_ingress_addr,omitempty"`
+
+	// ACME setup state
+	ACMEEnabled bool   `json:"acme_enabled,omitempty"`
+	ACMEEmail   string `json:"acme_email,omitempty"`
+
 	Error string `json:"error,omitempty"`
 }
 
@@ -199,9 +207,21 @@ func (s *SetupServer) handleMeshConfigure(w http.ResponseWriter, r *http.Request
 	s.mu.Unlock()
 
 	var req struct {
+		// Mesh settings
 		Hostname   string `json:"hostname"`
 		ControlURL string `json:"control_url"`
 		AuthKey    string `json:"auth_key"`
+
+		// Tunnel settings
+		TunnelEnabled     bool                     `json:"tunnel_enabled"`
+		TunnelIngressAddr string                   `json:"tunnel_ingress_addr"`
+		TunnelToken       string                   `json:"tunnel_token"`
+		TunnelEndpoints   []map[string]interface{} `json:"tunnel_endpoints"`
+
+		// ACME settings
+		ACMEEnabled bool   `json:"acme_enabled"`
+		ACMEEmail   string `json:"acme_email"`
+		ACMEStaging bool   `json:"acme_staging"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		sendJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid request"})
@@ -215,6 +235,22 @@ func (s *SetupServer) handleMeshConfigure(w http.ResponseWriter, r *http.Request
 	if req.ControlURL == "" {
 		req.ControlURL = "https://central.enbox.id"
 	}
+	if req.TunnelIngressAddr == "" {
+		req.TunnelIngressAddr = "ingress.enbox.id:9443"
+	}
+
+	// Build tunnel configuration
+	tunnelConfig := map[string]any{
+		"enabled":      req.TunnelEnabled,
+		"ingress_addr": req.TunnelIngressAddr,
+		"token":        req.TunnelToken,
+		"endpoints":    req.TunnelEndpoints,
+		"acme": map[string]any{
+			"enabled": req.ACMEEnabled,
+			"email":   req.ACMEEmail,
+			"staging": req.ACMEStaging,
+		},
+	}
 
 	// Save mesh configuration
 	meshConfig := map[string]any{
@@ -224,6 +260,7 @@ func (s *SetupServer) handleMeshConfigure(w http.ResponseWriter, r *http.Request
 		"auth_key":    req.AuthKey,
 		"state_dir":   filepath.Join(s.dataDir, "mesh"),
 		"is_hq":       true,
+		"tunnel":      tunnelConfig,
 	}
 
 	configData, _ := json.MarshalIndent(meshConfig, "", "  ")
@@ -238,13 +275,19 @@ func (s *SetupServer) handleMeshConfigure(w http.ResponseWriter, r *http.Request
 	s.mu.Lock()
 	s.state.MeshHostname = req.Hostname
 	s.state.MeshControlURL = req.ControlURL
+	s.state.TunnelEnabled = req.TunnelEnabled
+	s.state.TunnelIngressAddr = req.TunnelIngressAddr
+	s.state.ACMEEnabled = req.ACMEEnabled
+	s.state.ACMEEmail = req.ACMEEmail
 	s.state.Phase = PhaseComplete
 	s.mu.Unlock()
 
 	sendJSON(w, http.StatusOK, map[string]any{
-		"success":     true,
-		"hostname":    req.Hostname,
-		"control_url": req.ControlURL,
+		"success":        true,
+		"hostname":       req.Hostname,
+		"control_url":    req.ControlURL,
+		"tunnel_enabled": req.TunnelEnabled,
+		"acme_enabled":   req.ACMEEnabled,
 	})
 }
 
