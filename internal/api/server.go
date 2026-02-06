@@ -13,10 +13,10 @@ import (
 	"github.com/lirancohen/dex/internal/api/core"
 	"github.com/lirancohen/dex/internal/api/handlers/approvals"
 	authhandlers "github.com/lirancohen/dex/internal/api/handlers/auth"
+	forgejohandlers "github.com/lirancohen/dex/internal/api/handlers/forgejo"
 	githubhandlers "github.com/lirancohen/dex/internal/api/handlers/github"
 	"github.com/lirancohen/dex/internal/api/handlers/issuesync"
 	"github.com/lirancohen/dex/internal/api/handlers/memory"
-	forgejohandlers "github.com/lirancohen/dex/internal/api/handlers/forgejo"
 	meshhandlers "github.com/lirancohen/dex/internal/api/handlers/mesh"
 	planninghandlers "github.com/lirancohen/dex/internal/api/handlers/planning"
 	"github.com/lirancohen/dex/internal/api/handlers/projects"
@@ -58,15 +58,15 @@ type Server struct {
 	planner           *planning.Planner
 	questHandler      *quest.Handler
 	githubApp         *github.AppManager
-	githubSyncService *github.SyncService     // Underlying GitHub sync service
+	githubSyncService *github.SyncService    // Underlying GitHub sync service
 	handlersSyncSvc   *issuesync.SyncService // Handler-level sync service wrapper
 	setupHandler      *setup.Handler
 	realtime          *realtime.Node // Centrifuge-based realtime messaging
 	broadcaster       *realtime.Broadcaster
-	meshClient        *mesh.Client    // Campus mesh network client
+	meshClient        *mesh.Client       // Campus mesh network client
 	workerManager     *worker.Manager    // Worker pool manager for distributed execution
 	meshProxy         *mesh.ServiceProxy // Reverse proxy for mesh-exposed services
-	forgejoManager    *forgejo.Manager // Embedded Forgejo instance manager
+	forgejoManager    *forgejo.Manager   // Embedded Forgejo instance manager
 	deps              *core.Deps
 	encryption        *crypto.EncryptionConfig // Encryption for secrets and worker payloads
 	addr              string

@@ -2,8 +2,6 @@ module github.com/lirancohen/dex
 
 go 1.24.7
 
-toolchain go1.24.7
-
 require golang.org/x/crypto v0.47.0
 
 require filippo.io/age v1.2.1
