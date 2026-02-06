@@ -14,6 +14,23 @@ type Config struct {
 	Mesh   MeshConfig   `json:"mesh"`
 	Tunnel TunnelConfig `json:"tunnel"`
 	ACME   ACMEConfig   `json:"acme"`
+	Owner  OwnerConfig  `json:"owner"`
+}
+
+// OwnerConfig contains the HQ owner's identity and authentication credentials
+type OwnerConfig struct {
+	UserID      string        `json:"user_id"`
+	Email       string        `json:"email"`
+	DisplayName string        `json:"display_name,omitempty"`
+	Passkey     PasskeyConfig `json:"passkey,omitempty"`
+}
+
+// PasskeyConfig contains the WebAuthn credential for owner authentication
+type PasskeyConfig struct {
+	CredentialID []byte `json:"credential_id,omitempty"` // WebAuthn credential ID
+	PublicKey    []byte `json:"public_key,omitempty"`    // COSE-encoded public key
+	PublicKeyAlg int    `json:"public_key_alg,omitempty"` // COSE algorithm (-7 for ES256)
+	SignCount    uint32 `json:"sign_count,omitempty"`    // For replay protection
 }
 
 // MeshConfig contains mesh networking configuration

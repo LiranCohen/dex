@@ -69,39 +69,3 @@ func ValidateToken(tokenString string, config *TokenConfig) (*Claims, error) {
 
 	return claims, nil
 }
-
-// RefreshToken creates a new token from an existing valid token
-func RefreshToken(tokenString string, config *TokenConfig) (string, error) {
-	claims, err := ValidateToken(tokenString, config)
-	if err != nil && !errors.Is(err, ErrExpiredToken) {
-		return "", err
-	}
-
-	// Allow refresh of recently expired tokens (within refresh window)
-	if errors.Is(err, ErrExpiredToken) {
-		// Parse without validation to get claims
-		token, _ := jwt.ParseWithClaims(tokenString, &Claims{}, func(token *jwt.Token) (any, error) {
-			return config.VerifyingKey, nil
-		}, jwt.WithoutClaimsValidation())
-
-		if token == nil {
-			return "", ErrInvalidToken
-		}
-
-		claims, _ = token.Claims.(*Claims)
-		if claims == nil {
-			return "", ErrInvalidToken
-		}
-
-		// Check if within refresh window
-		if claims.ExpiresAt != nil {
-			expiry := claims.ExpiresAt.Time
-			refreshWindow := time.Duration(config.RefreshHours) * time.Hour
-			if time.Since(expiry) > refreshWindow {
-				return "", ErrExpiredToken
-			}
-		}
-	}
-
-	return GenerateToken(claims.UserID, config)
-}

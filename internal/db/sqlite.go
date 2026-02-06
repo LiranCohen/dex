@@ -120,6 +120,8 @@ func (db *DB) Migrate() error {
 		// Rename github_issue_number → issue_number (provider-agnostic)
 		"ALTER TABLE tasks RENAME COLUMN github_issue_number TO issue_number",
 		"ALTER TABLE quests RENAME COLUMN github_issue_number TO issue_number",
+		// User email for OIDC sessions
+		"ALTER TABLE users ADD COLUMN email TEXT",
 	}
 	for _, migration := range optionalMigrations {
 		_, _ = db.Exec(migration) // Ignore errors - column may already exist
@@ -133,7 +135,7 @@ func (db *DB) Migrate() error {
 const migrationUsers = `
 CREATE TABLE IF NOT EXISTS users (
 	id TEXT PRIMARY KEY,
-	public_key TEXT UNIQUE,
+	email TEXT,
 	created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 	last_login_at DATETIME
 );

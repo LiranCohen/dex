@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -49,6 +50,19 @@ type EnrollmentResponse struct {
 		Email  string `json:"email"`
 		DNSAPI string `json:"dns_api"`
 	} `json:"acme"`
+
+	// Owner identity for authentication
+	Owner struct {
+		UserID      string `json:"user_id"`
+		Email       string `json:"email"`
+		DisplayName string `json:"display_name,omitempty"`
+		Passkey     *struct {
+			CredentialID string `json:"credential_id"` // Base64 URL encoded
+			PublicKey    string `json:"public_key"`    // Base64 URL encoded COSE key
+			PublicKeyAlg int    `json:"public_key_alg"` // COSE algorithm
+			SignCount    uint32 `json:"sign_count"`
+		} `json:"passkey,omitempty"`
+	} `json:"owner"`
 }
 
 const (
@@ -227,6 +241,34 @@ func buildConfigFromResponse(resp *EnrollmentResponse) *Config {
 			Email:   resp.ACME.Email,
 			DNSAPI:  resp.ACME.DNSAPI,
 		},
+		Owner: OwnerConfig{
+			UserID:      resp.Owner.UserID,
+			Email:       resp.Owner.Email,
+			DisplayName: resp.Owner.DisplayName,
+		},
+	}
+
+	// Parse passkey if provided
+	if resp.Owner.Passkey != nil {
+		credID, err := base64.RawURLEncoding.DecodeString(resp.Owner.Passkey.CredentialID)
+		if err != nil {
+			// Log but don't fail - passkey is optional
+			fmt.Fprintf(os.Stderr, "Warning: failed to decode passkey credential ID: %v\n", err)
+		}
+		pubKey, err := base64.RawURLEncoding.DecodeString(resp.Owner.Passkey.PublicKey)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to decode passkey public key: %v\n", err)
+		}
+
+		// Only set passkey config if both decoded successfully
+		if len(credID) > 0 && len(pubKey) > 0 {
+			config.Owner.Passkey = PasskeyConfig{
+				CredentialID: credID,
+				PublicKey:    pubKey,
+				PublicKeyAlg: resp.Owner.Passkey.PublicKeyAlg,
+				SignCount:    resp.Owner.Passkey.SignCount,
+			}
+		}
 	}
 
 	return config
