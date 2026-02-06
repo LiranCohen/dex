@@ -13,9 +13,10 @@ export default defineConfig({
       provider: 'v8',
       reporter: ['text', 'json', 'html'],
       include: [
-        'src/v2/components/**/*.{ts,tsx}',
-        'src/v2/hooks/**/*.{ts,tsx}',
-        'src/v2/pages/**/*.{ts,tsx}',
+        'src/app/components/**/*.{ts,tsx}',
+        'src/app/hooks/**/*.{ts,tsx}',
+        'src/app/pages/**/*.{ts,tsx}',
+        'src/app/utils/**/*.{ts,tsx}',
         'src/components/QuestChat/utils.ts',
         'src/hooks/useWebSocket.ts',
       ],
@@ -27,19 +28,19 @@ export default defineConfig({
       ],
       thresholds: {
         // Per-file thresholds for tested components
-        'src/v2/components/*.tsx': {
+        'src/app/components/*.tsx': {
           lines: 65,
           functions: 65,
           branches: 55,
           statements: 65,
         },
-        'src/v2/components/chat/*.tsx': {
+        'src/app/components/chat/*.tsx': {
           lines: 65,
           functions: 65,
           branches: 55,
           statements: 65,
         },
-        'src/v2/hooks/*.ts': {
+        'src/app/hooks/*.ts': {
           lines: 90,
           functions: 90,
           branches: 90,

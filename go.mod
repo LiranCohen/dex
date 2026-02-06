@@ -119,3 +119,13 @@ require (
 
 // Use local dexnet fork for mesh networking
 replace github.com/WebP2P/dexnet => /home/user/dexnet
+
+// Local stubs for modules missing from cache (no network access)
+replace (
+	modernc.org/sqlite => /home/user/stubs/modernc-sqlite
+	modernc.org/libc => /home/user/stubs/modernc-libc
+	modernc.org/mathutil => /home/user/stubs/modernc-mathutil
+	modernc.org/memory => /home/user/stubs/modernc-memory
+	github.com/segmentio/encoding => /home/user/stubs/segmentio-encoding
+	github.com/segmentio/asm => /home/user/stubs/segmentio-asm
+)
