@@ -1,13 +1,13 @@
 module github.com/lirancohen/dex
 
-go 1.24.7
+go 1.25.5
 
 require golang.org/x/crypto v0.47.0
 
 require filippo.io/age v1.2.1
 
 require (
-	github.com/WebP2P/dexnet v0.0.0-00010101000000-000000000000
+	github.com/WebP2P/dexnet v0.0.0-20260206143204-9653b71a537f
 	github.com/bmatcuk/doublestar/v4 v4.10.0
 	github.com/centrifugal/centrifuge v0.38.0
 	github.com/go-acme/lego/v4 v4.31.0
@@ -47,7 +47,7 @@ require (
 	github.com/centrifugal/protocol v0.17.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/coder/websocket v1.8.12 // indirect
-	github.com/creachadair/msync v0.6.0 // indirect
+	github.com/creachadair/msync v0.7.1 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/dblohm7/wingoes v0.0.0-20240119213807-a09d6be7affa // indirect
 	github.com/dolthub/maphash v0.1.0 // indirect
@@ -127,6 +127,3 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
 )
-
-// Use local dexnet fork for mesh networking
-replace github.com/WebP2P/dexnet => /home/user/dexnet
