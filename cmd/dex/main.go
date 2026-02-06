@@ -21,9 +21,42 @@ import (
 	"github.com/lirancohen/dex/internal/toolbelt"
 )
 
-const version = "0.1.0-dev"
+// version is set at build time via ldflags
+// go build -ldflags="-X main.version=1.0.0" ./cmd/dex
+var version = "0.1.0-dev"
+
+func printUsage() {
+	fmt.Fprintf(os.Stderr, "Poindexter (dex) - AI Orchestration System\n\n")
+	fmt.Fprintf(os.Stderr, "Usage: dex <command> [options]\n\n")
+	fmt.Fprintf(os.Stderr, "Commands:\n")
+	fmt.Fprintf(os.Stderr, "  start     Start the Dex server (default if no command given)\n")
+	fmt.Fprintf(os.Stderr, "  enroll    Enroll this HQ with Central using an enrollment key\n")
+	fmt.Fprintf(os.Stderr, "  version   Show version information\n")
+	fmt.Fprintf(os.Stderr, "  help      Show this help message\n")
+	fmt.Fprintf(os.Stderr, "\nRun 'dex <command> --help' for more information on a command.\n")
+}
 
 func main() {
+	// Handle subcommands
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "enroll":
+			if err := runEnroll(os.Args[2:]); err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				os.Exit(1)
+			}
+			return
+		case "version":
+			fmt.Printf("Poindexter (dex) v%s\n", version)
+			return
+		case "help", "-h", "--help":
+			printUsage()
+			return
+		case "start":
+			// Remove "start" from args and continue to normal processing
+			os.Args = append(os.Args[:1], os.Args[2:]...)
+		}
+	}
 	// Define flags
 	dbPath := flag.String("db", "dex.db", "Path to SQLite database file")
 	addr := flag.String("addr", ":8080", "Server address (e.g., :8080 or 0.0.0.0:8443)")
@@ -80,6 +113,18 @@ func main() {
 	}
 	if dataDir == "" {
 		dataDir = "/opt/dex"
+	}
+
+	// Try to load config.json from enrollment (created by 'dex enroll')
+	var enrollConfig *Config
+	configPath := filepath.Join(dataDir, "config.json")
+	if cfg, err := LoadConfig(configPath); err == nil {
+		enrollConfig = cfg
+		fmt.Printf("Loaded enrollment config: %s\n", configPath)
+		fmt.Printf("  Namespace: %s\n", cfg.Namespace)
+		fmt.Printf("  Public URL: %s\n", cfg.PublicURL)
+	} else if !os.IsNotExist(err) {
+		fmt.Fprintf(os.Stderr, "Warning: Failed to load config.json: %v\n", err)
 	}
 
 	// Initialize encryption
@@ -216,30 +261,76 @@ func main() {
 		SigningKey:   privKey,
 		VerifyingKey: pubKey,
 	}
-	// Configure mesh networking if enabled
+	// Configure mesh networking
+	// Priority: CLI flags > enrollment config > defaults
 	var meshConfig *mesh.Config
-	if *meshEnabled {
+	meshShouldEnable := *meshEnabled
+	if !meshShouldEnable && enrollConfig != nil && enrollConfig.Mesh.Enabled {
+		meshShouldEnable = true
+	}
+
+	if meshShouldEnable {
 		// Default mesh state directory
 		meshState := *meshStateDir
 		if meshState == "" {
 			meshState = filepath.Join(dataDir, "mesh")
 		}
 
-		// Default hostname to OS hostname if not specified
+		// Default hostname: CLI flag > enrollment config > OS hostname
 		hostname := *meshHostname
+		if hostname == "" && enrollConfig != nil && enrollConfig.Hostname != "" {
+			hostname = enrollConfig.Hostname
+		}
 		if hostname == "" {
 			hostname, _ = os.Hostname()
+		}
+
+		// Control URL: CLI flag > enrollment config > default
+		controlURL := *meshControlURL
+		if controlURL == "https://central.enbox.id" && enrollConfig != nil && enrollConfig.Mesh.ControlURL != "" {
+			controlURL = enrollConfig.Mesh.ControlURL
+		}
+
+		// Auth key: CLI flag > enrollment config
+		authKey := *meshAuthKey
+		if authKey == "" && enrollConfig != nil && enrollConfig.Mesh.AuthKey != "" {
+			authKey = enrollConfig.Mesh.AuthKey
 		}
 
 		meshConfig = &mesh.Config{
 			Enabled:    true,
 			Hostname:   hostname,
 			StateDir:   meshState,
-			ControlURL: *meshControlURL,
-			AuthKey:    *meshAuthKey,
+			ControlURL: controlURL,
+			AuthKey:    authKey,
 			IsHQ:       true, // dex server is always the HQ
 		}
-		fmt.Printf("Mesh networking enabled: hostname=%s, control=%s\n", hostname, *meshControlURL)
+		fmt.Printf("Mesh networking enabled: hostname=%s, control=%s\n", hostname, controlURL)
+
+		// Configure tunnel if enrollment config has tunnel settings
+		if enrollConfig != nil && enrollConfig.Tunnel.Enabled {
+			meshConfig.Tunnel = mesh.TunnelSettings{
+				Enabled:     true,
+				IngressAddr: enrollConfig.Tunnel.IngressAddr,
+				Token:       enrollConfig.Tunnel.Token,
+			}
+			for _, ep := range enrollConfig.Tunnel.Endpoints {
+				meshConfig.Tunnel.Endpoints = append(meshConfig.Tunnel.Endpoints, mesh.EndpointMapping{
+					Hostname:  ep.Hostname,
+					LocalPort: ep.LocalPort,
+				})
+			}
+			fmt.Printf("Tunnel enabled: ingress=%s, endpoints=%d\n", enrollConfig.Tunnel.IngressAddr, len(enrollConfig.Tunnel.Endpoints))
+
+			// Configure ACME if enabled
+			if enrollConfig.ACME.Enabled {
+				meshConfig.Tunnel.ACME = mesh.ACMESettings{
+					Enabled: true,
+					Email:   enrollConfig.ACME.Email,
+				}
+				fmt.Printf("ACME enabled: email=%s\n", enrollConfig.ACME.Email)
+			}
+		}
 	}
 
 	// Configure embedded Forgejo if enabled
