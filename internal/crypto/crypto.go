@@ -312,6 +312,45 @@ func GenerateMasterKey() (*MasterKey, error) {
 	return NewMasterKey(password, nil)
 }
 
+// EnsureMasterKey loads a master key from a file, or creates a new one if it doesn't exist.
+// This is useful for worker nodes that need persistent encryption keys.
+func EnsureMasterKey(keyPath string) (*MasterKey, error) {
+	// Check if key file exists
+	data, err := os.ReadFile(keyPath)
+	if err == nil {
+		// File exists, load the key
+		if len(data) < SaltSize+KeySize {
+			return nil, errors.New("master key file corrupted: too short")
+		}
+		mk := &MasterKey{
+			salt: data[:SaltSize],
+		}
+		copy(mk.key[:], data[SaltSize:SaltSize+KeySize])
+		return mk, nil
+	}
+
+	if !os.IsNotExist(err) {
+		return nil, fmt.Errorf("failed to read master key file: %w", err)
+	}
+
+	// Generate new key
+	mk, err := GenerateMasterKey()
+	if err != nil {
+		return nil, err
+	}
+
+	// Save to file with restrictive permissions
+	keyData := make([]byte, len(mk.salt)+KeySize)
+	copy(keyData, mk.salt)
+	copy(keyData[len(mk.salt):], mk.key[:])
+
+	if err := os.WriteFile(keyPath, keyData, 0600); err != nil {
+		return nil, fmt.Errorf("failed to write master key file: %w", err)
+	}
+
+	return mk, nil
+}
+
 // ZeroKey securely zeroes a key in memory.
 func ZeroKey(key []byte) {
 	for i := range key {

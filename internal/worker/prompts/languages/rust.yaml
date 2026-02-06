@@ -1,0 +1,59 @@
+name: rust
+instructions: |
+  ## Rust Language Guidelines
+
+  Follow the Rust API Guidelines, principles from Andrew Gallant (burntsushi), and the Rust Design Patterns book.
+
+  ### Andrew Gallant's Error Handling Principles
+  - Return errors to the caller as best practice; the standard library does this
+  - "Panicking is not an adequate method of error handling" for libraries/applications
+  - Predictable errors (file not found, invalid input) must use `Result`, not panic
+  - Using `.unwrap()` is OK in tests, examples, or when panic indicates a bug
+  - Use `.expect("context")` over `.unwrap()` for better debugging
+  - Provide information beyond just String representation for custom errors
+
+  ### Rust API Guidelines
+  - Accept `&str` over `&String`, accept `&[T]` over `&Vec<T>`
+  - Use generics with precise trait bounds for flexible APIs
+  - Make common operations easy; make rare operations possible
+  - Doc comments: start with third-person verb ("Returns", not "Return")
+  - Document error conditions in an "Errors" section
+  - Include examples that compile and demonstrate real usage
+
+  ### Clippy is Your Friend
+  - Run `cargo clippy` routinely - it catches real issues
+  - Fix `unwrap_used` warnings first - ~17% of user-facing panics come from unguarded unwrap()
+  - Address warnings about redundant clones and unnecessary borrows
+  - Integrate Clippy in CI to catch non-idiomatic constructs automatically
+
+  ### Ownership & Borrowing
+  - Prefer borrowing (`&T`) over ownership when you don't need to consume
+  - Use `&mut` only when mutation is necessary
+  - Clone explicitly when needed; avoid hidden copies
+  - Understand when to use `Box`, `Rc`, `Arc` for heap allocation
+
+  ### Error Handling
+  - Use `Result<T, E>` for recoverable errors
+  - Use `?` operator for error propagation
+  - Create custom error types with `thiserror` crate
+  - Implement the `Error` trait for library errors
+  - Don't use generic `Box<dyn Error>` - define specific error enums
+
+  ### Idiomatic Patterns
+  - Use `if let` for single matches, `while let` for iterator patterns
+  - Prefer iterator methods (map, filter, collect) over manual loops
+  - Use exhaustive pattern matching; avoid catch-all `_` when possible
+  - Use `#[derive(...)]` for common traits (Debug, Clone, PartialEq)
+  - Use VecDeque for FIFO queues - Vec::remove(0) is O(n)
+
+  ### Code Style
+  - Follow rustfmt conventions; run `cargo fmt`
+  - Use `usize` for indexing, not `i32` or other integer types
+  - Read "The Book" (The Rust Programming Language) thoroughly
+
+  ### Common Pitfalls
+  - Lifetime annotations: add them when the compiler needs help
+  - String vs &str: use `&str` for function parameters when possible
+  - Avoid `.clone()` in hot paths without measurement
+  - Handle mutex poisoning; don't ignore lock errors
+  - Don't apply OOP patterns blindly - Rust has different idioms

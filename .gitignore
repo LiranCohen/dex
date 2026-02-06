@@ -2,7 +2,11 @@
 /dex
 /dex-cli
 /dex-setup
+/dex-worker
 *.exe
+
+# Worktrees
+/worktrees/
 
 # Dependencies
 /vendor/

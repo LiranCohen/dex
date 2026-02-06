@@ -1,0 +1,6 @@
+name: resolver
+components:
+  - system
+  - environment
+  - tools
+  - hat_resolver

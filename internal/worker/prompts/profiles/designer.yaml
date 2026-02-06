@@ -1,0 +1,6 @@
+name: designer
+components:
+  - system
+  - environment
+  - tools
+  - hat_designer

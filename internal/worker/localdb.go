@@ -126,6 +126,25 @@ func (ldb *LocalDB) migrate() error {
 			ack_id TEXT
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_sync_log_entity ON sync_log(entity_type, entity_id)`,
+		// Session state for resumption
+		`CREATE TABLE IF NOT EXISTS session_state (
+			session_id TEXT PRIMARY KEY,
+			objective_id TEXT NOT NULL,
+			hat TEXT NOT NULL,
+			iteration INTEGER NOT NULL DEFAULT 0,
+			tokens_input INTEGER NOT NULL DEFAULT 0,
+			tokens_output INTEGER NOT NULL DEFAULT 0,
+			conversation TEXT,
+			scratchpad TEXT,
+			checklist_done TEXT,
+			checklist_failed TEXT,
+			hat_history TEXT,
+			transition_count INTEGER DEFAULT 0,
+			previous_hat TEXT,
+			status TEXT NOT NULL DEFAULT 'running',
+			work_dir TEXT,
+			updated_at DATETIME NOT NULL
+		)`,
 	}
 
 	for _, migration := range migrations {
@@ -370,4 +389,117 @@ func (ldb *LocalDB) GetObjectiveIterationCount(objectiveID string) (int, error) 
 		SELECT COALESCE(MAX(iteration), 0) FROM activity WHERE objective_id = ?
 	`, objectiveID).Scan(&count)
 	return count, err
+}
+
+// SessionState represents the saved state of a session for resumption.
+type SessionState struct {
+	SessionID       string   `json:"session_id"`
+	ObjectiveID     string   `json:"objective_id"`
+	Hat             string   `json:"hat"`
+	Iteration       int      `json:"iteration"`
+	TokensInput     int64    `json:"tokens_input"`
+	TokensOutput    int64    `json:"tokens_output"`
+	Conversation    string   `json:"conversation"`     // JSON-encoded messages
+	Scratchpad      string   `json:"scratchpad"`
+	ChecklistDone   []string `json:"checklist_done"`
+	ChecklistFailed []string `json:"checklist_failed"`
+	HatHistory      string   `json:"hat_history"`      // JSON-encoded hat history
+	TransitionCount int      `json:"transition_count"`
+	PreviousHat     string   `json:"previous_hat"`
+	Status          string   `json:"status"`           // running, completed, failed
+	WorkDir         string   `json:"work_dir"`
+	UpdatedAt       time.Time `json:"updated_at"`
+}
+
+// SaveSessionState saves the current session state for potential resumption.
+func (ldb *LocalDB) SaveSessionState(state *SessionState) error {
+	checklistDoneJSON := "[]"
+	if len(state.ChecklistDone) > 0 {
+		data, _ := json.Marshal(state.ChecklistDone)
+		checklistDoneJSON = string(data)
+	}
+
+	checklistFailedJSON := "[]"
+	if len(state.ChecklistFailed) > 0 {
+		data, _ := json.Marshal(state.ChecklistFailed)
+		checklistFailedJSON = string(data)
+	}
+
+	_, err := ldb.db.Exec(`
+		INSERT INTO session_state (
+			session_id, objective_id, hat, iteration, tokens_input, tokens_output,
+			conversation, scratchpad, checklist_done, checklist_failed,
+			hat_history, transition_count, previous_hat, status, work_dir, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(session_id) DO UPDATE SET
+			hat = excluded.hat,
+			iteration = excluded.iteration,
+			tokens_input = excluded.tokens_input,
+			tokens_output = excluded.tokens_output,
+			conversation = excluded.conversation,
+			scratchpad = excluded.scratchpad,
+			checklist_done = excluded.checklist_done,
+			checklist_failed = excluded.checklist_failed,
+			hat_history = excluded.hat_history,
+			transition_count = excluded.transition_count,
+			previous_hat = excluded.previous_hat,
+			status = excluded.status,
+			work_dir = excluded.work_dir,
+			updated_at = excluded.updated_at
+	`,
+		state.SessionID, state.ObjectiveID, state.Hat, state.Iteration,
+		state.TokensInput, state.TokensOutput, state.Conversation, state.Scratchpad,
+		checklistDoneJSON, checklistFailedJSON, state.HatHistory, state.TransitionCount,
+		state.PreviousHat, state.Status, state.WorkDir, time.Now(),
+	)
+	return err
+}
+
+// GetIncompleteSession returns any session that was running when the worker stopped.
+func (ldb *LocalDB) GetIncompleteSession() (*SessionState, error) {
+	var state SessionState
+	var checklistDoneJSON, checklistFailedJSON string
+
+	err := ldb.db.QueryRow(`
+		SELECT session_id, objective_id, hat, iteration, tokens_input, tokens_output,
+			conversation, scratchpad, checklist_done, checklist_failed,
+			hat_history, transition_count, previous_hat, status, work_dir, updated_at
+		FROM session_state WHERE status = 'running' ORDER BY updated_at DESC LIMIT 1
+	`).Scan(
+		&state.SessionID, &state.ObjectiveID, &state.Hat, &state.Iteration,
+		&state.TokensInput, &state.TokensOutput, &state.Conversation, &state.Scratchpad,
+		&checklistDoneJSON, &checklistFailedJSON, &state.HatHistory, &state.TransitionCount,
+		&state.PreviousHat, &state.Status, &state.WorkDir, &state.UpdatedAt,
+	)
+
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	// Unmarshal checklist arrays
+	if checklistDoneJSON != "" {
+		_ = json.Unmarshal([]byte(checklistDoneJSON), &state.ChecklistDone)
+	}
+	if checklistFailedJSON != "" {
+		_ = json.Unmarshal([]byte(checklistFailedJSON), &state.ChecklistFailed)
+	}
+
+	return &state, nil
+}
+
+// MarkSessionComplete marks a session as completed (not running).
+func (ldb *LocalDB) MarkSessionComplete(sessionID, status string) error {
+	_, err := ldb.db.Exec(`
+		UPDATE session_state SET status = ?, updated_at = ? WHERE session_id = ?
+	`, status, time.Now(), sessionID)
+	return err
+}
+
+// DeleteSessionState removes a session state record.
+func (ldb *LocalDB) DeleteSessionState(sessionID string) error {
+	_, err := ldb.db.Exec(`DELETE FROM session_state WHERE session_id = ?`, sessionID)
+	return err
 }

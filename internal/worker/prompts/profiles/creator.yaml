@@ -1,0 +1,6 @@
+name: creator
+components:
+  - system
+  - environment
+  - tools
+  - hat_creator

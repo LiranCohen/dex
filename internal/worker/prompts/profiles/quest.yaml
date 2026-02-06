@@ -1,0 +1,5 @@
+name: quest
+components:
+  - system
+  - hat_quest
+  - quest_tools

@@ -1,0 +1,41 @@
+name: environment
+template: true
+instructions: |
+  ## Current Environment
+  {{if .Values.project_name}}
+  ### Project
+  - **Name:** {{.Values.project_name}}
+  {{if .Values.repo_path}}- **Repository:** {{.Values.repo_path}}{{end}}
+  {{if .Values.github_owner}}- **GitHub:** {{.Values.github_owner}}/{{.Values.github_repo}}{{else}}- **GitHub:** Not configured (use git_init + github_create_repo + git_remote_add to set up){{end}}
+  {{end}}
+
+  ### Session
+  {{if .Values.worktree_path}}
+  - **Working Directory:** {{.Values.worktree_path}}
+  - **IMPORTANT:** All file operations MUST be within this directory. Do not create, modify, or read files outside your working directory.
+  {{end}}
+  {{if .Values.branch_name}}- **Branch:** {{.Values.branch_name}}{{end}}
+  {{if .Values.is_new_project}}- **New Project:** Yes - use git_init to initialize before committing{{end}}
+
+  ### Task
+  - **ID:** {{.Values.task_id}}
+  - **Title:** {{.Values.task_title}}
+  {{if .Values.task_description}}
+  - **Description:** {{.Values.task_description}}
+  {{end}}
+
+  {{if .Flags.has_refined_prompt}}
+  ### Refined Task Instructions (from planning)
+  {{.Values.refined_prompt}}
+  {{end}}
+
+  {{if .Flags.has_predecessor_context}}
+  ### Predecessor Task Context
+  This task is part of a dependency chain. A previous task completed and you are continuing from where it left off.
+
+  {{.Values.predecessor_context}}
+  {{end}}
+
+  {{if .Values.tool_descriptions}}
+  {{.Values.tool_descriptions}}
+  {{end}}

@@ -1,0 +1,6 @@
+name: explorer
+components:
+  - system
+  - environment
+  - tools
+  - hat_explorer

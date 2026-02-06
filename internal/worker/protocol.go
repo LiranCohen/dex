@@ -23,16 +23,22 @@ const (
 	MsgTypePing     MessageType = "ping"     // Health check
 
 	// Worker -> HQ messages
-	MsgTypeReady       MessageType = "ready"        // Worker is ready to receive work
-	MsgTypeAccepted    MessageType = "accepted"     // Objective accepted, starting execution
-	MsgTypeProgress    MessageType = "progress"     // Progress update (iteration complete)
-	MsgTypeActivity    MessageType = "activity"     // Activity events to sync
-	MsgTypeCompleted   MessageType = "completed"    // Objective completed
-	MsgTypeFailed      MessageType = "failed"       // Objective failed
-	MsgTypeCancelled   MessageType = "cancelled"    // Objective was cancelled
-	MsgTypePong        MessageType = "pong"         // Health check response
-	MsgTypeError       MessageType = "error"        // Protocol or worker error
-	MsgTypeShutdownAck MessageType = "shutdown_ack" // Acknowledging shutdown
+	MsgTypeReady         MessageType = "ready"          // Worker is ready to receive work
+	MsgTypeAccepted      MessageType = "accepted"       // Objective accepted, starting execution
+	MsgTypeProgress      MessageType = "progress"       // Progress update (iteration complete)
+	MsgTypeActivity      MessageType = "activity"       // Activity events to sync
+	MsgTypeCompleted     MessageType = "completed"      // Objective completed
+	MsgTypeFailed        MessageType = "failed"         // Objective failed
+	MsgTypeCancelled     MessageType = "cancelled"      // Objective was cancelled
+	MsgTypePong          MessageType = "pong"           // Health check response
+	MsgTypeHeartbeat     MessageType = "heartbeat"      // Periodic heartbeat from worker
+	MsgTypeCrashReport   MessageType = "crash_report"   // Report of crashed session from previous run
+	MsgTypeResumeRequest MessageType = "resume_request" // Request to resume a crashed session
+	MsgTypeError         MessageType = "error"          // Protocol or worker error
+	MsgTypeShutdownAck   MessageType = "shutdown_ack"   // Acknowledging shutdown
+
+	// HQ -> Worker messages (for resumption)
+	MsgTypeResume MessageType = "resume" // Resume a crashed session with secrets
 )
 
 // Message is the envelope for all protocol messages.
@@ -75,7 +81,8 @@ type ProgressPayload struct {
 	TokensInput  int    `json:"tokens_input"`
 	TokensOutput int    `json:"tokens_output"`
 	Hat          string `json:"hat,omitempty"`
-	Status       string `json:"status,omitempty"` // Current status description
+	Status       string `json:"status,omitempty"`  // Current status (running, hat_transition, etc.)
+	Message      string `json:"message,omitempty"` // Human-readable status message
 }
 
 // ActivityPayload is the payload for MsgTypeActivity.
@@ -111,6 +118,51 @@ type PongPayload struct {
 	ObjectiveID string      `json:"objective_id,omitempty"`
 	Iteration   int         `json:"iteration,omitempty"`
 	TokensUsed  int         `json:"tokens_used,omitempty"`
+}
+
+// HeartbeatPayload is the payload for MsgTypeHeartbeat.
+type HeartbeatPayload struct {
+	WorkerID     string      `json:"worker_id"`
+	State        WorkerState `json:"state"`
+	ObjectiveID  string      `json:"objective_id,omitempty"`
+	SessionID    string      `json:"session_id,omitempty"`
+	Iteration    int         `json:"iteration,omitempty"`
+	TokensInput  int         `json:"tokens_input,omitempty"`
+	TokensOutput int         `json:"tokens_output,omitempty"`
+	Uptime       int64       `json:"uptime_sec"` // Seconds since worker started
+}
+
+// CrashReportPayload is the payload for MsgTypeCrashReport.
+// Sent when worker starts up and finds an incomplete session from a previous crash.
+type CrashReportPayload struct {
+	WorkerID     string    `json:"worker_id"`
+	ObjectiveID  string    `json:"objective_id"`
+	SessionID    string    `json:"session_id"`
+	Hat          string    `json:"hat"`
+	Iteration    int       `json:"iteration"`
+	TokensInput  int64     `json:"tokens_input"`
+	TokensOutput int64     `json:"tokens_output"`
+	WorkDir      string    `json:"work_dir"`
+	CrashedAt    time.Time `json:"crashed_at"` // When the crash was detected
+	CanResume    bool      `json:"can_resume"` // Whether checkpoint data is available
+}
+
+// ResumeRequestPayload is the payload for MsgTypeResumeRequest.
+// Sent when worker wants to resume a crashed session (needs secrets from HQ).
+type ResumeRequestPayload struct {
+	WorkerID    string `json:"worker_id"`
+	ObjectiveID string `json:"objective_id"`
+	SessionID   string `json:"session_id"`
+}
+
+// ResumePayload is the payload for MsgTypeResume.
+// Sent by HQ to authorize and provide secrets for session resumption.
+type ResumePayload struct {
+	ObjectiveID      string `json:"objective_id"`
+	SessionID        string `json:"session_id"`
+	EncryptedSecrets string `json:"encrypted_secrets"` // Encrypted WorkerSecrets
+	Approved         bool   `json:"approved"`          // Whether HQ approves resumption
+	Reason           string `json:"reason,omitempty"`  // Reason if not approved
 }
 
 // Conn wraps a reader/writer pair for protocol communication.
@@ -268,6 +320,30 @@ func (c *Conn) SendFailed(objectiveID, sessionID, errorMsg string, iteration int
 // SendPong is a helper to send a pong message.
 func (c *Conn) SendPong(status *PongPayload) error {
 	return c.Send(MsgTypePong, status)
+}
+
+// SendHeartbeat is a helper to send a heartbeat message.
+func (c *Conn) SendHeartbeat(heartbeat *HeartbeatPayload) error {
+	return c.Send(MsgTypeHeartbeat, heartbeat)
+}
+
+// SendCrashReport is a helper to send a crash report message.
+func (c *Conn) SendCrashReport(report *CrashReportPayload) error {
+	return c.Send(MsgTypeCrashReport, report)
+}
+
+// SendResumeRequest is a helper to send a resume request message.
+func (c *Conn) SendResumeRequest(workerID, objectiveID, sessionID string) error {
+	return c.Send(MsgTypeResumeRequest, &ResumeRequestPayload{
+		WorkerID:    workerID,
+		ObjectiveID: objectiveID,
+		SessionID:   sessionID,
+	})
+}
+
+// SendResume is a helper to send a resume authorization message.
+func (c *Conn) SendResume(payload *ResumePayload) error {
+	return c.Send(MsgTypeResume, payload)
 }
 
 // SendError is a helper to send an error message.

@@ -442,3 +442,82 @@ func TestLargeSecrets(t *testing.T) {
 		t.Error("Large secret should be preserved exactly")
 	}
 }
+
+func TestReceiver_DecryptSecrets(t *testing.T) {
+	// This tests the DecryptSecrets method used for session resumption
+	hqKeyPair, _ := crypto.GenerateKeyPair()
+	workerIdentity, _ := crypto.NewWorkerIdentity("worker-resume")
+
+	dispatcher := NewDispatcher(hqKeyPair)
+	receiver := NewReceiver(workerIdentity)
+
+	// Create secrets and encrypt them as HQ would for resumption
+	secrets := WorkerSecrets{
+		AnthropicKey: "sk-ant-resume-key",
+		GitHubToken:  "ghp_resume_token",
+	}
+
+	// Create a payload to get encrypted secrets
+	payload, err := dispatcher.PreparePayload(
+		Objective{ID: "obj-resume"},
+		Project{},
+		secrets,
+		workerIdentity.PublicKey(),
+		SyncConfig{},
+	)
+	if err != nil {
+		t.Fatalf("PreparePayload failed: %v", err)
+	}
+
+	// Use DecryptSecrets (the method used during resumption)
+	decrypted, err := receiver.DecryptSecrets(payload.SecretsEncrypted)
+	if err != nil {
+		t.Fatalf("DecryptSecrets failed: %v", err)
+	}
+
+	if decrypted.AnthropicKey != secrets.AnthropicKey {
+		t.Errorf("AnthropicKey mismatch: got %q, want %q", decrypted.AnthropicKey, secrets.AnthropicKey)
+	}
+	if decrypted.GitHubToken != secrets.GitHubToken {
+		t.Errorf("GitHubToken mismatch: got %q, want %q", decrypted.GitHubToken, secrets.GitHubToken)
+	}
+}
+
+func TestReceiver_DecryptSecrets_InvalidData(t *testing.T) {
+	workerIdentity, _ := crypto.NewWorkerIdentity("worker-invalid")
+	receiver := NewReceiver(workerIdentity)
+
+	// Try to decrypt invalid encrypted string
+	_, err := receiver.DecryptSecrets("not-valid-encrypted-data")
+	if err == nil {
+		t.Error("DecryptSecrets should fail with invalid data")
+	}
+}
+
+func TestReceiver_DecryptSecrets_WrongWorker(t *testing.T) {
+	hqKeyPair, _ := crypto.GenerateKeyPair()
+	worker1, _ := crypto.NewWorkerIdentity("worker-1")
+	worker2, _ := crypto.NewWorkerIdentity("worker-2")
+
+	dispatcher := NewDispatcher(hqKeyPair)
+
+	secrets := WorkerSecrets{
+		AnthropicKey: "secret-key",
+	}
+
+	// Encrypt for worker1
+	payload, _ := dispatcher.PreparePayload(
+		Objective{ID: "obj-1"},
+		Project{},
+		secrets,
+		worker1.PublicKey(),
+		SyncConfig{},
+	)
+
+	// Worker2 tries to decrypt
+	receiver2 := NewReceiver(worker2)
+	_, err := receiver2.DecryptSecrets(payload.SecretsEncrypted)
+	if err == nil {
+		t.Error("DecryptSecrets should fail when wrong worker tries to decrypt")
+	}
+}

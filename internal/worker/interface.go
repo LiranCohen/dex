@@ -2,8 +2,91 @@ package worker
 
 import (
 	"context"
+	"os/exec"
 	"time"
+
+	"github.com/lirancohen/dex/internal/toolbelt"
 )
+
+// ChatClient is the interface for AI chat operations.
+// This abstraction allows for mock implementations in tests.
+type ChatClient interface {
+	// ChatWithStreaming sends a chat request and returns the response.
+	// The onDelta callback is called for each streaming delta (can be nil).
+	ChatWithStreaming(ctx context.Context, req *toolbelt.AnthropicChatRequest, onDelta toolbelt.StreamCallback) (*toolbelt.AnthropicChatResponse, error)
+}
+
+// CommandResult represents the result of running a shell command.
+type CommandResult struct {
+	Output   string
+	ExitCode int
+	Err      error
+}
+
+// CommandRunner is the interface for executing shell commands.
+// This abstraction allows for mock implementations in tests.
+type CommandRunner interface {
+	// Run executes a command and returns the result.
+	// The command is run with bash -c.
+	Run(ctx context.Context, workDir, command string) *CommandResult
+
+	// RunGit executes a git command with the given arguments.
+	RunGit(ctx context.Context, workDir string, args ...string) *CommandResult
+}
+
+// ExecCommandRunner is the default implementation using os/exec.
+type ExecCommandRunner struct{}
+
+// NewExecCommandRunner creates a new command runner using os/exec.
+func NewExecCommandRunner() *ExecCommandRunner {
+	return &ExecCommandRunner{}
+}
+
+// Run executes a shell command using bash.
+func (r *ExecCommandRunner) Run(ctx context.Context, workDir, command string) *CommandResult {
+	cmd := exec.CommandContext(ctx, "bash", "-c", command)
+	cmd.Dir = workDir
+
+	output, err := cmd.CombinedOutput()
+
+	exitCode := 0
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			exitCode = exitErr.ExitCode()
+		} else {
+			exitCode = 1
+		}
+	}
+
+	return &CommandResult{
+		Output:   string(output),
+		ExitCode: exitCode,
+		Err:      err,
+	}
+}
+
+// RunGit executes a git command with the given arguments.
+func (r *ExecCommandRunner) RunGit(ctx context.Context, workDir string, args ...string) *CommandResult {
+	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd.Dir = workDir
+
+	output, err := cmd.CombinedOutput()
+
+	exitCode := 0
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			exitCode = exitErr.ExitCode()
+		} else {
+			exitCode = 1
+		}
+	}
+
+	return &CommandResult{
+		Output:   string(output),
+		ExitCode: exitCode,
+		Err:      err,
+	}
+}
 
 // Worker is the interface implemented by both local (subprocess) and remote workers.
 // This uniform interface allows HQ to treat all workers the same regardless of where
@@ -127,6 +210,10 @@ type ManagerConfig struct {
 	// Default: 10 seconds
 	HealthCheckInterval time.Duration
 
+	// StalledWorkerThreshold is how long without a heartbeat before a worker is considered stalled.
+	// Default: 60 seconds
+	StalledWorkerThreshold time.Duration
+
 	// HQKeyPair is HQ's keypair for encrypting payloads.
 	HQPublicKey string
 }
@@ -134,9 +221,10 @@ type ManagerConfig struct {
 // DefaultManagerConfig returns a ManagerConfig with sensible defaults.
 func DefaultManagerConfig() *ManagerConfig {
 	return &ManagerConfig{
-		MaxLocalWorkers:     4, // Conservative default
-		MaxRemoteWorkers:    0, // Unlimited
-		SpawnTimeout:        30 * time.Second,
-		HealthCheckInterval: 10 * time.Second,
+		MaxLocalWorkers:        4, // Conservative default
+		MaxRemoteWorkers:       0, // Unlimited
+		SpawnTimeout:           30 * time.Second,
+		HealthCheckInterval:    10 * time.Second,
+		StalledWorkerThreshold: 60 * time.Second,
 	}
 }

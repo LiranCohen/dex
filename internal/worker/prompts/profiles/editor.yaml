@@ -1,0 +1,6 @@
+name: editor
+components:
+  - system
+  - environment
+  - tools
+  - hat_editor

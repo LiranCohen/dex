@@ -105,3 +105,19 @@ func (r *Receiver) EncryptCompletionReport(report *CompletionReport, hqPublicKey
 	}
 	return r.EncryptResponse(data, hqPublicKey)
 }
+
+// DecryptSecrets decrypts an encrypted secrets string (used for resumption).
+func (r *Receiver) DecryptSecrets(encryptedSecrets string) (*WorkerSecrets, error) {
+	var secrets WorkerSecrets
+
+	decrypted, err := r.workerIdentity.Decrypt(encryptedSecrets)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decrypt secrets: %w", err)
+	}
+
+	if err := json.Unmarshal(decrypted, &secrets); err != nil {
+		return nil, fmt.Errorf("failed to parse secrets: %w", err)
+	}
+
+	return &secrets, nil
+}

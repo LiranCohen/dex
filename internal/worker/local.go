@@ -20,16 +20,17 @@ type LocalWorker struct {
 	stdout io.ReadCloser
 	stderr io.ReadCloser
 
-	state        WorkerState
-	objectiveID  string
-	sessionID    string
-	iteration    int
-	tokensUsed   int
-	lastActivity time.Time
-	startedAt    time.Time
-	workerPubKey string
-	version      string
-	err          error
+	state         WorkerState
+	objectiveID   string
+	sessionID     string
+	iteration     int
+	tokensUsed    int
+	lastActivity  time.Time
+	lastHeartbeat time.Time
+	startedAt     time.Time
+	workerPubKey  string
+	version       string
+	err           error
 
 	mu        sync.RWMutex
 	done      chan struct{}
@@ -278,6 +279,15 @@ func (w *LocalWorker) handleMessage(msg *Message) {
 		default:
 		}
 
+	case MsgTypeHeartbeat:
+		// Update heartbeat timestamp
+		w.lastHeartbeat = time.Now()
+		// Forward to event channel for manager
+		select {
+		case w.eventChan <- msg:
+		default:
+		}
+
 	case MsgTypeError:
 		payload, _ := ParsePayload[ErrorPayload](msg)
 		if payload != nil {
@@ -418,6 +428,42 @@ func (w *LocalWorker) PublicKey() string {
 // The manager uses this to receive activity, progress, and completion events.
 func (w *LocalWorker) Events() <-chan *Message {
 	return w.eventChan
+}
+
+// UpdateLastHeartbeat updates the last heartbeat timestamp.
+func (w *LocalWorker) UpdateLastHeartbeat() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.lastHeartbeat = time.Now()
+}
+
+// LastHeartbeat returns the time of the last heartbeat.
+func (w *LocalWorker) LastHeartbeat() time.Time {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	return w.lastHeartbeat
+}
+
+// IsStalled returns true if no heartbeat received within the threshold.
+func (w *LocalWorker) IsStalled(threshold time.Duration) bool {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+
+	// Not stalled if not started or not running
+	if w.state != WorkerStateRunning {
+		return false
+	}
+
+	// Not stalled if we've never received a heartbeat (worker might be starting up)
+	if w.lastHeartbeat.IsZero() {
+		// Use lastActivity as fallback
+		if w.lastActivity.IsZero() {
+			return false
+		}
+		return time.Since(w.lastActivity) > threshold
+	}
+
+	return time.Since(w.lastHeartbeat) > threshold
 }
 
 // Wait blocks until the worker stops.

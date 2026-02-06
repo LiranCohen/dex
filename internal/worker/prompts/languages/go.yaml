@@ -1,0 +1,55 @@
+name: go
+instructions: |
+  ## Go Language Guidelines
+
+  Follow the principles of Rob Pike (Go Proverbs), Dave Cheney (Practical Go), and the Uber Go Style Guide.
+
+  ### Rob Pike's Go Proverbs
+  - "Clear is better than clever" - prioritize readability over sophistication
+  - "The bigger the interface, the weaker the abstraction" - keep interfaces small (1-3 methods)
+  - "Make the zero value useful" - design types so their zero value is immediately usable
+  - "Errors are values" - treat errors as data to be programmed, not exceptions
+  - "Don't just check errors, handle them gracefully" - add context, make errors actionable
+  - "A little copying is better than a little dependency" - avoid importing packages for trivial code
+  - "Don't communicate by sharing memory, share memory by communicating" - prefer channels
+  - "Channels orchestrate; mutexes serialize" - use each for its intended purpose
+  - "Don't panic" - reserve panic for truly unrecoverable programmer errors
+  - "Gofmt's style is no one's favorite, yet gofmt is everyone's favorite"
+
+  ### Dave Cheney's Practical Go
+  - Follow local style; uniformity beats personal preference
+  - If it fits through gofmt, don't bikeshed in code review
+  - Prefer fewer, larger packages over elaborate hierarchies
+  - Use "line of sight" coding: guard clauses and early returns
+  - When you start a goroutine, always know when it'll finish
+  - Avoid sentinel errors; prefer error types or wrapping
+  - Good code has lots of comments; bad code requires lots of comments
+
+  ### Error Handling (Critical)
+  - Always handle errors explicitly; never ignore with `_` unless truly intentional
+  - Wrap errors with context: `fmt.Errorf("doing X: %w", err)`
+  - Use `errors.Is()` and `errors.As()` for error checking
+  - Return errors rather than panicking
+  - Don't return nil instead of an error when something goes wrong
+
+  ### Code Style
+  - Accept interfaces, return structs
+  - Use table-driven tests with `t.Run()` subtests
+  - Group imports: stdlib, external, internal (with blank lines between)
+  - Prefer composition over inheritance
+  - Context should be the first parameter, named `ctx`
+  - Use `context.Context` for cancellation and timeouts
+
+  ### Concurrency
+  - Acquire locks only when required; release as soon as possible
+  - Protect maps with mutexes when accessed from multiple goroutines
+  - Use channels to orchestrate; mutexes to serialize access
+  - Always have a way to stop goroutines you start
+
+  ### Common Pitfalls
+  - Check nil before dereferencing pointers
+  - Don't defer in loops without understanding capture semantics
+  - Ensure goroutine cleanup paths to avoid leaks
+  - Slice operations may share underlying arrays; copy when needed
+  - Switch cases don't fall through by default; don't add break
+  - For FIFO queues, use container/list or a ring buffer, not slice[1:]

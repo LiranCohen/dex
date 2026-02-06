@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"sync"
 	"time"
 
@@ -84,7 +85,7 @@ func (m *Manager) Start(ctx context.Context) error {
 	m.mu.Unlock()
 
 	// Spawn initial local workers
-	for i := 0; i < m.config.MaxLocalWorkers; i++ {
+	for i := range m.config.MaxLocalWorkers {
 		if err := m.spawnLocalWorker(); err != nil {
 			fmt.Printf("Warning: failed to spawn local worker %d: %v\n", i, err)
 		}
@@ -196,6 +197,9 @@ func (m *Manager) handleWorkerEvents(worker *LocalWorker) {
 
 // processWorkerMessage handles a message received from a worker.
 func (m *Manager) processWorkerMessage(workerID string, msg *Message) {
+	// Update last heartbeat time for any message
+	m.updateWorkerHeartbeat(workerID)
+
 	switch msg.Type {
 	case MsgTypeProgress:
 		payload, err := ParsePayload[ProgressPayload](msg)
@@ -237,6 +241,10 @@ func (m *Manager) processWorkerMessage(workerID string, msg *Message) {
 			m.onFailed(payload.ObjectiveID, payload.SessionID, payload.Error)
 		}
 
+	case MsgTypeHeartbeat:
+		// Heartbeat processed above, nothing extra needed
+		// Could parse payload for detailed status if needed
+
 	case MsgTypeError:
 		payload, err := ParsePayload[ErrorPayload](msg)
 		if err != nil {
@@ -247,6 +255,18 @@ func (m *Manager) processWorkerMessage(workerID string, msg *Message) {
 
 	default:
 		fmt.Printf("Worker %s: unknown message type: %s\n", workerID, msg.Type)
+	}
+}
+
+// updateWorkerHeartbeat updates the last heartbeat time for a worker.
+func (m *Manager) updateWorkerHeartbeat(workerID string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if w, ok := m.workers[workerID]; ok {
+		if lw, ok := w.(*LocalWorker); ok {
+			lw.UpdateLastHeartbeat()
+		}
 	}
 }
 
@@ -263,12 +283,6 @@ func (m *Manager) dispatchLoop() {
 			req.response <- err
 		}
 	}
-}
-
-// dispatchToWorker finds an available worker and dispatches the objective.
-// Deprecated: Use dispatchToWorkerWithSecrets instead.
-func (m *Manager) dispatchToWorker(payload *ObjectivePayload) error {
-	return m.dispatchToWorkerWithSecrets(payload, nil)
 }
 
 // dispatchToWorkerWithSecrets finds an available worker, encrypts secrets, and dispatches.
@@ -324,14 +338,8 @@ func (m *Manager) getIdleWorker() Worker {
 	return nil
 }
 
-// Dispatch queues an objective for dispatch to an available worker.
-// This is the main entry point for HQ to send work to workers.
-// Deprecated: Use DispatchWithSecrets instead.
-func (m *Manager) Dispatch(ctx context.Context, payload *ObjectivePayload) error {
-	return m.DispatchWithSecrets(ctx, payload, nil)
-}
-
 // DispatchWithSecrets queues an objective with secrets for dispatch.
+// This is the main entry point for HQ to send work to workers.
 // Secrets are encrypted per-worker using their public key.
 func (m *Manager) DispatchWithSecrets(ctx context.Context, payload *ObjectivePayload, secrets *WorkerSecrets) error {
 	req := &dispatchRequest{
@@ -382,31 +390,54 @@ func (m *Manager) healthCheckLoop() {
 	}
 }
 
-// checkWorkerHealth checks all workers and restarts any that have failed.
+// checkWorkerHealth checks all workers and restarts any that have failed or stalled.
 func (m *Manager) checkWorkerHealth() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	stalledThreshold := m.config.StalledWorkerThreshold
+	if stalledThreshold == 0 {
+		stalledThreshold = 60 * time.Second // Default 60 seconds
+	}
+
 	// Check local workers
 	for i, w := range m.localPool {
 		status := w.Status()
+
+		// Check for error or stopped state
 		if status.State == WorkerStateError || status.State == WorkerStateStopped {
 			fmt.Printf("Worker %s is unhealthy (state: %s), restarting...\n", w.ID(), status.State)
-
-			// Remove from pool
-			delete(m.workers, w.ID())
-			m.localPool = append(m.localPool[:i], m.localPool[i+1:]...)
-
-			// Try to restart (outside lock)
-			go func() {
-				if err := m.spawnLocalWorker(); err != nil {
-					fmt.Printf("Failed to restart worker: %v\n", err)
-				}
-			}()
-
+			m.restartWorker(i, w)
 			return // Only handle one per tick to avoid issues
 		}
+
+		// Check for stalled worker
+		if w.IsStalled(stalledThreshold) {
+			fmt.Printf("Worker %s is stalled (no heartbeat for %v), restarting...\n", w.ID(), stalledThreshold)
+			// Try to stop gracefully first
+			go func(worker *LocalWorker) {
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				_ = worker.Stop(ctx)
+			}(w)
+			m.restartWorker(i, w)
+			return
+		}
 	}
+}
+
+// restartWorker removes a worker from the pool and spawns a replacement.
+func (m *Manager) restartWorker(index int, w *LocalWorker) {
+	// Remove from pool
+	delete(m.workers, w.ID())
+	m.localPool = slices.Delete(m.localPool, index, index+1)
+
+	// Try to restart (outside lock)
+	go func() {
+		if err := m.spawnLocalWorker(); err != nil {
+			fmt.Printf("Failed to restart worker: %v\n", err)
+		}
+	}()
 }
 
 // Workers returns a list of all worker statuses.
@@ -496,7 +527,7 @@ func (m *Manager) unregisterRemoteWorker(id string) {
 
 	for i, w := range m.remotePool {
 		if w.ID() == id {
-			m.remotePool = append(m.remotePool[:i], m.remotePool[i+1:]...)
+			m.remotePool = slices.Delete(m.remotePool, i, i+1)
 			break
 		}
 	}
