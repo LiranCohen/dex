@@ -26,6 +26,12 @@ type Status struct {
 
 	// LastSeen is the last time this node was seen (ISO 8601).
 	LastSeen string `json:"last_seen,omitempty"`
+
+	// TunnelConnected indicates whether the tunnel to Ingress is connected.
+	TunnelConnected bool `json:"tunnel_connected"`
+
+	// TunnelEndpoints is the number of endpoints exposed via tunnel.
+	TunnelEndpoints int `json:"tunnel_endpoints,omitempty"`
 }
 
 // Peer represents another node on the Campus mesh.
