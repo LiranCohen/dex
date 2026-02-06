@@ -1,7 +1,9 @@
 package auth
 
 import (
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/go-webauthn/webauthn/webauthn"
 )
@@ -186,8 +188,11 @@ func TestPasskeyVerifier(t *testing.T) {
 			t.Error("session ID should not be empty")
 		}
 
-		// Verify session was stored
-		if _, ok := verifier.sessions[sessionID]; !ok {
+		// Verify session was stored (with proper locking)
+		verifier.mu.RLock()
+		_, ok := verifier.sessions[sessionID]
+		verifier.mu.RUnlock()
+		if !ok {
 			t.Error("session should be stored in verifier")
 		}
 	})
@@ -209,6 +214,93 @@ func TestPasskeyVerifier(t *testing.T) {
 			t.Error("expected error for invalid session")
 		}
 	})
+}
+
+func TestPasskeyVerifierCleanup(t *testing.T) {
+	cfg := &PasskeyConfig{
+		RPDisplayName: "Test HQ",
+		RPID:          "example.com",
+		RPOrigin:      "https://example.com",
+	}
+
+	cred := webauthn.Credential{
+		ID:              []byte("test-credential-id"),
+		PublicKey:       []byte("test-public-key"),
+		AttestationType: "none",
+	}
+	user := NewWebAuthnUser("user-123", "alice@example.com", []webauthn.Credential{cred})
+
+	verifier, err := NewPasskeyVerifier(cfg, user)
+	if err != nil {
+		t.Fatalf("failed to create verifier: %v", err)
+	}
+
+	// Begin authentication to create a session
+	_, sessionID, err := verifier.BeginAuthentication()
+	if err != nil {
+		t.Fatalf("failed to begin authentication: %v", err)
+	}
+
+	// Manually expire the session for testing
+	verifier.mu.Lock()
+	if session, ok := verifier.sessions[sessionID]; ok {
+		session.expiresAt = time.Now().Add(-time.Hour)
+	}
+	verifier.mu.Unlock()
+
+	// Cleanup should remove expired session
+	verifier.Cleanup()
+
+	verifier.mu.RLock()
+	_, ok := verifier.sessions[sessionID]
+	verifier.mu.RUnlock()
+
+	if ok {
+		t.Error("expired session should be cleaned up")
+	}
+}
+
+func TestPasskeyVerifierConcurrency(t *testing.T) {
+	cfg := &PasskeyConfig{
+		RPDisplayName: "Test HQ",
+		RPID:          "example.com",
+		RPOrigin:      "https://example.com",
+	}
+
+	cred := webauthn.Credential{
+		ID:              []byte("test-credential-id"),
+		PublicKey:       []byte("test-public-key"),
+		AttestationType: "none",
+	}
+	user := NewWebAuthnUser("user-123", "alice@example.com", []webauthn.Credential{cred})
+
+	verifier, err := NewPasskeyVerifier(cfg, user)
+	if err != nil {
+		t.Fatalf("failed to create verifier: %v", err)
+	}
+
+	// Run concurrent BeginAuthentication calls
+	var wg sync.WaitGroup
+	for i := 0; i < 100; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, _, _ = verifier.BeginAuthentication()
+		}()
+	}
+
+	// Run concurrent Cleanup calls
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			verifier.Cleanup()
+		}()
+	}
+
+	wg.Wait()
+
+	// If we get here without data race panic, the test passes
 }
 
 func TestGenerateRandomString(t *testing.T) {

@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"crypto/rand"
 	"encoding/base64"
+	"sync"
+	"time"
 
 	"github.com/go-webauthn/webauthn/protocol"
 	"github.com/go-webauthn/webauthn/webauthn"
@@ -83,10 +85,20 @@ func (u *WebAuthnUser) AddCredential(cred webauthn.Credential) {
 
 // PasskeyVerifier handles WebAuthn authentication for the HQ owner.
 type PasskeyVerifier struct {
-	webauthn   *webauthn.WebAuthn
-	user       *WebAuthnUser
-	sessions   map[string]*webauthn.SessionData
+	webauthn *webauthn.WebAuthn
+	user     *WebAuthnUser
+
+	mu       sync.RWMutex
+	sessions map[string]*passkeySession
 }
+
+// passkeySession wraps WebAuthn session data with expiration.
+type passkeySession struct {
+	data      *webauthn.SessionData
+	expiresAt time.Time
+}
+
+const passkeySessionLifetime = 5 * time.Minute
 
 // NewPasskeyVerifier creates a new passkey verifier for owner authentication.
 func NewPasskeyVerifier(cfg *PasskeyConfig, user *WebAuthnUser) (*PasskeyVerifier, error) {
@@ -98,7 +110,7 @@ func NewPasskeyVerifier(cfg *PasskeyConfig, user *WebAuthnUser) (*PasskeyVerifie
 	return &PasskeyVerifier{
 		webauthn: w,
 		user:     user,
-		sessions: make(map[string]*webauthn.SessionData),
+		sessions: make(map[string]*passkeySession),
 	}, nil
 }
 
@@ -119,9 +131,15 @@ func (v *PasskeyVerifier) BeginAuthentication() (*protocol.CredentialAssertion, 
 		return nil, "", err
 	}
 
-	// Generate session ID
+	// Generate session ID and store with expiration
 	sessionID := generateRandomString(16)
-	v.sessions[sessionID] = session
+
+	v.mu.Lock()
+	v.sessions[sessionID] = &passkeySession{
+		data:      session,
+		expiresAt: time.Now().Add(passkeySessionLifetime),
+	}
+	v.mu.Unlock()
 
 	return options, sessionID, nil
 }
@@ -129,18 +147,41 @@ func (v *PasskeyVerifier) BeginAuthentication() (*protocol.CredentialAssertion, 
 // FinishAuthentication completes the WebAuthn authentication flow.
 // Returns the updated credential on success.
 func (v *PasskeyVerifier) FinishAuthentication(sessionID string, response *protocol.ParsedCredentialAssertionData) (*webauthn.Credential, error) {
+	v.mu.Lock()
 	session, ok := v.sessions[sessionID]
+	if ok {
+		delete(v.sessions, sessionID) // Single-use
+	}
+	v.mu.Unlock()
+
 	if !ok {
 		return nil, protocol.ErrBadRequest.WithDetails("invalid or expired session")
 	}
-	delete(v.sessions, sessionID)
 
-	credential, err := v.webauthn.ValidateLogin(v.user, *session, response)
+	if time.Now().After(session.expiresAt) {
+		return nil, protocol.ErrBadRequest.WithDetails("session expired")
+	}
+
+	credential, err := v.webauthn.ValidateLogin(v.user, *session.data, response)
 	if err != nil {
 		return nil, err
 	}
 
 	return credential, nil
+}
+
+// Cleanup removes expired passkey sessions.
+// Should be called periodically.
+func (v *PasskeyVerifier) Cleanup() {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
+	now := time.Now()
+	for id, session := range v.sessions {
+		if now.After(session.expiresAt) {
+			delete(v.sessions, id)
+		}
+	}
 }
 
 // ParseAssertionResponse parses a WebAuthn assertion response from the request body.

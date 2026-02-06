@@ -2,6 +2,7 @@ package oidc
 
 import (
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -91,7 +92,8 @@ func (p *Provider) ValidateClient(clientID, clientSecret string) (*Client, error
 		return nil, err
 	}
 
-	if client.Secret != clientSecret {
+	// Use constant-time comparison to prevent timing attacks
+	if subtle.ConstantTimeCompare([]byte(client.Secret), []byte(clientSecret)) != 1 {
 		return nil, errors.New("invalid client credentials")
 	}
 

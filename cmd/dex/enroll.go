@@ -250,14 +250,24 @@ func buildConfigFromResponse(resp *EnrollmentResponse) *Config {
 
 	// Parse passkey if provided
 	if resp.Owner.Passkey != nil {
-		credID, _ := base64.RawURLEncoding.DecodeString(resp.Owner.Passkey.CredentialID)
-		pubKey, _ := base64.RawURLEncoding.DecodeString(resp.Owner.Passkey.PublicKey)
+		credID, err := base64.RawURLEncoding.DecodeString(resp.Owner.Passkey.CredentialID)
+		if err != nil {
+			// Log but don't fail - passkey is optional
+			fmt.Fprintf(os.Stderr, "Warning: failed to decode passkey credential ID: %v\n", err)
+		}
+		pubKey, err := base64.RawURLEncoding.DecodeString(resp.Owner.Passkey.PublicKey)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to decode passkey public key: %v\n", err)
+		}
 
-		config.Owner.Passkey = PasskeyConfig{
-			CredentialID: credID,
-			PublicKey:    pubKey,
-			PublicKeyAlg: resp.Owner.Passkey.PublicKeyAlg,
-			SignCount:    resp.Owner.Passkey.SignCount,
+		// Only set passkey config if both decoded successfully
+		if len(credID) > 0 && len(pubKey) > 0 {
+			config.Owner.Passkey = PasskeyConfig{
+				CredentialID: credID,
+				PublicKey:    pubKey,
+				PublicKeyAlg: resp.Owner.Passkey.PublicKeyAlg,
+				SignCount:    resp.Owner.Passkey.SignCount,
+			}
 		}
 	}
 
