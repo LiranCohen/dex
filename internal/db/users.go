@@ -23,21 +23,21 @@ func NewPrefixedID(prefix string) string {
 }
 
 // CreateUser inserts a new user into the database with auto-generated ID
-func (db *DB) CreateUser(publicKey string) (*User, error) {
-	return db.CreateUserWithID(NewPrefixedID("user"), publicKey)
+func (db *DB) CreateUser(email string) (*User, error) {
+	return db.CreateUserWithID(NewPrefixedID("user"), email)
 }
 
 // CreateUserWithID inserts a new user with a specific ID
-func (db *DB) CreateUserWithID(id, publicKey string) (*User, error) {
+func (db *DB) CreateUserWithID(id, email string) (*User, error) {
 	user := &User{
 		ID:        id,
-		PublicKey: publicKey,
+		Email:     email,
 		CreatedAt: time.Now(),
 	}
 
 	_, err := db.Exec(
-		`INSERT INTO users (id, public_key, created_at) VALUES (?, ?, ?)`,
-		user.ID, user.PublicKey, user.CreatedAt,
+		`INSERT INTO users (id, email, created_at) VALUES (?, ?, ?)`,
+		user.ID, user.Email, user.CreatedAt,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create user: %w", err)
@@ -49,10 +49,11 @@ func (db *DB) CreateUserWithID(id, publicKey string) (*User, error) {
 // GetUserByID retrieves a user by their ID
 func (db *DB) GetUserByID(id string) (*User, error) {
 	user := &User{}
+	var email sql.NullString
 	err := db.QueryRow(
-		`SELECT id, public_key, created_at, last_login_at FROM users WHERE id = ?`,
+		`SELECT id, email, created_at, last_login_at FROM users WHERE id = ?`,
 		id,
-	).Scan(&user.ID, &user.PublicKey, &user.CreatedAt, &user.LastLoginAt)
+	).Scan(&user.ID, &email, &user.CreatedAt, &user.LastLoginAt)
 
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -61,24 +62,27 @@ func (db *DB) GetUserByID(id string) (*User, error) {
 		return nil, fmt.Errorf("failed to get user: %w", err)
 	}
 
+	user.Email = email.String
 	return user, nil
 }
 
-// GetUserByPublicKey retrieves a user by their public key
-func (db *DB) GetUserByPublicKey(publicKey string) (*User, error) {
+// GetUserByEmail retrieves a user by their email
+func (db *DB) GetUserByEmail(email string) (*User, error) {
 	user := &User{}
+	var emailVal sql.NullString
 	err := db.QueryRow(
-		`SELECT id, public_key, created_at, last_login_at FROM users WHERE public_key = ?`,
-		publicKey,
-	).Scan(&user.ID, &user.PublicKey, &user.CreatedAt, &user.LastLoginAt)
+		`SELECT id, email, created_at, last_login_at FROM users WHERE email = ?`,
+		email,
+	).Scan(&user.ID, &emailVal, &user.CreatedAt, &user.LastLoginAt)
 
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("failed to get user by public key: %w", err)
+		return nil, fmt.Errorf("failed to get user by email: %w", err)
 	}
 
+	user.Email = emailVal.String
 	return user, nil
 }
 
@@ -115,9 +119,9 @@ func (db *DB) DeleteUser(id string) error {
 	return nil
 }
 
-// GetOrCreateUser retrieves a user by public key, creating one if it doesn't exist
-func (db *DB) GetOrCreateUser(publicKey string) (*User, bool, error) {
-	user, err := db.GetUserByPublicKey(publicKey)
+// GetOrCreateUserByEmail retrieves a user by email, creating one if it doesn't exist
+func (db *DB) GetOrCreateUserByEmail(email string) (*User, bool, error) {
+	user, err := db.GetUserByEmail(email)
 	if err != nil {
 		return nil, false, err
 	}
@@ -125,7 +129,7 @@ func (db *DB) GetOrCreateUser(publicKey string) (*User, bool, error) {
 		return user, false, nil // existing user
 	}
 
-	user, err = db.CreateUser(publicKey)
+	user, err = db.CreateUser(email)
 	if err != nil {
 		return nil, false, err
 	}

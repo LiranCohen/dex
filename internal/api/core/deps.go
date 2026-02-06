@@ -3,8 +3,6 @@ package core
 
 import (
 	"context"
-	"sync"
-	"time"
 
 	"github.com/lirancohen/dex/internal/auth"
 	"github.com/lirancohen/dex/internal/db"
@@ -20,12 +18,6 @@ import (
 	"github.com/lirancohen/dex/internal/toolbelt"
 	"github.com/lirancohen/dex/internal/worker"
 )
-
-// ChallengeEntry holds a challenge and its expiry time for auth
-type ChallengeEntry struct {
-	Challenge string
-	ExpiresAt time.Time
-}
 
 // StartTaskResult contains the result of starting a task
 type StartTaskResult struct {
@@ -50,12 +42,8 @@ type Deps struct {
 	MeshClient     *mesh.Client              // Campus mesh network client
 	WorkerManager  *worker.Manager           // Worker pool manager for distributed execution
 	SecretsStore   *db.EncryptedSecretsStore // Encrypted secrets storage
-	TokenConfig    *auth.TokenConfig
-	BaseDir        string
-
-	// Auth challenge storage (shared with auth handlers)
-	Challenges   map[string]ChallengeEntry
-	ChallengesMu *sync.RWMutex
+	TokenConfig *auth.TokenConfig
+	BaseDir     string
 
 	// Thread-safe accessors for dynamically reloadable services
 	// These are closures that handle the mutex locking internally

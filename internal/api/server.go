@@ -44,9 +44,6 @@ import (
 	"github.com/lirancohen/dex/internal/worker"
 )
 
-// challengeEntry is an alias for core.ChallengeEntry
-type challengeEntry = core.ChallengeEntry
-
 // Server represents the API server
 type Server struct {
 	echo              *echo.Echo
@@ -66,7 +63,9 @@ type Server struct {
 	meshClient        *mesh.Client       // Campus mesh network client
 	workerManager     *worker.Manager    // Worker pool manager for distributed execution
 	meshProxy         *mesh.ServiceProxy // Reverse proxy for mesh-exposed services
-	forgejoManager    *forgejo.Manager   // Embedded Forgejo instance manager
+	forgejoManager    *forgejo.Manager                // Embedded Forgejo instance manager
+	oidcHandler       *authhandlers.OIDCHandler      // OIDC provider for SSO
+	oidcLoginHandler  *authhandlers.OIDCLoginHandler // Passkey login for OIDC
 	deps              *core.Deps
 	encryption        *crypto.EncryptionConfig // Encryption for secrets and worker payloads
 	addr              string
@@ -74,10 +73,8 @@ type Server struct {
 	keyFile           string
 	tokenConfig       *auth.TokenConfig
 	staticDir         string
-	baseDir           string                    // Base Dex directory (e.g., /opt/dex)
-	challenges        map[string]challengeEntry // challenge -> expiry
-	challengesMu      sync.RWMutex
-	toolbeltMu        sync.RWMutex // Protects toolbelt updates
+	baseDir    string           // Base Dex directory (e.g., /opt/dex)
+	toolbeltMu sync.RWMutex     // Protects toolbelt updates
 	githubAppMu       sync.RWMutex // Protects GitHub App manager
 }
 
@@ -94,6 +91,7 @@ type Config struct {
 	Encryption  *crypto.EncryptionConfig // Encryption configuration for secrets at rest and worker payloads
 	Worker      *worker.ManagerConfig    // Worker pool configuration (optional)
 	Forgejo     *forgejo.Config          // Embedded Forgejo configuration (optional)
+	PublicURL   string                   // Public URL for OIDC issuer (e.g., https://hq.alice.enbox.id)
 }
 
 // NewServer creates a new API server
@@ -168,10 +166,9 @@ func NewServer(database *db.DB, cfg Config) *Server {
 		addr:           cfg.Addr,
 		certFile:       cfg.CertFile,
 		keyFile:        cfg.KeyFile,
-		tokenConfig:    cfg.TokenConfig,
-		staticDir:      cfg.StaticDir,
-		baseDir:        cfg.BaseDir,
-		challenges:     make(map[string]challengeEntry),
+		tokenConfig: cfg.TokenConfig,
+		staticDir:   cfg.StaticDir,
+		baseDir:     cfg.BaseDir,
 	}
 
 	// Setup git service with derived paths from base directory
@@ -271,10 +268,8 @@ func NewServer(database *db.DB, cfg Config) *Server {
 		MeshClient:     meshClient,
 		WorkerManager:  workerMgr,
 		SecretsStore:   secretsStore,
-		TokenConfig:    cfg.TokenConfig,
-		BaseDir:        cfg.BaseDir,
-		Challenges:     s.challenges,
-		ChallengesMu:   &s.challengesMu,
+		TokenConfig: cfg.TokenConfig,
+		BaseDir:     cfg.BaseDir,
 		GetToolbelt: func() *toolbelt.Toolbelt {
 			s.toolbeltMu.RLock()
 			defer s.toolbeltMu.RUnlock()
@@ -412,6 +407,21 @@ func NewServer(database *db.DB, cfg Config) *Server {
 		)
 	}
 
+	// Initialize OIDC handler if public URL is configured (for SSO)
+	if cfg.PublicURL != "" {
+		oidcHandler, err := authhandlers.NewOIDCHandler(s.deps, authhandlers.OIDCConfig{
+			Issuer:   cfg.PublicURL,
+			DataDir:  filepath.Join(cfg.BaseDir, "oidc"),
+			LoginURL: "/login",
+		})
+		if err != nil {
+			fmt.Printf("Warning: failed to create OIDC handler: %v\n", err)
+		} else if oidcHandler != nil {
+			s.oidcHandler = oidcHandler
+			s.oidcLoginHandler = authhandlers.NewOIDCLoginHandler(oidcHandler)
+		}
+	}
+
 	// Register routes
 	s.registerRoutes()
 
@@ -429,7 +439,6 @@ func (s *Server) registerRoutes() {
 	v1 := s.echo.Group("/api/v1")
 
 	// Create handlers
-	authHandler := authhandlers.New(s.deps)
 	passkeyHandler := authhandlers.NewPasskeyHandler(s.deps)
 	toolbeltHandler := toolbelthandlers.New(s.deps)
 	tasksHandler := tasks.New(s.deps)
@@ -459,7 +468,6 @@ func (s *Server) registerRoutes() {
 
 	// Register public routes
 	toolbeltHandler.RegisterPublicRoutes(v1)
-	authHandler.RegisterRoutes(v1)
 	passkeyHandler.RegisterRoutes(v1)
 	githubHandler.RegisterRoutes(v1)
 
@@ -511,6 +519,13 @@ func (s *Server) registerRoutes() {
 	// Auth is handled via Centrifuge protocol in Node.OnConnecting, not HTTP middleware
 	if s.realtime != nil {
 		v1.GET("/realtime", echo.WrapHandler(s.realtime.WebSocketHandler()))
+	}
+
+	// OIDC routes (root level per spec, not under /api/v1)
+	// These enable HQ to act as an OIDC provider for SSO
+	if s.oidcHandler != nil {
+		s.oidcHandler.RegisterRoutes(s.echo)
+		s.oidcLoginHandler.RegisterRoutes(s.echo)
 	}
 }
 

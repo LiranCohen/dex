@@ -138,17 +138,19 @@ func (db *DB) HasAnyUsers() (bool, error) {
 // GetFirstUser gets the first (and typically only) user for single-user mode
 func (db *DB) GetFirstUser() (*User, error) {
 	var user User
+	var email sql.NullString
 	err := db.QueryRow(`
-		SELECT id, public_key, created_at, last_login_at
+		SELECT id, email, created_at, last_login_at
 		FROM users
 		ORDER BY created_at ASC
 		LIMIT 1
-	`).Scan(&user.ID, &user.PublicKey, &user.CreatedAt, &user.LastLoginAt)
+	`).Scan(&user.ID, &email, &user.CreatedAt, &user.LastLoginAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to get first user: %w", err)
 	}
+	user.Email = email.String
 	return &user, nil
 }

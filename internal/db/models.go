@@ -10,7 +10,7 @@ import (
 // User represents an authenticated user
 type User struct {
 	ID          string
-	PublicKey   string // Legacy: Ed25519 public key (may be empty for passkey-only users)
+	Email       string // User's email address (for OIDC sessions)
 	CreatedAt   time.Time
 	LastLoginAt sql.NullTime
 }
