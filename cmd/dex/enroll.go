@@ -231,7 +231,7 @@ func buildConfigFromResponse(resp *EnrollmentResponse) *Config {
 			Token:       resp.Tunnel.Token,
 			Endpoints: []EndpointConfig{
 				{
-					Hostname:  resp.Namespace + ".enbox.id",
+					Hostname:  "hq." + resp.Namespace + ".enbox.id",
 					LocalPort: 8080,
 				},
 			},

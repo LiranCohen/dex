@@ -159,8 +159,8 @@ func TestEnrollmentSuccess(t *testing.T) {
 	if len(config.Tunnel.Endpoints) != 1 {
 		t.Errorf("expected 1 endpoint, got %d", len(config.Tunnel.Endpoints))
 	}
-	if config.Tunnel.Endpoints[0].Hostname != "alice.enbox.id" {
-		t.Errorf("expected endpoint hostname alice.enbox.id, got %s", config.Tunnel.Endpoints[0].Hostname)
+	if config.Tunnel.Endpoints[0].Hostname != "hq.alice.enbox.id" {
+		t.Errorf("expected endpoint hostname hq.alice.enbox.id, got %s", config.Tunnel.Endpoints[0].Hostname)
 	}
 	if config.Owner.UserID != "user-123" {
 		t.Errorf("expected owner user ID user-123, got %s", config.Owner.UserID)
