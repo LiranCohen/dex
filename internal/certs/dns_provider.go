@@ -48,14 +48,15 @@ func NewDexDNSProvider(cfg DexDNSProviderConfig) *DexDNSProvider {
 }
 
 // Present creates the DNS TXT record for the ACME challenge.
-// domain is in the form "_acme-challenge.myapp.alice.enbox.id"
+// domain is the domain being certified (e.g., "dex2.enbox.id" or "myapp.alice.enbox.id").
+// The TXT record will be created at _acme-challenge.{domain}.
 func (d *DexDNSProvider) Present(domain, token, keyAuth string) error {
-	// Extract hostname and namespace from the challenge domain
-	// domain: _acme-challenge.myapp.alice.enbox.id
-	// We need: hostname=myapp, namespace=alice
-	hostname, namespace, ok := d.parseChallengeDomain(domain)
+	// Extract hostname and namespace from the domain
+	// domain: dex2.enbox.id → hostname="", namespace="dex2"
+	// domain: myapp.alice.enbox.id → hostname="myapp", namespace="alice"
+	hostname, namespace, ok := d.parseDomain(domain)
 	if !ok {
-		return fmt.Errorf("invalid challenge domain: %s", domain)
+		return fmt.Errorf("invalid domain: %s", domain)
 	}
 
 	payload := map[string]interface{}{
@@ -97,7 +98,7 @@ func (d *DexDNSProvider) Present(domain, token, keyAuth string) error {
 
 // CleanUp removes the DNS TXT record after the challenge.
 func (d *DexDNSProvider) CleanUp(domain, token, keyAuth string) error {
-	hostname, namespace, ok := d.parseChallengeDomain(domain)
+	hostname, namespace, ok := d.parseDomain(domain)
 	if !ok {
 		// Best effort cleanup
 		return nil
@@ -141,24 +142,17 @@ func (d *DexDNSProvider) Timeout() (timeout, interval time.Duration) {
 	return 3 * time.Minute, 10 * time.Second
 }
 
-// parseChallengeDomain extracts hostname and namespace from an ACME challenge domain.
+// parseDomain extracts hostname and namespace from a domain.
 // Supports two formats:
-// - _acme-challenge.myapp.alice.enbox.id -> hostname=myapp, namespace=alice
-// - _acme-challenge.alice.enbox.id -> hostname="", namespace=alice (namespace-level cert)
-func (d *DexDNSProvider) parseChallengeDomain(domain string) (hostname, namespace string, ok bool) {
-	// Remove _acme-challenge. prefix
-	const prefix = "_acme-challenge."
-	if !strings.HasPrefix(domain, prefix) {
-		return "", "", false
-	}
-	fullHostname := strings.TrimPrefix(domain, prefix)
-
+// - myapp.alice.enbox.id -> hostname=myapp, namespace=alice
+// - alice.enbox.id -> hostname="", namespace=alice (namespace-level cert)
+func (d *DexDNSProvider) parseDomain(domain string) (hostname, namespace string, ok bool) {
 	// Remove base domain suffix
 	suffix := "." + d.baseDomain
-	if !strings.HasSuffix(fullHostname, suffix) {
+	if !strings.HasSuffix(domain, suffix) {
 		return "", "", false
 	}
-	withoutBase := strings.TrimSuffix(fullHostname, suffix)
+	withoutBase := strings.TrimSuffix(domain, suffix)
 
 	// Split into parts
 	parts := strings.SplitN(withoutBase, ".", 2)
