@@ -1,6 +1,10 @@
 package auth
 
 import (
+	"bytes"
+	"crypto/rand"
+	"encoding/base64"
+
 	"github.com/go-webauthn/webauthn/protocol"
 	"github.com/go-webauthn/webauthn/webauthn"
 )
@@ -75,4 +79,77 @@ func (u *WebAuthnUser) WebAuthnIcon() string {
 // AddCredential adds a credential to the user
 func (u *WebAuthnUser) AddCredential(cred webauthn.Credential) {
 	u.credentials = append(u.credentials, cred)
+}
+
+// PasskeyVerifier handles WebAuthn authentication for the HQ owner.
+type PasskeyVerifier struct {
+	webauthn   *webauthn.WebAuthn
+	user       *WebAuthnUser
+	sessions   map[string]*webauthn.SessionData
+}
+
+// NewPasskeyVerifier creates a new passkey verifier for owner authentication.
+func NewPasskeyVerifier(cfg *PasskeyConfig, user *WebAuthnUser) (*PasskeyVerifier, error) {
+	w, err := NewWebAuthn(cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	return &PasskeyVerifier{
+		webauthn: w,
+		user:     user,
+		sessions: make(map[string]*webauthn.SessionData),
+	}, nil
+}
+
+// HasCredential returns true if the user has passkey credentials.
+func (v *PasskeyVerifier) HasCredential() bool {
+	return v.user != nil && len(v.user.credentials) > 0
+}
+
+// BeginAuthentication starts the WebAuthn authentication flow.
+// Returns options to send to the client and a session ID.
+func (v *PasskeyVerifier) BeginAuthentication() (*protocol.CredentialAssertion, string, error) {
+	if !v.HasCredential() {
+		return nil, "", protocol.ErrBadRequest.WithDetails("no passkey credential configured")
+	}
+
+	options, session, err := v.webauthn.BeginLogin(v.user)
+	if err != nil {
+		return nil, "", err
+	}
+
+	// Generate session ID
+	sessionID := generateRandomString(16)
+	v.sessions[sessionID] = session
+
+	return options, sessionID, nil
+}
+
+// FinishAuthentication completes the WebAuthn authentication flow.
+// Returns the updated credential on success.
+func (v *PasskeyVerifier) FinishAuthentication(sessionID string, response *protocol.ParsedCredentialAssertionData) (*webauthn.Credential, error) {
+	session, ok := v.sessions[sessionID]
+	if !ok {
+		return nil, protocol.ErrBadRequest.WithDetails("invalid or expired session")
+	}
+	delete(v.sessions, sessionID)
+
+	credential, err := v.webauthn.ValidateLogin(v.user, *session, response)
+	if err != nil {
+		return nil, err
+	}
+
+	return credential, nil
+}
+
+// ParseAssertionResponse parses a WebAuthn assertion response from the request body.
+func ParseAssertionResponse(body []byte) (*protocol.ParsedCredentialAssertionData, error) {
+	return protocol.ParseCredentialRequestResponseBody(bytes.NewReader(body))
+}
+
+func generateRandomString(length int) string {
+	b := make([]byte, length)
+	_, _ = rand.Read(b)
+	return base64.RawURLEncoding.EncodeToString(b)[:length]
 }

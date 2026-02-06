@@ -108,6 +108,9 @@ func TestEnrollmentSuccess(t *testing.T) {
 		resp.Tunnel.Token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.test"
 		resp.ACME.Email = "alice@example.com"
 		resp.ACME.DNSAPI = "https://central.enbox.id/api/v1/dns/acme-challenge"
+		resp.Owner.UserID = "user-123"
+		resp.Owner.Email = "alice@example.com"
+		resp.Owner.DisplayName = "Alice"
 
 		w.WriteHeader(http.StatusOK)
 		_ = json.NewEncoder(w).Encode(resp)
@@ -158,6 +161,12 @@ func TestEnrollmentSuccess(t *testing.T) {
 	}
 	if config.Tunnel.Endpoints[0].Hostname != "alice.enbox.id" {
 		t.Errorf("expected endpoint hostname alice.enbox.id, got %s", config.Tunnel.Endpoints[0].Hostname)
+	}
+	if config.Owner.UserID != "user-123" {
+		t.Errorf("expected owner user ID user-123, got %s", config.Owner.UserID)
+	}
+	if config.Owner.Email != "alice@example.com" {
+		t.Errorf("expected owner email alice@example.com, got %s", config.Owner.Email)
 	}
 }
 
