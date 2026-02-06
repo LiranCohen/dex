@@ -99,7 +99,7 @@ func NewWorkerRalphLoop(
 		messages:           make([]toolbelt.AnthropicMessage, 0),
 		tools:              getToolDefinitionsForHat(session.Hat),
 		model:              "claude-sonnet-4-5-20250929", // Default to Sonnet
-		checkpointInterval: 5, // Save state every 5 iterations
+		checkpointInterval: 5,                            // Save state every 5 iterations
 	}
 }
 

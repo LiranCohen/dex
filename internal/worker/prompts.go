@@ -28,21 +28,21 @@ type WorkerPromptLoader struct {
 // WorkerPromptContext provides context for rendering hat prompts.
 type WorkerPromptContext struct {
 	// Objective information
-	ObjectiveID         string
-	ObjectiveTitle      string
+	ObjectiveID          string
+	ObjectiveTitle       string
 	ObjectiveDescription string
-	BranchName          string
+	BranchName           string
 
 	// Session context
-	SessionID   string
-	WorkDir     string
-	Scratchpad  string
+	SessionID  string
+	WorkDir    string
+	Scratchpad string
 
 	// Project context
-	ProjectName   string
-	GitHubOwner   string
-	GitHubRepo    string
-	IsNewProject  bool
+	ProjectName  string
+	GitHubOwner  string
+	GitHubRepo   string
+	IsNewProject bool
 
 	// Tools available
 	Tools            []string

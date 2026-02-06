@@ -393,21 +393,21 @@ func (ldb *LocalDB) GetObjectiveIterationCount(objectiveID string) (int, error) 
 
 // SessionState represents the saved state of a session for resumption.
 type SessionState struct {
-	SessionID       string   `json:"session_id"`
-	ObjectiveID     string   `json:"objective_id"`
-	Hat             string   `json:"hat"`
-	Iteration       int      `json:"iteration"`
-	TokensInput     int64    `json:"tokens_input"`
-	TokensOutput    int64    `json:"tokens_output"`
-	Conversation    string   `json:"conversation"`     // JSON-encoded messages
-	Scratchpad      string   `json:"scratchpad"`
-	ChecklistDone   []string `json:"checklist_done"`
-	ChecklistFailed []string `json:"checklist_failed"`
-	HatHistory      string   `json:"hat_history"`      // JSON-encoded hat history
-	TransitionCount int      `json:"transition_count"`
-	PreviousHat     string   `json:"previous_hat"`
-	Status          string   `json:"status"`           // running, completed, failed
-	WorkDir         string   `json:"work_dir"`
+	SessionID       string    `json:"session_id"`
+	ObjectiveID     string    `json:"objective_id"`
+	Hat             string    `json:"hat"`
+	Iteration       int       `json:"iteration"`
+	TokensInput     int64     `json:"tokens_input"`
+	TokensOutput    int64     `json:"tokens_output"`
+	Conversation    string    `json:"conversation"` // JSON-encoded messages
+	Scratchpad      string    `json:"scratchpad"`
+	ChecklistDone   []string  `json:"checklist_done"`
+	ChecklistFailed []string  `json:"checklist_failed"`
+	HatHistory      string    `json:"hat_history"` // JSON-encoded hat history
+	TransitionCount int       `json:"transition_count"`
+	PreviousHat     string    `json:"previous_hat"`
+	Status          string    `json:"status"` // running, completed, failed
+	WorkDir         string    `json:"work_dir"`
 	UpdatedAt       time.Time `json:"updated_at"`
 }
 

@@ -271,7 +271,7 @@ func TestFullCommunicationCycle(t *testing.T) {
 	}
 
 	payload, err := dispatcher.PreparePayload(objective, project, secrets, workerIdentity.PublicKey(), SyncConfig{
-		HQEndpoint:          "100.100.1.1:8080",
+		HQEndpoint:           "100.100.1.1:8080",
 		HeartbeatIntervalSec: 10,
 	})
 	if err != nil {

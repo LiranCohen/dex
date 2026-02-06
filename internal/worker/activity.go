@@ -12,14 +12,14 @@ import (
 
 // ActivityType constants for worker activity events
 const (
-	ActivityTypeUserMessage      = "user_message"
+	ActivityTypeUserMessage       = "user_message"
 	ActivityTypeAssistantResponse = "assistant_response"
-	ActivityTypeToolCall         = "tool_call"
-	ActivityTypeToolResult       = "tool_result"
-	ActivityTypeCompletion       = "completion"
-	ActivityTypeHatTransition    = "hat_transition"
-	ActivityTypeChecklistUpdate  = "checklist_update"
-	ActivityTypeDebugLog         = "debug_log"
+	ActivityTypeToolCall          = "tool_call"
+	ActivityTypeToolResult        = "tool_result"
+	ActivityTypeCompletion        = "completion"
+	ActivityTypeHatTransition     = "hat_transition"
+	ActivityTypeChecklistUpdate   = "checklist_update"
+	ActivityTypeDebugLog          = "debug_log"
 )
 
 // WorkerActivityRecorder records session activity to local DB and batches for HQ sync.
