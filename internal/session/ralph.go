@@ -200,8 +200,8 @@ func (r *RalphLoop) SetEventRouter(router *EventRouter) {
 	r.eventRouter = router
 }
 
-// SetOnRepoCreated sets the callback for when a GitHub repo is created
-// This allows updating the project's GitHub info in the database
+// SetOnRepoCreated sets the callback for when a repo is created
+// This allows updating the project's git info in the database
 func (r *RalphLoop) SetOnRepoCreated(callback func(owner, repo string)) {
 	if r.executor != nil {
 		r.executor.SetOnRepoCreated(callback)

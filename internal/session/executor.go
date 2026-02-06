@@ -20,14 +20,14 @@ type ToolResult struct {
 }
 
 // ToolExecutor executes tools in the context of a worktree
-// Extends the base tools.Executor with git operations and GitHub client
+// Extends the base tools.Executor with git operations and optional GitHub client
 type ToolExecutor struct {
 	*tools.Executor
 	gitOps       *git.Operations
-	githubClient *toolbelt.GitHubClient
+	githubClient *toolbelt.GitHubClient // Optional - for GitHub API operations (PAT-based)
 	owner        string
 	repo         string
-	// Callback when a GitHub repo is created - allows updating project DB record
+	// Callback when a repo is created - allows updating project DB record
 	onRepoCreated func(owner, repo string)
 	// Callback when quality gate runs - allows posting issue comments
 	onQualityGateResult func(result *GateResult)
@@ -48,7 +48,7 @@ func NewToolExecutor(worktreePath string, gitOps *git.Operations, githubClient *
 	}
 }
 
-// SetOnRepoCreated sets the callback for when a GitHub repo is created
+// SetOnRepoCreated sets the callback for when a repo is created
 func (e *ToolExecutor) SetOnRepoCreated(callback func(owner, repo string)) {
 	e.onRepoCreated = callback
 }
