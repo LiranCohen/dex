@@ -14,7 +14,7 @@ type TaskResponse struct {
 	ID                string   `json:"ID"`
 	ProjectID         string   `json:"ProjectID"`
 	QuestID           *string  `json:"QuestID"`
-	GitHubIssueNumber *int64   `json:"GitHubIssueNumber"`
+	IssueNumber       *int64   `json:"IssueNumber"`
 	Title             string   `json:"Title"`
 	Description       *string  `json:"Description"`
 	ParentID          *string  `json:"ParentID"`
@@ -65,8 +65,8 @@ func ToTaskResponse(t *db.Task) TaskResponse {
 	if t.QuestID.Valid {
 		resp.QuestID = &t.QuestID.String
 	}
-	if t.GitHubIssueNumber.Valid {
-		resp.GitHubIssueNumber = &t.GitHubIssueNumber.Int64
+	if t.IssueNumber.Valid {
+		resp.IssueNumber = &t.IssueNumber.Int64
 	}
 	if t.Description.Valid {
 		resp.Description = &t.Description.String
@@ -284,6 +284,9 @@ type ProjectResponse struct {
 	ID             string  `json:"ID"`
 	Name           string  `json:"Name"`
 	RepoPath       string  `json:"RepoPath"`
+	GitProvider    string  `json:"GitProvider"`
+	GitOwner       *string `json:"GitOwner"`
+	GitRepo        *string `json:"GitRepo"`
 	GitHubOwner    *string `json:"GitHubOwner"`
 	GitHubRepo     *string `json:"GitHubRepo"`
 	RemoteOrigin   *string `json:"RemoteOrigin"`
@@ -298,8 +301,15 @@ func ToProjectResponse(p *db.Project) ProjectResponse {
 		ID:            p.ID,
 		Name:          p.Name,
 		RepoPath:      p.RepoPath,
+		GitProvider:   p.GetGitProvider(),
 		DefaultBranch: p.DefaultBranch,
 		CreatedAt:     p.CreatedAt.Format(time.RFC3339),
+	}
+	if p.GitOwner.Valid {
+		resp.GitOwner = &p.GitOwner.String
+	}
+	if p.GitRepo.Valid {
+		resp.GitRepo = &p.GitRepo.String
 	}
 	if p.GitHubOwner.Valid {
 		resp.GitHubOwner = &p.GitHubOwner.String

@@ -10,6 +10,8 @@ import (
 
 	"github.com/lirancohen/dex/internal/db"
 	"github.com/lirancohen/dex/internal/git"
+	"github.com/lirancohen/dex/internal/gitprovider"
+	forgejoclient "github.com/lirancohen/dex/internal/gitprovider/forgejo"
 	"github.com/lirancohen/dex/internal/orchestrator"
 	"github.com/lirancohen/dex/internal/realtime"
 	"github.com/lirancohen/dex/internal/toolbelt"
@@ -89,19 +91,19 @@ func (s *ActiveSession) Cost() float64 {
 // This allows the session manager to get installation-specific clients for GitHub Apps
 type GitHubClientFetcher func(ctx context.Context, login string) (*toolbelt.GitHubClient, error)
 
-// TaskCompletedCallback is called when a task completes (for GitHub sync)
+// TaskCompletedCallback is called when a task completes (for issue sync)
 type TaskCompletedCallback func(taskID string)
 
-// TaskFailedCallback is called when a task fails or is cancelled (for GitHub sync)
+// TaskFailedCallback is called when a task fails or is cancelled (for issue sync)
 type TaskFailedCallback func(taskID string, reason string)
 
-// PRCreatedCallback is called when a PR is created for a task (for GitHub sync)
+// PRCreatedCallback is called when a PR is created for a task (for issue sync)
 type PRCreatedCallback func(taskID string, prNumber int)
 
-// ChecklistUpdatedCallback is called when a checklist item is updated (for GitHub sync)
+// ChecklistUpdatedCallback is called when a checklist item is updated (for issue sync)
 type ChecklistUpdatedCallback func(taskID string)
 
-// TaskStatusCallback is called when a task status changes (for GitHub sync)
+// TaskStatusCallback is called when a task status changes (for issue sync)
 type TaskStatusCallback func(taskID string, status string)
 
 type Manager struct {
@@ -113,12 +115,14 @@ type Manager struct {
 	anthropicClient *toolbelt.AnthropicClient
 	broadcaster     *realtime.Broadcaster   // Publishes to both legacy and new systems
 
-	// Git and GitHub for PR creation on completion
+	// Git and GitHub/Forgejo for PR creation on completion
 	gitOps              *git.Operations
 	gitService          *git.Service           // For worktree cleanup after merge
 	repoManager         *git.RepoManager       // For cloning repos to permanent location
 	githubClient        *toolbelt.GitHubClient // Static client (PAT-based)
 	githubClientFetcher GitHubClientFetcher    // Dynamic client fetcher (GitHub App)
+	forgejoBaseURL      string                 // Forgejo API base URL (e.g., http://127.0.0.1:3000)
+	forgejoBotToken     string                 // Forgejo bot account API token
 
 	// Event callbacks for GitHub sync
 	onTaskCompleted    TaskCompletedCallback
@@ -277,6 +281,14 @@ func (m *Manager) SetOnTaskStatus(callback TaskStatusCallback) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.onTaskStatus = callback
+}
+
+// SetForgejoCredentials sets the Forgejo API credentials for PR creation.
+func (m *Manager) SetForgejoCredentials(baseURL, botToken string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.forgejoBaseURL = baseURL
+	m.forgejoBotToken = botToken
 }
 
 // notifyTaskStatus notifies listeners of a task status change
@@ -598,13 +610,8 @@ func (m *Manager) runSession(ctx context.Context, session *ActiveSession) {
 				fmt.Printf("runSession: warning - failed to get project for executor: %v\n", err)
 			}
 			if project != nil {
-				var owner, repo string
-				if project.GitHubOwner.Valid {
-					owner = project.GitHubOwner.String
-				}
-				if project.GitHubRepo.Valid {
-					repo = project.GitHubRepo.String
-				}
+				owner := project.GetOwner()
+				repo := project.GetRepo()
 
 				// Get GitHub client - try static client first, then fetcher
 				githubClient := m.githubClient
@@ -630,16 +637,27 @@ func (m *Manager) runSession(ctx context.Context, session *ActiveSession) {
 
 				// Set callback to update project when a repo is created
 				projectID := project.ID
+				projectProvider := project.GetGitProvider()
 				repoMgr := m.repoManager
 				loop.SetOnRepoCreated(func(newOwner, newRepo string) {
-					// Update GitHub info in database
-					if err := m.db.UpdateProjectGitHub(projectID, newOwner, newRepo); err != nil {
-						fmt.Printf("runSession: warning - failed to update project GitHub info: %v\n", err)
+					// Update provider-agnostic git info
+					if err := m.db.UpdateProjectGitProvider(projectID, projectProvider, newOwner, newRepo); err != nil {
+						fmt.Printf("runSession: warning - failed to update project git provider info: %v\n", err)
+					}
+					// Keep legacy GitHub fields in sync for GitHub projects
+					if projectProvider == db.GitProviderGitHub {
+						if err := m.db.UpdateProjectGitHub(projectID, newOwner, newRepo); err != nil {
+							fmt.Printf("runSession: warning - failed to update project GitHub info: %v\n", err)
+						}
+					}
+					fmt.Printf("runSession: updated project %s with %s %s/%s\n", projectID, projectProvider, newOwner, newRepo)
+
+					// For Forgejo projects, the repo already exists as a bare repo — no clone needed
+					if projectProvider == db.GitProviderForgejo {
 						return
 					}
-					fmt.Printf("runSession: updated project %s with GitHub %s/%s\n", projectID, newOwner, newRepo)
 
-					// Clone the repo to permanent location if repo manager is available
+					// Clone the repo to permanent location if repo manager is available (GitHub only)
 					if repoMgr != nil {
 						cloneURL := fmt.Sprintf("git@github.com:%s/%s.git", newOwner, newRepo)
 						repoPath, err := repoMgr.CloneWithOptions(git.CloneOptions{
@@ -997,21 +1015,93 @@ func (m *Manager) createPRForTask(taskID, worktreePath string) {
 		return
 	}
 
-	// Get project from DB to find GitHub owner/repo
+	// Get project from DB to find git provider owner/repo
 	project, err := m.db.GetProjectByID(task.ProjectID)
 	if err != nil || project == nil {
 		fmt.Printf("createPRForTask: failed to get project for task %s: %v\n", taskID, err)
 		return
 	}
 
-	// Check if project has GitHub configured
-	if !project.GitHubOwner.Valid || !project.GitHubRepo.Valid {
-		fmt.Printf("createPRForTask: project %s has no GitHub owner/repo configured\n", project.ID)
+	owner := project.GetOwner()
+	repo := project.GetRepo()
+	if owner == "" || repo == "" {
+		fmt.Printf("createPRForTask: project %s has no owner/repo configured\n", project.ID)
 		return
 	}
 
-	owner := project.GitHubOwner.String
-	repo := project.GitHubRepo.String
+	// For Forgejo projects, PRs are created via the Forgejo API.
+	// The push is a no-op (bare repo worktrees), so we just create the PR.
+	if project.IsForgejo() {
+		m.mu.RLock()
+		baseURL := m.forgejoBaseURL
+		botToken := m.forgejoBotToken
+		m.mu.RUnlock()
+
+		if baseURL == "" || botToken == "" {
+			fmt.Printf("createPRForTask: Forgejo credentials not configured, skipping PR for task %s\n", taskID)
+			return
+		}
+
+		branchName, err := gitOps.GetCurrentBranch(worktreePath)
+		if err != nil {
+			fmt.Printf("createPRForTask: failed to get branch for task %s: %v\n", taskID, err)
+			return
+		}
+
+		forgejoProvider := forgejoclient.New(baseURL, botToken)
+		pr, err := forgejoProvider.CreatePR(ctx, owner, repo, gitprovider.CreatePROpts{
+			Title: task.Title,
+			Body:  fmt.Sprintf("Closes task: %s\n\n%s", taskID, task.GetDescription()),
+			Head:  branchName,
+			Base:  project.DefaultBranch,
+		})
+		if err != nil {
+			fmt.Printf("createPRForTask: failed to create Forgejo PR for task %s: %v\n", taskID, err)
+			return
+		}
+
+		if err := m.db.UpdateTaskPRNumber(taskID, pr.Number); err != nil {
+			fmt.Printf("createPRForTask: failed to update task %s with PR number: %v\n", taskID, err)
+			return
+		}
+		fmt.Printf("createPRForTask: created Forgejo PR #%d for task %s\n", pr.Number, taskID)
+
+		m.mu.RLock()
+		onPRCreated := m.onPRCreated
+		m.mu.RUnlock()
+		if onPRCreated != nil {
+			go onPRCreated(taskID, pr.Number)
+		}
+
+		// Auto-merge the PR unless autonomy_level is 0 (requires manual approval)
+		if task.AutonomyLevel == 0 {
+			fmt.Printf("createPRForTask: autonomy_level=0 for task %s, skipping auto-merge\n", taskID)
+			return
+		}
+
+		if err := forgejoProvider.MergePR(ctx, owner, repo, pr.Number, gitprovider.MergeSquash); err != nil {
+			fmt.Printf("createPRForTask: failed to merge Forgejo PR #%d for task %s: %v (left open for manual merge)\n", pr.Number, taskID, err)
+			return
+		}
+		fmt.Printf("createPRForTask: merged Forgejo PR #%d for task %s\n", pr.Number, taskID)
+
+		// Cleanup worktree after successful merge
+		m.mu.RLock()
+		gitService := m.gitService
+		m.mu.RUnlock()
+
+		if gitService != nil {
+			if err := gitService.CleanupTaskWorktree(project.RepoPath, taskID, true); err != nil {
+				fmt.Printf("createPRForTask: failed to cleanup worktree for task %s: %v\n", taskID, err)
+			} else {
+				if err := m.db.MarkTaskWorktreeCleaned(taskID); err != nil {
+					fmt.Printf("createPRForTask: failed to mark worktree cleaned for task %s: %v\n", taskID, err)
+				}
+				fmt.Printf("createPRForTask: cleaned up worktree for task %s after merge\n", taskID)
+			}
+		}
+		return
+	}
 
 	// Get current branch name from worktree
 	if gitOps == nil {

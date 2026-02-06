@@ -302,36 +302,6 @@ func BuildQualityGateComment(data *CommentData) string {
 	return sb.String()
 }
 
-// BuildCheckpointComment builds a checkpoint/pause comment
-func BuildCheckpointComment(data *CommentData, completedItems, remainingItems []string) string {
-	var sb strings.Builder
-
-	sb.WriteString("### ⏸️ Checkpointed\n\n")
-	sb.WriteString(fmt.Sprintf("Session checkpointed after %d iterations.\n\n", data.Iteration))
-
-	if len(completedItems) > 0 {
-		sb.WriteString("**Completed:**\n")
-		for _, item := range completedItems {
-			sb.WriteString(fmt.Sprintf("- %s\n", item))
-		}
-		sb.WriteString("\n")
-	}
-
-	if len(remainingItems) > 0 {
-		sb.WriteString("**Remaining:**\n")
-		for _, item := range remainingItems {
-			sb.WriteString(fmt.Sprintf("- %s\n", item))
-		}
-		sb.WriteString("\n")
-	}
-
-	sb.WriteString("**Resume:** Will continue automatically or can be manually resumed.\n\n")
-	sb.WriteString("---\n")
-	sb.WriteString(fmt.Sprintf("<sub>🤖 Dex • %s tokens used</sub>", formatTokens(data.TotalTokens)))
-
-	return sb.String()
-}
-
 // BuildCompletedComment builds the task completion comment
 func BuildCompletedComment(data *CommentData, summary []string) string {
 	var sb strings.Builder
@@ -360,19 +330,6 @@ func BuildCompletedComment(data *CommentData, summary []string) string {
 	sb.WriteString("---\n")
 	sb.WriteString(fmt.Sprintf("<sub>🤖 Dex • %d iterations • %s tokens</sub>",
 		data.Iteration, formatTokens(data.TotalTokens)))
-
-	return sb.String()
-}
-
-// BuildBlockedComment builds a blocked/degraded comment
-func BuildBlockedComment(data *CommentData, reason string) string {
-	var sb strings.Builder
-
-	sb.WriteString("### ⚠️ Blocked\n\n")
-	sb.WriteString(fmt.Sprintf("Session encountered issues: %s\n\n", reason))
-	sb.WriteString("Attempting recovery or awaiting intervention.\n\n")
-	sb.WriteString("---\n")
-	sb.WriteString(fmt.Sprintf("<sub>🤖 Dex • Iteration %d</sub>", data.Iteration))
 
 	return sb.String()
 }

@@ -66,7 +66,11 @@ func (h *Handler) HandleCreate(c echo.Context) error {
 		// Option 3: Clone from URL
 		CloneURL string `json:"clone_url,omitempty"`
 
-		// GitHub options (when create_repo=true)
+		// Git provider selection: "forgejo" or "github" (default)
+		GitProvider string `json:"git_provider,omitempty"`
+		GitOwner    string `json:"git_owner,omitempty"`
+
+		// GitHub options (when create_repo=true and git_provider is "github" or empty)
 		GitHubCreate  bool `json:"github_create,omitempty"`
 		GitHubPrivate bool `json:"github_private,omitempty"`
 
@@ -86,6 +90,24 @@ func (h *Handler) HandleCreate(c echo.Context) error {
 		// Create new local repository
 		if h.deps.GitService == nil {
 			return echo.NewHTTPError(http.StatusServiceUnavailable, "git service not configured")
+		}
+
+		// Forgejo creation path: create repo via Forgejo API, use bare repo path
+		if req.GitProvider == db.GitProviderForgejo && h.deps.ForgejoManager != nil {
+			org := req.GitOwner
+			if org == "" {
+				org = "dex" // default org
+			}
+			if err := h.deps.ForgejoManager.CreateRepo(c.Request().Context(), org, req.Name); err != nil {
+				return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("failed to create Forgejo repo: %v", err))
+			}
+			repoPath = h.deps.ForgejoManager.RepoPath(org, req.Name)
+
+			project, err := h.deps.DB.GetOrCreateProjectByForgejo(org, req.Name, repoPath)
+			if err != nil {
+				return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+			}
+			return c.JSON(http.StatusCreated, core.ToProjectResponse(project))
 		}
 
 		var err error
@@ -139,6 +161,13 @@ func (h *Handler) HandleCreate(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 
+	// Set provider-agnostic fields if specified
+	if req.GitProvider != "" && req.GitOwner != "" {
+		if err := h.deps.DB.UpdateProjectGitProvider(project.ID, req.GitProvider, req.GitOwner, req.Name); err != nil {
+			fmt.Printf("warning: failed to set git provider info: %v\n", err)
+		}
+	}
+
 	return c.JSON(http.StatusCreated, core.ToProjectResponse(project))
 }
 
@@ -176,6 +205,9 @@ func (h *Handler) HandleUpdate(c echo.Context) error {
 		Name          *string             `json:"name"`
 		RepoPath      *string             `json:"repo_path"`
 		DefaultBranch *string             `json:"default_branch"`
+		GitProvider   *string             `json:"git_provider"`
+		GitOwner      *string             `json:"git_owner"`
+		GitRepo       *string             `json:"git_repo"`
 		GitHubOwner   *string             `json:"github_owner"`
 		GitHubRepo    *string             `json:"github_repo"`
 		Services      *db.ProjectServices `json:"services"`
@@ -202,8 +234,31 @@ func (h *Handler) HandleUpdate(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 
-	// Update GitHub info if provided
-	if req.GitHubOwner != nil || req.GitHubRepo != nil {
+	// Update provider-agnostic git info if provided
+	if req.GitProvider != nil || req.GitOwner != nil || req.GitRepo != nil {
+		provider := existing.GetGitProvider()
+		owner := existing.GetOwner()
+		repo := existing.GetRepo()
+		if req.GitProvider != nil {
+			provider = *req.GitProvider
+		}
+		if req.GitOwner != nil {
+			owner = *req.GitOwner
+		}
+		if req.GitRepo != nil {
+			repo = *req.GitRepo
+		}
+		if err := h.deps.DB.UpdateProjectGitProvider(id, provider, owner, repo); err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		}
+		// Keep legacy GitHub fields in sync when provider is GitHub
+		if provider == db.GitProviderGitHub {
+			if err := h.deps.DB.UpdateProjectGitHub(id, owner, repo); err != nil {
+				return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+			}
+		}
+	} else if req.GitHubOwner != nil || req.GitHubRepo != nil {
+		// Legacy GitHub-only update path
 		owner := ""
 		repo := ""
 		if existing.GitHubOwner.Valid {
@@ -220,6 +275,10 @@ func (h *Handler) HandleUpdate(c echo.Context) error {
 		}
 		if err := h.deps.DB.UpdateProjectGitHub(id, owner, repo); err != nil {
 			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		}
+		// Also update provider-agnostic fields to keep them in sync
+		if err := h.deps.DB.UpdateProjectGitProvider(id, db.GitProviderGitHub, owner, repo); err != nil {
+			fmt.Printf("warning: failed to sync git provider fields: %v\n", err)
 		}
 	}
 

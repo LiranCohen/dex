@@ -17,7 +17,7 @@ export interface Task {
   ProjectID: string;
   QuestID: string | null;
   QuestTitle?: string;
-  GitHubIssueNumber: number | null;
+  IssueNumber: number | null;
   Title: string;
   Description: string | null;
   ParentID: string | null;

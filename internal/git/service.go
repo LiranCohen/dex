@@ -171,7 +171,10 @@ func (s *Service) CloneRepo(cloneURL, name string) (string, error) {
 	if s.repos == nil {
 		return "", fmt.Errorf("repository manager not configured")
 	}
-	return s.repos.Clone(cloneURL, name)
+	return s.repos.CloneWithOptions(CloneOptions{
+		URL:  cloneURL,
+		Name: name,
+	})
 }
 
 // GetRepoPath returns the full path for a repository name
@@ -272,4 +275,15 @@ func (s *Service) IsTaskBranchMerged(taskID string) (bool, error) {
 	}
 
 	return s.worktrees.IsBranchMerged(project.RepoPath, task.BranchName.String, task.BaseBranch)
+}
+
+// ForgejoRepoPath returns the bare repo path for a Forgejo-backed project.
+// Forgejo stores bare repos at: {dataDir}/repositories/{owner}/{repo}.git
+func ForgejoRepoPath(forgejoDataDir, owner, repo string) string {
+	return filepath.Join(forgejoDataDir, "repositories", owner, repo+".git")
+}
+
+// IsRepoBare returns whether the given repo path is a bare git repository.
+func (s *Service) IsRepoBare(repoPath string) bool {
+	return IsBareRepo(repoPath)
 }

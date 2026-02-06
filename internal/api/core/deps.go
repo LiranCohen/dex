@@ -8,6 +8,7 @@ import (
 
 	"github.com/lirancohen/dex/internal/auth"
 	"github.com/lirancohen/dex/internal/db"
+	"github.com/lirancohen/dex/internal/forgejo"
 	"github.com/lirancohen/dex/internal/git"
 	"github.com/lirancohen/dex/internal/github"
 	"github.com/lirancohen/dex/internal/mesh"
@@ -41,6 +42,7 @@ type Deps struct {
 	TaskService    *task.Service
 	SessionManager *session.Manager
 	GitService     *git.Service
+	ForgejoManager *forgejo.Manager
 	Planner        *planning.Planner
 	QuestHandler   *quest.Handler
 	Realtime       *realtime.Node            // Centrifuge realtime node

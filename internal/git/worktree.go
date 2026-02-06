@@ -261,24 +261,38 @@ func (m *WorktreeManager) GetWorktreeBase() string {
 // Uses git merge-base --is-ancestor to check if all commits from the branch
 // are in the base branch
 func (m *WorktreeManager) IsBranchMerged(projectPath, branchName, baseBranch string) (bool, error) {
-	// First fetch to ensure we have latest remote state
-	fetchCmd := exec.Command("git", "fetch", "origin", baseBranch)
-	fetchCmd.Dir = projectPath
-	_, _ = fetchCmd.CombinedOutput() // Ignore fetch errors - may not have network
+	isBare := IsBareRepo(projectPath)
 
-	// Determine which base ref to use (prefer remote, fall back to local)
-	baseRef := "origin/" + baseBranch
-	checkBaseCmd := exec.Command("git", "rev-parse", "--verify", "--quiet", baseRef)
-	checkBaseCmd.Dir = projectPath
-	if checkBaseCmd.Run() != nil {
-		// Remote base doesn't exist, use local branch
+	// For non-bare repos, fetch remote state first
+	if !isBare {
+		fetchCmd := exec.Command("git", "fetch", "origin", baseBranch)
+		fetchCmd.Dir = projectPath
+		_, _ = fetchCmd.CombinedOutput() // Ignore fetch errors - may not have network
+	}
+
+	// Determine which base ref to use
+	// For bare repos (Forgejo), always use local refs — there's no remote
+	var baseRef string
+	if isBare {
 		baseRef = baseBranch
+	} else {
+		baseRef = "origin/" + baseBranch
+		checkBaseCmd := exec.Command("git", "rev-parse", "--verify", "--quiet", baseRef)
+		checkBaseCmd.Dir = projectPath
+		if checkBaseCmd.Run() != nil {
+			// Remote base doesn't exist, use local branch
+			baseRef = baseBranch
+		}
 	}
 
 	// Check if branch exists locally
 	checkCmd := exec.Command("git", "rev-parse", "--verify", "--quiet", branchName)
 	checkCmd.Dir = projectPath
 	if err := checkCmd.Run(); err != nil {
+		if isBare {
+			// For bare repos, if branch doesn't exist locally it was deleted (merged)
+			return true, nil
+		}
 		// Branch doesn't exist locally - check if it was deleted (likely merged)
 		// Try to find the branch on remote
 		remoteCheckCmd := exec.Command("git", "rev-parse", "--verify", "--quiet", "origin/"+branchName)

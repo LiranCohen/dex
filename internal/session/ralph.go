@@ -220,8 +220,8 @@ func (r *RalphLoop) initIssueCommenter(task *db.Task) {
 		return
 	}
 
-	// Check if task has a linked GitHub issue
-	if !task.GitHubIssueNumber.Valid || task.GitHubIssueNumber.Int64 == 0 {
+	// Check if task has a linked issue
+	if !task.IssueNumber.Valid || task.IssueNumber.Int64 == 0 {
 		return
 	}
 
@@ -239,7 +239,7 @@ func (r *RalphLoop) initIssueCommenter(task *db.Task) {
 		r.githubClient,
 		project.GitHubOwner.String,
 		project.GitHubRepo.String,
-		int(task.GitHubIssueNumber.Int64),
+		int(task.IssueNumber.Int64),
 		github.DefaultIssueCommenterConfig(),
 	)
 }

@@ -3,6 +3,7 @@ package git
 import (
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
@@ -68,8 +69,16 @@ type PushOptions struct {
 	Force       bool   // Force push (use with caution)
 }
 
-// Push pushes commits to a remote
+// Push pushes commits to a remote.
+// For worktrees created from a bare repo (Forgejo), this is a no-op since
+// commits are already in the bare repo's object store.
 func (o *Operations) Push(dir string, opts PushOptions) error {
+	// Check if this worktree belongs to a bare repo — if so, skip push.
+	// Worktrees from bare repos share the object store directly.
+	if IsWorktreeOfBareRepo(dir) {
+		return nil
+	}
+
 	remote := opts.Remote
 	if remote == "" {
 		remote = "origin"
@@ -99,6 +108,26 @@ func (o *Operations) Push(dir string, opts PushOptions) error {
 	}
 
 	return nil
+}
+
+// IsWorktreeOfBareRepo checks if dir is a git worktree whose parent repo
+// is a bare repository. This is the case for Forgejo-backed worktrees.
+func IsWorktreeOfBareRepo(dir string) bool {
+	// Use git rev-parse to find the common dir (the main repo)
+	cmd := exec.Command("git", "rev-parse", "--git-common-dir")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		return false
+	}
+	commonDir := strings.TrimSpace(string(out))
+	// If commonDir is relative, resolve it
+	if commonDir != "" && commonDir[0] != '/' {
+		commonDir = filepath.Join(dir, commonDir)
+	}
+	// A bare repo's common dir IS the repo dir, and it won't have a .git subdirectory
+	// Check if the parent of commonDir is a bare repo
+	return IsBareRepo(filepath.Dir(commonDir))
 }
 
 // PullOptions configures a git pull

@@ -15,6 +15,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/lirancohen/dex/internal/db"
+	"github.com/lirancohen/dex/internal/pathutil"
 	"github.com/lirancohen/dex/internal/realtime"
 	"github.com/lirancohen/dex/internal/session"
 	"github.com/lirancohen/dex/internal/toolbelt"
@@ -40,8 +41,11 @@ type ObjectiveDraft struct {
 	EstimatedIterations int       `json:"estimated_iterations,omitempty"`
 	EstimatedBudget     float64   `json:"estimated_budget,omitempty"` // estimated cost in dollars
 	// Repository targeting - used for creating proper projects
-	GitHubOwner string `json:"github_owner,omitempty"` // GitHub owner/org for new or cloned repo
-	GitHubRepo  string `json:"github_repo,omitempty"`  // GitHub repo name
+	GitProvider string `json:"git_provider,omitempty"` // "forgejo" or "github" (default)
+	GitOwner    string `json:"git_owner,omitempty"`    // Owner/org on the git provider
+	GitRepoName string `json:"git_repo,omitempty"`     // Repo name on the git provider
+	GitHubOwner string `json:"github_owner,omitempty"` // GitHub owner/org (legacy, use git_owner)
+	GitHubRepo  string `json:"github_repo,omitempty"`  // GitHub repo name (legacy, use git_repo)
 	CloneURL    string `json:"clone_url,omitempty"`    // URL to clone (if cloning existing repo)
 }
 
@@ -785,22 +789,38 @@ func complexityToPriority(complexity string, estimatedIterations int) int {
 // validStartingHats defines hats that can be used as starting hats for tasks
 var validStartingHats = []string{"explorer", "planner", "creator", "designer"}
 
-// resolveProjectForDraft finds or creates a project for a draft with GitHub owner/repo
+// resolveProjectForDraft finds or creates a project for a draft.
+// Supports both Forgejo and GitHub as git providers.
 func (h *Handler) resolveProjectForDraft(draft ObjectiveDraft) (*db.Project, error) {
-	if draft.GitHubOwner == "" || draft.GitHubRepo == "" {
-		return nil, fmt.Errorf("draft must have both github_owner and github_repo")
+	// Resolve owner/repo from either provider-agnostic or legacy fields
+	owner := draft.GitOwner
+	if owner == "" {
+		owner = draft.GitHubOwner
+	}
+	repo := draft.GitRepoName
+	if repo == "" {
+		repo = draft.GitHubRepo
+	}
+	if owner == "" || repo == "" {
+		return nil, fmt.Errorf("draft must have both owner and repo (via git_owner/git_repo or github_owner/github_repo)")
 	}
 
-	// Compute the repo path: {baseDir}/repos/{owner}/{repo}
-	// Default to /opt/dex if baseDir not set
 	baseDir := h.baseDir
 	if baseDir == "" {
 		baseDir = "/opt/dex"
 	}
-	repoPath := filepath.Join(baseDir, "repos", draft.GitHubOwner, draft.GitHubRepo)
 
-	// Find or create the project
-	return h.db.GetOrCreateProjectByGitHub(draft.GitHubOwner, draft.GitHubRepo, repoPath)
+	// Route to appropriate provider
+	provider := draft.GitProvider
+	if provider == db.GitProviderForgejo {
+		// For Forgejo, the repo path is the bare repo under Forgejo's data dir
+		repoPath := filepath.Join(baseDir, "forgejo", "repositories", owner, repo+".git")
+		return h.db.GetOrCreateProjectByForgejo(owner, repo, repoPath)
+	}
+
+	// Default: GitHub
+	repoPath := filepath.Join(baseDir, "repos", owner, repo)
+	return h.db.GetOrCreateProjectByGitHub(owner, repo, repoPath)
 }
 
 // CreateObjectiveFromDraft creates a task from an accepted draft
@@ -832,9 +852,10 @@ func (h *Handler) CreateObjectiveFromDraft(ctx context.Context, questID string, 
 	}
 
 	// Determine the project ID for this task
-	// If draft specifies a GitHub owner/repo, find or create a proper project for it
+	// If draft specifies a git owner/repo, find or create a proper project for it
 	projectID := quest.ProjectID
-	if draft.GitHubOwner != "" && draft.GitHubRepo != "" {
+	hasRepoTarget := (draft.GitOwner != "" && draft.GitRepoName != "") || (draft.GitHubOwner != "" && draft.GitHubRepo != "")
+	if hasRepoTarget {
 		project, err := h.resolveProjectForDraft(draft)
 		if err != nil {
 			return nil, fmt.Errorf("failed to resolve project for draft: %w", err)
@@ -966,28 +987,9 @@ func (h *Handler) RunPreflightChecks(projectID string) (*PreflightCheck, error) 
 	return check, nil
 }
 
-// isValidProjectPath checks if a path is appropriate for use as a project directory
+// isValidProjectPath checks if a path is appropriate for use as a project directory.
 func (h *Handler) isValidProjectPath(path string) bool {
-	if path == "" || path == "." || path == ".." {
-		return false
-	}
-
-	// System directories that should never be used (including subdirectories)
-	systemPrefixes := []string{
-		"/usr/",
-		"/bin/",
-		"/sbin/",
-		"/lib/",
-		"/etc/",
-	}
-
-	for _, prefix := range systemPrefixes {
-		if strings.HasPrefix(path, prefix) {
-			return false
-		}
-	}
-
-	return true
+	return pathutil.IsValidProjectPath(path, h.baseDir)
 }
 
 // GetPreflightCheck performs preflight checks for a quest's project

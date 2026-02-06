@@ -67,6 +67,7 @@ func (db *DB) Migrate() error {
 		migrationMemories,
 		migrationEvents,
 		migrationWorkers,
+		migrationForgejoConfig,
 	}
 
 	for i, migration := range migrations {
@@ -97,7 +98,7 @@ func (db *DB) Migrate() error {
 		// Task/Quest content stored in git files
 		"ALTER TABLE tasks ADD COLUMN content_path TEXT",
 		"ALTER TABLE quests ADD COLUMN conversation_path TEXT",
-		// GitHub Issue sync for Quests (Tasks already have github_issue_number)
+		// Issue sync for Quests (Tasks already have issue_number)
 		"ALTER TABLE quests ADD COLUMN github_issue_number INTEGER",
 		// Quality gate and termination tracking
 		"ALTER TABLE sessions ADD COLUMN termination_reason TEXT",
@@ -112,6 +113,13 @@ func (db *DB) Migrate() error {
 		"ALTER TABLE secrets ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP",
 		// GitHub App config encryption support
 		"ALTER TABLE github_app_config ADD COLUMN encrypted INTEGER DEFAULT 0",
+		// Provider-agnostic git columns
+		"ALTER TABLE projects ADD COLUMN git_provider TEXT DEFAULT 'github'",
+		"ALTER TABLE projects ADD COLUMN git_owner TEXT",
+		"ALTER TABLE projects ADD COLUMN git_repo TEXT",
+		// Rename github_issue_number → issue_number (provider-agnostic)
+		"ALTER TABLE tasks RENAME COLUMN github_issue_number TO issue_number",
+		"ALTER TABLE quests RENAME COLUMN github_issue_number TO issue_number",
 	}
 	for _, migration := range optionalMigrations {
 		_, _ = db.Exec(migration) // Ignore errors - column may already exist
@@ -156,6 +164,11 @@ CREATE TABLE IF NOT EXISTS projects (
 	repo_path TEXT NOT NULL,
 	github_owner TEXT,
 	github_repo TEXT,
+	git_provider TEXT,       -- "forgejo" or "github" (default: github for backwards compat)
+	git_owner TEXT,          -- Owner/org on the git provider
+	git_repo TEXT,           -- Repo name on the git provider
+	remote_origin TEXT,      -- git remote origin URL
+	remote_upstream TEXT,    -- git remote upstream URL (if fork)
 	default_branch TEXT DEFAULT 'main',
 	services TEXT,  -- JSON blob for ProjectServices
 	created_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -166,7 +179,7 @@ const migrationTasks = `
 CREATE TABLE IF NOT EXISTS tasks (
 	id TEXT PRIMARY KEY,
 	project_id TEXT NOT NULL REFERENCES projects(id),
-	github_issue_number INTEGER,
+	issue_number INTEGER,
 	title TEXT NOT NULL,
 	description TEXT,
 	parent_id TEXT REFERENCES tasks(id),
@@ -345,6 +358,8 @@ CREATE TABLE IF NOT EXISTS quests (
 	status TEXT NOT NULL DEFAULT 'active',
 	model TEXT DEFAULT 'sonnet',
 	auto_start_default INTEGER DEFAULT 1,
+	conversation_path TEXT,
+	issue_number INTEGER,
 	created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 	completed_at DATETIME,
 	FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
@@ -502,4 +517,18 @@ CREATE TABLE IF NOT EXISTS events (
 
 CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id);
 CREATE INDEX IF NOT EXISTS idx_events_topic ON events(topic);
+`
+
+const migrationForgejoConfig = `
+-- Forgejo instance configuration (singleton - only one row)
+CREATE TABLE IF NOT EXISTS forgejo_config (
+	id INTEGER PRIMARY KEY CHECK (id = 1),
+	base_url TEXT NOT NULL DEFAULT 'http://127.0.0.1:3000',
+	admin_token_ref TEXT NOT NULL DEFAULT 'forgejo_admin_token',
+	bot_token_ref TEXT NOT NULL DEFAULT 'forgejo_bot_token',
+	bot_username TEXT NOT NULL DEFAULT 'dex-bot',
+	default_org TEXT,
+	created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+	updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
 `

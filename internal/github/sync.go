@@ -60,7 +60,7 @@ func (s *SyncService) SyncQuestToIssue(ctx context.Context, questID string, repo
 	}
 
 	// Check if quest already has an issue
-	if quest.GitHubIssueNumber.Valid {
+	if quest.IssueNumber.Valid {
 		// Update existing issue
 		return s.updateQuestIssue(ctx, client, quest, repo)
 	}
@@ -94,7 +94,7 @@ func (s *SyncService) SyncQuestToIssue(ctx context.Context, questID string, repo
 	}
 
 	// Update quest with issue number
-	if err := s.db.UpdateQuestGitHubIssue(questID, int64(issue.GetNumber())); err != nil {
+	if err := s.db.UpdateQuestIssueNumber(questID, int64(issue.GetNumber())); err != nil {
 		return fmt.Errorf("failed to update quest with issue number: %w", err)
 	}
 
@@ -119,8 +119,8 @@ func (s *SyncService) updateQuestIssue(ctx context.Context, client *github.Clien
 			if task.Status == db.TaskStatusCompleted || task.Status == db.TaskStatusCompletedWithIssues {
 				checkbox = "[x]"
 			}
-			if task.GitHubIssueNumber.Valid {
-				objectivesSection += fmt.Sprintf("- %s #%d - %s\n", checkbox, task.GitHubIssueNumber.Int64, task.Title)
+			if task.IssueNumber.Valid {
+				objectivesSection += fmt.Sprintf("- %s #%d - %s\n", checkbox, task.IssueNumber.Int64, task.Title)
 			} else {
 				objectivesSection += fmt.Sprintf("- %s %s\n", checkbox, task.Title)
 			}
@@ -155,7 +155,7 @@ func (s *SyncService) updateQuestIssue(ctx context.Context, client *github.Clien
 **Project:** %s
 %s`, description, projectName, objectivesSection)
 
-	return UpdateIssueBody(ctx, client, repo.Owner, repo.Repo, int(quest.GitHubIssueNumber.Int64), body)
+	return UpdateIssueBody(ctx, client, repo.Owner, repo.Repo, int(quest.IssueNumber.Int64), body)
 }
 
 // SyncObjectiveToIssue creates a GitHub Issue for a Task/Objective
@@ -170,7 +170,7 @@ func (s *SyncService) SyncObjectiveToIssue(ctx context.Context, taskID string, r
 	}
 
 	// Skip if already has an issue
-	if task.GitHubIssueNumber.Valid {
+	if task.IssueNumber.Valid {
 		return nil
 	}
 
@@ -184,8 +184,8 @@ func (s *SyncService) SyncObjectiveToIssue(ctx context.Context, taskID string, r
 	questIssueNumber := 0
 	if task.QuestID.Valid {
 		quest, err := s.db.GetQuestByID(task.QuestID.String)
-		if err == nil && quest != nil && quest.GitHubIssueNumber.Valid {
-			questIssueNumber = int(quest.GitHubIssueNumber.Int64)
+		if err == nil && quest != nil && quest.IssueNumber.Valid {
+			questIssueNumber = int(quest.IssueNumber.Int64)
 		}
 	}
 
@@ -217,7 +217,7 @@ func (s *SyncService) SyncObjectiveToIssue(ctx context.Context, taskID string, r
 	}
 
 	// Update task with issue number
-	if err := s.db.UpdateTaskGitHubIssue(taskID, int64(issue.GetNumber())); err != nil {
+	if err := s.db.UpdateTaskIssueNumber(taskID, int64(issue.GetNumber())); err != nil {
 		return fmt.Errorf("failed to update task with issue number: %w", err)
 	}
 
@@ -244,7 +244,7 @@ func (s *SyncService) CompleteQuestIssue(ctx context.Context, questID string, su
 	}
 
 	// Skip if no issue
-	if !quest.GitHubIssueNumber.Valid {
+	if !quest.IssueNumber.Valid {
 		return nil
 	}
 
@@ -262,7 +262,7 @@ func (s *SyncService) CompleteQuestIssue(ctx context.Context, questID string, su
 
 	// Close with summary
 	comment := fmt.Sprintf("## Quest Completed\n\n%s", summary)
-	return CloseIssueWithComment(ctx, client, repo.Owner, repo.Repo, int(quest.GitHubIssueNumber.Int64), comment)
+	return CloseIssueWithComment(ctx, client, repo.Owner, repo.Repo, int(quest.IssueNumber.Int64), comment)
 }
 
 // ReopenQuestIssue reopens a quest's GitHub Issue
@@ -277,7 +277,7 @@ func (s *SyncService) ReopenQuestIssue(ctx context.Context, questID string, repo
 	}
 
 	// Skip if no issue
-	if !quest.GitHubIssueNumber.Valid {
+	if !quest.IssueNumber.Valid {
 		return nil
 	}
 
@@ -287,7 +287,7 @@ func (s *SyncService) ReopenQuestIssue(ctx context.Context, questID string, repo
 		return fmt.Errorf("failed to get GitHub client: %w", err)
 	}
 
-	return ReopenIssueWithComment(ctx, client, repo.Owner, repo.Repo, int(quest.GitHubIssueNumber.Int64), "Quest reopened.")
+	return ReopenIssueWithComment(ctx, client, repo.Owner, repo.Repo, int(quest.IssueNumber.Int64), "Quest reopened.")
 }
 
 // CompleteObjectiveIssue closes the objective's GitHub Issue
@@ -302,7 +302,7 @@ func (s *SyncService) CompleteObjectiveIssue(ctx context.Context, taskID string,
 	}
 
 	// Skip if no issue
-	if !task.GitHubIssueNumber.Valid {
+	if !task.IssueNumber.Valid {
 		return nil
 	}
 
@@ -317,7 +317,7 @@ func (s *SyncService) CompleteObjectiveIssue(ctx context.Context, taskID string,
 		comment = fmt.Sprintf("Objective completed. See PR #%d.", task.PRNumber.Int64)
 	}
 
-	return CloseIssueWithComment(ctx, client, repo.Owner, repo.Repo, int(task.GitHubIssueNumber.Int64), comment)
+	return CloseIssueWithComment(ctx, client, repo.Owner, repo.Repo, int(task.IssueNumber.Int64), comment)
 }
 
 // CancelObjectiveIssue closes the objective's GitHub Issue as cancelled
@@ -330,7 +330,7 @@ func (s *SyncService) CancelObjectiveIssue(ctx context.Context, taskID string, r
 		return fmt.Errorf("task not found: %s", taskID)
 	}
 
-	if !task.GitHubIssueNumber.Valid {
+	if !task.IssueNumber.Valid {
 		return nil
 	}
 
@@ -339,7 +339,7 @@ func (s *SyncService) CancelObjectiveIssue(ctx context.Context, taskID string, r
 		return fmt.Errorf("failed to get GitHub client: %w", err)
 	}
 
-	return CloseIssueWithComment(ctx, client, repo.Owner, repo.Repo, int(task.GitHubIssueNumber.Int64), "Objective cancelled.")
+	return CloseIssueWithComment(ctx, client, repo.Owner, repo.Repo, int(task.IssueNumber.Int64), "Objective cancelled.")
 }
 
 // FailObjectiveIssue closes the objective's GitHub Issue as failed
@@ -352,7 +352,7 @@ func (s *SyncService) FailObjectiveIssue(ctx context.Context, taskID string, rea
 		return fmt.Errorf("task not found: %s", taskID)
 	}
 
-	if !task.GitHubIssueNumber.Valid {
+	if !task.IssueNumber.Valid {
 		return nil
 	}
 
@@ -366,7 +366,7 @@ func (s *SyncService) FailObjectiveIssue(ctx context.Context, taskID string, rea
 		comment = fmt.Sprintf("Objective failed: %s", reason)
 	}
 
-	return CloseIssueWithComment(ctx, client, repo.Owner, repo.Repo, int(task.GitHubIssueNumber.Int64), comment)
+	return CloseIssueWithComment(ctx, client, repo.Owner, repo.Repo, int(task.IssueNumber.Int64), comment)
 }
 
 // UpdateObjectiveIssueChecklist updates the objective's GitHub Issue body with current checklist status
@@ -379,7 +379,7 @@ func (s *SyncService) UpdateObjectiveIssueChecklist(ctx context.Context, taskID 
 		return fmt.Errorf("task not found: %s", taskID)
 	}
 
-	if !task.GitHubIssueNumber.Valid {
+	if !task.IssueNumber.Valid {
 		return nil
 	}
 
@@ -416,7 +416,7 @@ func (s *SyncService) UpdateObjectiveIssueChecklist(ctx context.Context, taskID 
 
 	body := FormatObjectiveIssueBodyWithStatus(description, checklistItems)
 
-	return UpdateIssueBody(ctx, client, repo.Owner, repo.Repo, int(task.GitHubIssueNumber.Int64), body)
+	return UpdateIssueBody(ctx, client, repo.Owner, repo.Repo, int(task.IssueNumber.Int64), body)
 }
 
 // AddObjectiveStatusComment adds a status comment to the objective's GitHub Issue
@@ -429,7 +429,7 @@ func (s *SyncService) AddObjectiveStatusComment(ctx context.Context, taskID stri
 		return fmt.Errorf("task not found: %s", taskID)
 	}
 
-	if !task.GitHubIssueNumber.Valid {
+	if !task.IssueNumber.Valid {
 		return nil
 	}
 
@@ -454,7 +454,7 @@ func (s *SyncService) AddObjectiveStatusComment(ctx context.Context, taskID stri
 		comment = fmt.Sprintf("Status changed to: %s", status)
 	}
 
-	return AddIssueComment(ctx, client, repo.Owner, repo.Repo, int(task.GitHubIssueNumber.Int64), comment)
+	return AddIssueComment(ctx, client, repo.Owner, repo.Repo, int(task.IssueNumber.Int64), comment)
 }
 
 // LinkPRToObjective links a PR to the objective's GitHub Issue
@@ -469,7 +469,7 @@ func (s *SyncService) LinkPRToObjective(ctx context.Context, taskID string, prNu
 	}
 
 	// Skip if no issue
-	if !task.GitHubIssueNumber.Valid {
+	if !task.IssueNumber.Valid {
 		return nil
 	}
 
@@ -479,7 +479,7 @@ func (s *SyncService) LinkPRToObjective(ctx context.Context, taskID string, prNu
 		return fmt.Errorf("failed to get GitHub client: %w", err)
 	}
 
-	return LinkPRToIssue(ctx, client, repo.Owner, repo.Repo, int(task.GitHubIssueNumber.Int64), prNumber)
+	return LinkPRToIssue(ctx, client, repo.Owner, repo.Repo, int(task.IssueNumber.Int64), prNumber)
 }
 
 // EnsureRepoLabels ensures the dex labels exist in the repo
