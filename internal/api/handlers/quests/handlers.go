@@ -18,10 +18,10 @@ import (
 type Handler struct {
 	deps *core.Deps
 
-	// GitHub sync callback (injected to avoid circular deps)
-	SyncQuestToGitHubIssue  func(questID string)
-	CloseQuestGitHubIssue   func(questID string, summary *db.QuestSummary)
-	ReopenQuestGitHubIssue  func(questID string)
+	// Issue sync callbacks (injected to avoid circular deps)
+	SyncQuestToIssue  func(questID string)
+	CloseQuestIssue   func(questID string, summary *db.QuestSummary)
+	ReopenQuestIssue  func(questID string)
 }
 
 // New creates a new quests handler.
@@ -285,8 +285,8 @@ func (h *Handler) HandleSendMessage(c echo.Context) error {
 	}
 
 	// Sync to GitHub Issue (async)
-	if h.SyncQuestToGitHubIssue != nil {
-		go h.SyncQuestToGitHubIssue(questID)
+	if h.SyncQuestToIssue != nil {
+		go h.SyncQuestToIssue(questID)
 	}
 
 	return c.JSON(http.StatusCreated, map[string]any{
@@ -326,8 +326,8 @@ func (h *Handler) HandleComplete(c echo.Context) error {
 	}
 
 	// Close GitHub Issue (async)
-	if h.CloseQuestGitHubIssue != nil {
-		go h.CloseQuestGitHubIssue(questID, summary)
+	if h.CloseQuestIssue != nil {
+		go h.CloseQuestIssue(questID, summary)
 	}
 
 	return c.JSON(http.StatusOK, core.ToQuestResponse(quest, summary))
@@ -364,8 +364,8 @@ func (h *Handler) HandleReopen(c echo.Context) error {
 	}
 
 	// Reopen GitHub Issue (async)
-	if h.ReopenQuestGitHubIssue != nil {
-		go h.ReopenQuestGitHubIssue(questID)
+	if h.ReopenQuestIssue != nil {
+		go h.ReopenQuestIssue(questID)
 	}
 
 	return c.JSON(http.StatusOK, core.ToQuestResponse(quest, summary))

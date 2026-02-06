@@ -147,19 +147,19 @@ func (s *SyncService) getForgejoProjectInfo(project *db.Project) (string, string
 	return owner, repo, provider
 }
 
-// SyncQuestToGitHubIssue creates or updates an issue for a quest on Forgejo.
-func (s *SyncService) SyncQuestToGitHubIssue(questID string) {
+// SyncQuestToIssue creates or updates an issue for a quest on Forgejo.
+func (s *SyncService) SyncQuestToIssue(questID string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	quest, err := s.deps.DB.GetQuestByID(questID)
 	if err != nil || quest == nil {
-		fmt.Printf("SyncQuestToGitHubIssue: failed to get quest %s: %v\n", questID, err)
+		fmt.Printf("SyncQuestToIssue: failed to get quest %s: %v\n", questID, err)
 		return
 	}
 	project, err := s.deps.DB.GetProjectByID(quest.ProjectID)
 	if err != nil || project == nil {
-		fmt.Printf("SyncQuestToGitHubIssue: failed to get project for quest %s: %v\n", questID, err)
+		fmt.Printf("SyncQuestToIssue: failed to get project for quest %s: %v\n", questID, err)
 		return
 	}
 
@@ -171,14 +171,14 @@ func (s *SyncService) SyncQuestToGitHubIssue(questID string) {
 	s.syncForgejoQuestIssue(ctx, questID, owner, repo, provider)
 }
 
-// CloseQuestGitHubIssue closes the issue for a completed quest on Forgejo.
-func (s *SyncService) CloseQuestGitHubIssue(questID string, summary *db.QuestSummary) {
+// CloseQuestIssue closes the issue for a completed quest on Forgejo.
+func (s *SyncService) CloseQuestIssue(questID string, summary *db.QuestSummary) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	quest, err := s.deps.DB.GetQuestByID(questID)
 	if err != nil || quest == nil {
-		fmt.Printf("CloseQuestGitHubIssue: failed to get quest %s: %v\n", questID, err)
+		fmt.Printf("CloseQuestIssue: failed to get quest %s: %v\n", questID, err)
 		return
 	}
 
@@ -193,7 +193,7 @@ func (s *SyncService) CloseQuestGitHubIssue(questID string, summary *db.QuestSum
 
 	project, err := s.deps.DB.GetProjectByID(quest.ProjectID)
 	if err != nil || project == nil {
-		fmt.Printf("CloseQuestGitHubIssue: failed to get project for quest %s: %v\n", questID, err)
+		fmt.Printf("CloseQuestIssue: failed to get project for quest %s: %v\n", questID, err)
 		return
 	}
 
@@ -204,24 +204,24 @@ func (s *SyncService) CloseQuestGitHubIssue(questID string, summary *db.QuestSum
 
 	if quest.IssueNumber.Valid {
 		s.closeForgejoIssue(ctx, owner, repo, int(quest.IssueNumber.Int64), summaryText, provider)
-		fmt.Printf("CloseQuestGitHubIssue: closed Forgejo issue #%d for quest %s\n", quest.IssueNumber.Int64, questID)
+		fmt.Printf("CloseQuestIssue: closed Forgejo issue #%d for quest %s\n", quest.IssueNumber.Int64, questID)
 	}
 }
 
-// ReopenQuestGitHubIssue reopens the issue for a reopened quest on Forgejo.
-func (s *SyncService) ReopenQuestGitHubIssue(questID string) {
+// ReopenQuestIssue reopens the issue for a reopened quest on Forgejo.
+func (s *SyncService) ReopenQuestIssue(questID string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	quest, err := s.deps.DB.GetQuestByID(questID)
 	if err != nil || quest == nil {
-		fmt.Printf("ReopenQuestGitHubIssue: failed to get quest %s: %v\n", questID, err)
+		fmt.Printf("ReopenQuestIssue: failed to get quest %s: %v\n", questID, err)
 		return
 	}
 
 	project, err := s.deps.DB.GetProjectByID(quest.ProjectID)
 	if err != nil || project == nil {
-		fmt.Printf("ReopenQuestGitHubIssue: failed to get project for quest %s: %v\n", questID, err)
+		fmt.Printf("ReopenQuestIssue: failed to get project for quest %s: %v\n", questID, err)
 		return
 	}
 
@@ -233,27 +233,27 @@ func (s *SyncService) ReopenQuestGitHubIssue(questID string) {
 	if quest.IssueNumber.Valid {
 		openState := "open"
 		if err := provider.UpdateIssue(ctx, owner, repo, int(quest.IssueNumber.Int64), gitprovider.UpdateIssueOpts{State: &openState}); err != nil {
-			fmt.Printf("ReopenQuestGitHubIssue: failed to reopen Forgejo issue #%d for quest %s: %v\n", quest.IssueNumber.Int64, questID, err)
+			fmt.Printf("ReopenQuestIssue: failed to reopen Forgejo issue #%d for quest %s: %v\n", quest.IssueNumber.Int64, questID, err)
 		} else {
-			fmt.Printf("ReopenQuestGitHubIssue: reopened Forgejo issue #%d for quest %s\n", quest.IssueNumber.Int64, questID)
+			fmt.Printf("ReopenQuestIssue: reopened Forgejo issue #%d for quest %s\n", quest.IssueNumber.Int64, questID)
 		}
 	}
 }
 
-// SyncObjectiveToGitHubIssue creates an issue for an objective (task) on Forgejo.
-func (s *SyncService) SyncObjectiveToGitHubIssue(taskID string) {
+// SyncObjectiveToIssue creates an issue for an objective (task) on Forgejo.
+func (s *SyncService) SyncObjectiveToIssue(taskID string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	task, err := s.deps.DB.GetTaskByID(taskID)
 	if err != nil || task == nil {
-		fmt.Printf("SyncObjectiveToGitHubIssue: failed to get task %s: %v\n", taskID, err)
+		fmt.Printf("SyncObjectiveToIssue: failed to get task %s: %v\n", taskID, err)
 		return
 	}
 
 	project, err := s.deps.DB.GetProjectByID(task.ProjectID)
 	if err != nil || project == nil {
-		fmt.Printf("SyncObjectiveToGitHubIssue: failed to get project for task %s: %v\n", taskID, err)
+		fmt.Printf("SyncObjectiveToIssue: failed to get project for task %s: %v\n", taskID, err)
 		return
 	}
 
@@ -437,20 +437,20 @@ func (s *SyncService) OnPRCreated(taskID string, prNumber int) {
 	}
 }
 
-// CancelObjectiveGitHubIssue closes the issue for a cancelled task on Forgejo.
-func (s *SyncService) CancelObjectiveGitHubIssue(taskID string) {
+// CancelObjectiveIssue closes the issue for a cancelled task on Forgejo.
+func (s *SyncService) CancelObjectiveIssue(taskID string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	task, err := s.deps.DB.GetTaskByID(taskID)
 	if err != nil || task == nil {
-		fmt.Printf("CancelObjectiveGitHubIssue: failed to get task %s: %v\n", taskID, err)
+		fmt.Printf("CancelObjectiveIssue: failed to get task %s: %v\n", taskID, err)
 		return
 	}
 
 	project, err := s.deps.DB.GetProjectByID(task.ProjectID)
 	if err != nil || project == nil {
-		fmt.Printf("CancelObjectiveGitHubIssue: failed to get project for task %s: %v\n", taskID, err)
+		fmt.Printf("CancelObjectiveIssue: failed to get project for task %s: %v\n", taskID, err)
 		return
 	}
 
@@ -461,7 +461,7 @@ func (s *SyncService) CancelObjectiveGitHubIssue(taskID string) {
 
 	if task.IssueNumber.Valid {
 		s.closeForgejoIssue(ctx, owner, repo, int(task.IssueNumber.Int64), "Task cancelled.", provider)
-		fmt.Printf("CancelObjectiveGitHubIssue: closed Forgejo issue #%d for task %s\n", task.IssueNumber.Int64, taskID)
+		fmt.Printf("CancelObjectiveIssue: closed Forgejo issue #%d for task %s\n", task.IssueNumber.Int64, taskID)
 	}
 }
 

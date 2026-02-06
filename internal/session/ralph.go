@@ -245,7 +245,7 @@ func (r *RalphLoop) initIssueCommenter(task *db.Task) {
 	)
 }
 
-// postIssueComment posts a comment to the linked GitHub issue (if any)
+// postIssueComment posts a comment to the linked issue (if any)
 func (r *RalphLoop) postIssueComment(ctx context.Context, comment string) {
 	if r.issueCommenter == nil {
 		return

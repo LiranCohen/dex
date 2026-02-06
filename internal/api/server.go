@@ -419,10 +419,10 @@ func (s *Server) registerRoutes() {
 	forgejoHandler := forgejohandlers.New(s.deps)
 
 	// Wire up callbacks for issue sync (Forgejo)
-	questsHandler.SyncQuestToGitHubIssue = s.handlersSyncSvc.SyncQuestToGitHubIssue
-	questsHandler.CloseQuestGitHubIssue = s.handlersSyncSvc.CloseQuestGitHubIssue
-	questsHandler.ReopenQuestGitHubIssue = s.handlersSyncSvc.ReopenQuestGitHubIssue
-	objectivesHandler.SyncObjectiveToGitHubIssue = s.handlersSyncSvc.SyncObjectiveToGitHubIssue
+	questsHandler.SyncQuestToIssue = s.handlersSyncSvc.SyncQuestToIssue
+	questsHandler.CloseQuestIssue = s.handlersSyncSvc.CloseQuestIssue
+	questsHandler.ReopenQuestIssue = s.handlersSyncSvc.ReopenQuestIssue
+	objectivesHandler.SyncObjectiveToIssue = s.handlersSyncSvc.SyncObjectiveToIssue
 
 	// Public endpoints (no auth required)
 	v1.GET("/system/status", s.handleHealthCheck)

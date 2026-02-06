@@ -17,8 +17,8 @@ import (
 type ObjectivesHandler struct {
 	deps *core.Deps
 
-	// GitHub sync callback
-	SyncObjectiveToGitHubIssue func(taskID string)
+	// Issue sync callback
+	SyncObjectiveToIssue func(taskID string)
 }
 
 // NewObjectivesHandler creates a new objectives handler.
@@ -113,8 +113,8 @@ func (h *ObjectivesHandler) HandleCreate(c echo.Context) error {
 	}
 
 	// Sync to GitHub Issue (async)
-	if h.SyncObjectiveToGitHubIssue != nil {
-		go h.SyncObjectiveToGitHubIssue(createdTask.ID)
+	if h.SyncObjectiveToIssue != nil {
+		go h.SyncObjectiveToIssue(createdTask.ID)
 	}
 
 	// Add message to quest history
@@ -267,8 +267,8 @@ func (h *ObjectivesHandler) HandleCreateBatch(c echo.Context) error {
 
 	for i, task := range createdTasks {
 		// Sync to GitHub Issue (async)
-		if h.SyncObjectiveToGitHubIssue != nil {
-			go h.SyncObjectiveToGitHubIssue(task.ID)
+		if h.SyncObjectiveToIssue != nil {
+			go h.SyncObjectiveToIssue(task.ID)
 		}
 
 		// Auto-start if requested and not blocked (derived from dependencies)

@@ -225,21 +225,21 @@ func (m *Manager) SetOnTaskCompleted(callback TaskCompletedCallback) {
 	m.onTaskCompleted = callback
 }
 
-// SetOnPRCreated sets a callback for PR creation events (for GitHub sync)
+// SetOnPRCreated sets a callback for PR creation events (for issue sync)
 func (m *Manager) SetOnPRCreated(callback PRCreatedCallback) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.onPRCreated = callback
 }
 
-// SetOnTaskFailed sets a callback for task failure events (for GitHub sync)
+// SetOnTaskFailed sets a callback for task failure events (for issue sync)
 func (m *Manager) SetOnTaskFailed(callback TaskFailedCallback) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.onTaskFailed = callback
 }
 
-// SetOnChecklistUpdated sets a callback for checklist update events (for GitHub sync)
+// SetOnChecklistUpdated sets a callback for checklist update events (for issue sync)
 func (m *Manager) SetOnChecklistUpdated(callback ChecklistUpdatedCallback) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -256,7 +256,7 @@ func (m *Manager) NotifyChecklistUpdated(taskID string) {
 	}
 }
 
-// SetOnTaskStatus sets a callback for task status change events (for GitHub sync)
+// SetOnTaskStatus sets a callback for task status change events (for issue sync)
 func (m *Manager) SetOnTaskStatus(callback TaskStatusCallback) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -385,7 +385,7 @@ func (m *Manager) Start(ctx context.Context, sessionID string) error {
 		return fmt.Errorf("failed to update session status: %w", err)
 	}
 
-	// Notify task started (for GitHub sync)
+	// Notify task started (for issue sync)
 	m.notifyTaskStatus(session.TaskID, "running")
 
 	// Broadcast task.updated event for WebSocket clients
@@ -452,7 +452,7 @@ func (m *Manager) Pause(sessionID string) error {
 		return err
 	}
 
-	// Notify task paused (for GitHub sync)
+	// Notify task paused (for issue sync)
 	m.notifyTaskStatus(taskID, "paused")
 
 	return nil
@@ -746,7 +746,7 @@ func (m *Manager) runSession(ctx context.Context, session *ActiveSession) {
 		_ = m.db.UpdateTaskStatus(taskID, db.TaskStatusCompleted)
 		m.broadcastTaskUpdated(taskID, db.TaskStatusCompleted)
 
-		// Notify task completed (for GitHub sync)
+		// Notify task completed (for issue sync)
 		m.mu.RLock()
 		onTaskCompleted := m.onTaskCompleted
 		m.mu.RUnlock()
@@ -762,7 +762,7 @@ func (m *Manager) runSession(ctx context.Context, session *ActiveSession) {
 		_ = m.db.UpdateTaskStatus(taskID, db.TaskStatusPaused)
 		m.broadcastTaskUpdated(taskID, db.TaskStatusPaused)
 
-		// Notify with error status (adds comment to GitHub issue, doesn't close it)
+		// Notify with error status (adds comment to linked issue, doesn't close it)
 		reason := "Session failed"
 		if loopErr != nil {
 			reason = loopErr.Error()
