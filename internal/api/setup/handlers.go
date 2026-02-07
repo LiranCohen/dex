@@ -91,12 +91,10 @@ func (h *Handler) HandleStatus(c echo.Context) error {
 
 	// Check actual state for reconciliation
 	hasPasskey, _ := h.db.HasAnyCredentials()
-	hasGitHubApp := h.hasGitHubApp()
-	hasInstallation := h.db.HasGitHubInstallation()
 	hasAnthropicKey := h.db.HasSecret(db.SecretKeyAnthropicKey)
 
 	// Determine current step based on actual state
-	actualStep := DetermineCurrentStep(progress, hasPasskey, hasGitHubApp, hasInstallation, hasAnthropicKey)
+	actualStep := DetermineCurrentStep(progress, hasPasskey, hasAnthropicKey)
 
 	// If database step doesn't match actual state, update it
 	if progress.CurrentStep != actualStep && actualStep != "" {
@@ -108,31 +106,11 @@ func (h *Handler) HandleStatus(c echo.Context) error {
 	status := SetupStatus{
 		CurrentStep: progress.CurrentStep,
 		Steps:       BuildSteps(progress),
-		GitHubOrg:   progress.GetGitHubOrgName(),
-		GitHubOrgID: progress.GetGitHubOrgID(),
 
 		// Legacy compatibility fields
 		PasskeyRegistered: hasPasskey,
-		GitHubAppSet:      hasGitHubApp,
-		GitHubAuthMethod:  "none",
 		AnthropicKeySet:   hasAnthropicKey,
 		SetupComplete:     progress.IsComplete(),
-	}
-
-	// Set GitHub auth method and app slug
-	if hasGitHubApp {
-		status.GitHubAuthMethod = "app"
-		if appConfig, err := h.db.GetGitHubAppConfig(); err == nil && appConfig != nil {
-			status.GitHubAppSlug = appConfig.AppSlug
-		}
-	}
-
-	// Check legacy token (for backward compatibility)
-	if githubToken, _ := h.db.GetSecret(db.SecretKeyGitHubToken); githubToken != "" {
-		status.GitHubTokenSet = true
-		if status.GitHubAuthMethod == "none" {
-			status.GitHubAuthMethod = "token"
-		}
 	}
 
 	// Check workspace status
@@ -142,14 +120,12 @@ func (h *Handler) HandleStatus(c echo.Context) error {
 		status.WorkspaceReady = true
 		status.WorkspacePath = workspacePath
 
-		// Check if GitHub remote is configured
+		// Check if remote is configured
 		cmd := exec.Command("git", "remote", "get-url", "origin")
 		cmd.Dir = workspacePath
 		if output, err := cmd.Output(); err == nil {
 			remoteURL := strings.TrimSpace(string(output))
 			if remoteURL != "" {
-				status.WorkspaceGitHubReady = true
-				status.WorkspaceGitHubURL = remoteURL
 				status.WorkspaceURL = remoteURL
 			}
 		}
@@ -196,7 +172,7 @@ func (h *Handler) HandleCompletePasskey(c echo.Context) error {
 
 	return c.JSON(http.StatusOK, map[string]any{
 		"success":   true,
-		"next_step": db.OnboardingStepGitHubOrg,
+		"next_step": db.OnboardingStepAnthropic,
 	})
 }
 

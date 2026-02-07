@@ -74,8 +74,9 @@ func main() {
 	meshAuthKey := flag.String("mesh-auth-key", "", "Pre-auth key for automatic mesh registration")
 	meshStateDir := flag.String("mesh-state-dir", "", "Directory for mesh state (default: {base-dir}/mesh)")
 
-	// Forgejo flags
-	forgejoEnabled := flag.Bool("forgejo", false, "Enable embedded Forgejo git server")
+	// Forgejo flags (enabled by default)
+	forgejoDisabled := flag.Bool("no-forgejo", false, "Disable embedded Forgejo git server")
+	forgejoURL := flag.String("forgejo-url", "", "External URL for Forgejo (default: https://git.{mesh-hostname}.enbox.id)")
 	forgejoBinary := flag.String("forgejo-binary", "", "Path to Forgejo binary (default: auto-download)")
 	forgejoPort := flag.Int("forgejo-port", 3000, "HTTP port for Forgejo")
 
@@ -346,16 +347,46 @@ func main() {
 		}
 	}
 
-	// Configure embedded Forgejo if enabled
+	// Configure embedded Forgejo (enabled by default)
 	var forgejoConfig *forgejo.Config
-	if *forgejoEnabled {
+	if !*forgejoDisabled {
 		cfg := forgejo.DefaultConfig(dataDir)
 		cfg.HTTPPort = *forgejoPort
 		if *forgejoBinary != "" {
 			cfg.BinaryPath = *forgejoBinary
 		}
+
+		// Set external URL: explicit flag > derived from mesh hostname > localhost
+		if *forgejoURL != "" {
+			cfg.RootURL = *forgejoURL
+		} else if meshConfig != nil && meshConfig.Hostname != "" {
+			cfg.RootURL = fmt.Sprintf("https://git.%s.enbox.id", meshConfig.Hostname)
+		}
+
+		// Auto-add git endpoint to tunnel if mesh is configured
+		if meshConfig != nil && meshConfig.Tunnel.Enabled && meshConfig.Hostname != "" {
+			gitHostname := fmt.Sprintf("git.%s.enbox.id", meshConfig.Hostname)
+			// Check if endpoint already exists
+			gitEndpointExists := false
+			for _, ep := range meshConfig.Tunnel.Endpoints {
+				if ep.Hostname == gitHostname {
+					gitEndpointExists = true
+					break
+				}
+			}
+			if !gitEndpointExists {
+				meshConfig.Tunnel.Endpoints = append(meshConfig.Tunnel.Endpoints, mesh.EndpointMapping{
+					Hostname:  gitHostname,
+					LocalPort: cfg.HTTPPort,
+				})
+				fmt.Printf("Auto-added tunnel endpoint: %s -> :%d\n", gitHostname, cfg.HTTPPort)
+			}
+		}
+
 		forgejoConfig = &cfg
-		fmt.Printf("Embedded Forgejo enabled: port=%d, data=%s\n", cfg.HTTPPort, cfg.DataDir)
+		fmt.Printf("Embedded Forgejo enabled: port=%d, url=%s, data=%s\n", cfg.HTTPPort, cfg.RootURL, cfg.DataDir)
+	} else {
+		fmt.Println("Embedded Forgejo disabled")
 	}
 
 	// Create API server

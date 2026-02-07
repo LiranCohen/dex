@@ -8,13 +8,15 @@ import (
 
 // OnboardingStep represents the possible steps in the onboarding flow
 const (
-	OnboardingStepWelcome       = "welcome"
-	OnboardingStepPasskey       = "passkey"
+	OnboardingStepWelcome   = "welcome"
+	OnboardingStepPasskey   = "passkey"
+	OnboardingStepAnthropic = "anthropic"
+	OnboardingStepComplete  = "complete"
+
+	// Deprecated: GitHub steps are no longer used (replaced by embedded Forgejo)
 	OnboardingStepGitHubOrg     = "github_org"
 	OnboardingStepGitHubApp     = "github_app"
 	OnboardingStepGitHubInstall = "github_install"
-	OnboardingStepAnthropic     = "anthropic"
-	OnboardingStepComplete      = "complete"
 )
 
 // OnboardingProgress represents the current state of onboarding
@@ -113,7 +115,7 @@ func (db *DB) CompletePasskeyStep() error {
 		UPDATE onboarding_progress
 		SET passkey_completed_at = ?, current_step = ?, updated_at = ?
 		WHERE id = 1
-	`, now, OnboardingStepGitHubOrg, now)
+	`, now, OnboardingStepAnthropic, now)
 	if err != nil {
 		return fmt.Errorf("failed to complete passkey step: %w", err)
 	}

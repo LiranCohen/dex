@@ -3,9 +3,6 @@ import { useOnboarding } from './hooks/useOnboarding';
 import { StepIndicator } from './shared/StepIndicator';
 import { WelcomeStep } from './steps/WelcomeStep';
 import { PasskeyStep } from './steps/PasskeyStep';
-import { GitHubOrgStep } from './steps/GitHubOrgStep';
-import { GitHubAppStep } from './steps/GitHubAppStep';
-import { GitHubInstallStep } from './steps/GitHubInstallStep';
 import { AnthropicStep } from './steps/AnthropicStep';
 import { CompleteStep } from './steps/CompleteStep';
 import '../../app/styles/app.css';
@@ -21,30 +18,11 @@ export function OnboardingFlow({ onComplete }: OnboardingFlowProps) {
     isLoading,
     error,
     setError,
-    fetchStatus,
     advanceWelcome,
     completePasskey,
-    setGitHubOrg,
-    validateGitHubOrg,
-    completeGitHubInstall,
     setAnthropicKey,
     completeSetup,
-    getGitHubAppManifest,
   } = useOnboarding();
-
-  // Check URL params for GitHub callbacks on mount
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const githubAppCreated = params.get('github_app');
-    const githubInstalled = params.get('github_installed');
-
-    if (githubAppCreated === 'created' || githubInstalled === 'true') {
-      // Clean up URL params
-      window.history.replaceState({}, '', window.location.pathname);
-      // Refresh status to get updated step
-      fetchStatus();
-    }
-  }, [fetchStatus]);
 
   // Handle completion
   useEffect(() => {
@@ -87,36 +65,6 @@ export function OnboardingFlow({ onComplete }: OnboardingFlowProps) {
             onComplete={completePasskey}
             error={error}
             setError={setError}
-          />
-        );
-
-      case 'github_org':
-        return (
-          <GitHubOrgStep
-            onSetOrg={setGitHubOrg}
-            validateOrg={validateGitHubOrg}
-            error={error}
-            isLoading={isLoading}
-          />
-        );
-
-      case 'github_app':
-        return (
-          <GitHubAppStep
-            orgName={status?.github_org || ''}
-            getManifest={getGitHubAppManifest}
-            error={error}
-          />
-        );
-
-      case 'github_install':
-        return (
-          <GitHubInstallStep
-            orgName={status?.github_org || ''}
-            orgId={status?.github_org_id}
-            appSlug={status?.github_app_slug}
-            onComplete={completeGitHubInstall}
-            error={error}
           />
         );
 

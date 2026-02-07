@@ -14,27 +14,23 @@ type Step struct {
 
 // SetupStatus represents the current setup status
 type SetupStatus struct {
-	CurrentStep   string `json:"current_step"`
-	Steps         []Step `json:"steps"`
-	GitHubOrg     string `json:"github_org,omitempty"`
-	GitHubOrgID   int64  `json:"github_org_id,omitempty"`
-	GitHubAppSlug string `json:"github_app_slug,omitempty"`
-	WorkspaceURL  string `json:"workspace_url,omitempty"`
+	CurrentStep string `json:"current_step"`
+	Steps       []Step `json:"steps"`
 
-	// Legacy fields for backward compatibility during transition
-	PasskeyRegistered    bool   `json:"passkey_registered"`
-	GitHubTokenSet       bool   `json:"github_token_set"`
-	GitHubAppSet         bool   `json:"github_app_set"`
-	GitHubAuthMethod     string `json:"github_auth_method"`
-	AnthropicKeySet      bool   `json:"anthropic_key_set"`
-	SetupComplete        bool   `json:"setup_complete"`
-	AccessMethod         string `json:"access_method,omitempty"`
-	PermanentURL         string `json:"permanent_url,omitempty"`
-	WorkspaceReady       bool   `json:"workspace_ready"`
-	WorkspacePath        string `json:"workspace_path,omitempty"`
-	WorkspaceGitHubReady bool   `json:"workspace_github_ready"`
-	WorkspaceGitHubURL   string `json:"workspace_github_url,omitempty"`
-	WorkspaceError       string `json:"workspace_error,omitempty"`
+	// Status flags
+	PasskeyRegistered bool `json:"passkey_registered"`
+	AnthropicKeySet   bool `json:"anthropic_key_set"`
+	SetupComplete     bool `json:"setup_complete"`
+
+	// Access info
+	AccessMethod string `json:"access_method,omitempty"`
+	PermanentURL string `json:"permanent_url,omitempty"`
+
+	// Workspace info (for Forgejo)
+	WorkspaceReady bool   `json:"workspace_ready"`
+	WorkspacePath  string `json:"workspace_path,omitempty"`
+	WorkspaceURL   string `json:"workspace_url,omitempty"`
+	WorkspaceError string `json:"workspace_error,omitempty"`
 }
 
 // StepDefinitions returns the ordered list of onboarding steps
@@ -48,9 +44,6 @@ func StepDefinitions() []struct {
 	}{
 		{ID: db.OnboardingStepWelcome, Name: "Welcome"},
 		{ID: db.OnboardingStepPasskey, Name: "Security"},
-		{ID: db.OnboardingStepGitHubOrg, Name: "GitHub Organization"},
-		{ID: db.OnboardingStepGitHubApp, Name: "Create GitHub App"},
-		{ID: db.OnboardingStepGitHubInstall, Name: "Install App"},
 		{ID: db.OnboardingStepAnthropic, Name: "Anthropic API"},
 		{ID: db.OnboardingStepComplete, Name: "Complete"},
 	}
@@ -97,12 +90,6 @@ func isStepComplete(progress *db.OnboardingProgress, stepID string) bool {
 		return progress.CurrentStep != db.OnboardingStepWelcome
 	case db.OnboardingStepPasskey:
 		return progress.PasskeyCompletedAt.Valid
-	case db.OnboardingStepGitHubOrg:
-		return progress.GitHubOrgName.Valid && progress.GitHubOrgName.String != ""
-	case db.OnboardingStepGitHubApp:
-		return progress.GitHubAppCompletedAt.Valid
-	case db.OnboardingStepGitHubInstall:
-		return progress.GitHubInstallCompletedAt.Valid
 	case db.OnboardingStepAnthropic:
 		return progress.AnthropicCompletedAt.Valid
 	case db.OnboardingStepComplete:
@@ -114,7 +101,7 @@ func isStepComplete(progress *db.OnboardingProgress, stepID string) bool {
 
 // DetermineCurrentStep determines what step the user should be on based on progress
 // This is used to recover from incomplete state
-func DetermineCurrentStep(progress *db.OnboardingProgress, hasPasskey bool, hasGitHubApp bool, hasInstallation bool, hasAnthropicKey bool) string {
+func DetermineCurrentStep(progress *db.OnboardingProgress, hasPasskey bool, hasAnthropicKey bool) string {
 	// If onboarding is marked complete, return complete
 	if progress.CompletedAt.Valid {
 		return db.OnboardingStepComplete
@@ -123,18 +110,6 @@ func DetermineCurrentStep(progress *db.OnboardingProgress, hasPasskey bool, hasG
 	// Check from the beginning
 	if !hasPasskey {
 		return db.OnboardingStepPasskey
-	}
-
-	if progress.GitHubOrgName.String == "" {
-		return db.OnboardingStepGitHubOrg
-	}
-
-	if !hasGitHubApp {
-		return db.OnboardingStepGitHubApp
-	}
-
-	if !hasInstallation {
-		return db.OnboardingStepGitHubInstall
 	}
 
 	if !hasAnthropicKey {
