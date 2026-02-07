@@ -33,11 +33,12 @@ type PasskeyConfig struct {
 	SignCount    uint32 `json:"sign_count,omitempty"`    // For replay protection
 }
 
-// MeshConfig contains mesh networking configuration
+// MeshConfig contains mesh networking configuration.
+// Note: AuthKey is NOT stored here - it's consumed during enrollment.
+// After enrollment, the machine key in the mesh state directory is used.
 type MeshConfig struct {
 	Enabled    bool   `json:"enabled"`
 	ControlURL string `json:"control_url"`
-	AuthKey    string `json:"auth_key"`
 }
 
 // TunnelConfig contains tunnel configuration for public ingress

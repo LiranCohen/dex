@@ -13,43 +13,38 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/WebP2P/dexnet/types/key"
 )
 
 // EnrollmentRequest is sent to Central
 type EnrollmentRequest struct {
-	Key      string `json:"key"`
-	Hostname string `json:"hostname,omitempty"`
+	Key        string `json:"key"`                   // Enrollment key (dexkey-xxx)
+	MachineKey string `json:"machine_key"`           // Machine's public key for mesh registration
+	Hostname   string `json:"hostname,omitempty"`    // Requested hostname
 }
 
 // EnrollmentResponse is returned by Central's /api/v1/enroll endpoint
 type EnrollmentResponse struct {
-	// Account/Network info
-	AccountID string `json:"account_id"`
-	NetworkID string `json:"network_id"`
 	Namespace string `json:"namespace"`
-	Hostname  string `json:"hostname"` // Server hostname (e.g., "hq")
-	PublicURL string `json:"public_url"`
-
-	// Top-level fields (for convenience)
-	ControlURL  string `json:"control_url"`
-	TunnelToken string `json:"tunnel_token"`
+	Hostname  string `json:"hostname"`   // Server hostname (e.g., "hq")
+	PublicURL string `json:"public_url"` // e.g., "https://hq.alice.enbox.id"
 
 	// Mesh configuration for dexnet
 	Mesh struct {
-		ControlURL string `json:"control_url"`
-		AuthKey    string `json:"auth_key"` // Headscale pre-auth key
+		ControlURL string `json:"control_url"` // Central coordination service URL
 	} `json:"mesh"`
 
 	// Tunnel configuration for Edge connection
 	Tunnel struct {
-		IngressAddr string `json:"ingress_addr"`
-		Token       string `json:"token"`
+		IngressAddr string `json:"ingress_addr"` // Edge address (e.g., "edge.enbox.id:443")
+		Token       string `json:"token"`        // JWT for tunnel authentication
 	} `json:"tunnel"`
 
 	// ACME configuration for TLS certificates
 	ACME struct {
-		Email  string `json:"email"`
-		DNSAPI string `json:"dns_api"`
+		Email  string `json:"email"`   // Email for Let's Encrypt
+		DNSAPI string `json:"dns_api"` // Central's DNS API for ACME challenges
 	} `json:"acme"`
 
 	// Owner identity for authentication
@@ -58,8 +53,8 @@ type EnrollmentResponse struct {
 		Email       string `json:"email"`
 		DisplayName string `json:"display_name,omitempty"`
 		Passkey     *struct {
-			CredentialID string `json:"credential_id"` // Base64 URL encoded
-			PublicKey    string `json:"public_key"`    // Base64 URL encoded COSE key
+			CredentialID string `json:"credential_id"`  // Base64 URL encoded
+			PublicKey    string `json:"public_key"`     // Base64 URL encoded COSE key
 			PublicKeyAlg int    `json:"public_key_alg"` // COSE algorithm
 			SignCount    uint32 `json:"sign_count"`
 		} `json:"passkey,omitempty"`
@@ -93,23 +88,23 @@ func runEnroll(args []string) error {
 	}
 
 	// 1. Get enrollment key
-	key := *keyFlag
-	if key == "" {
+	enrollKey := *keyFlag
+	if enrollKey == "" {
 		fmt.Print("Enter your enrollment key: ")
 		reader := bufio.NewReader(os.Stdin)
 		input, err := reader.ReadString('\n')
 		if err != nil {
 			return fmt.Errorf("failed to read input: %w", err)
 		}
-		key = strings.TrimSpace(input)
+		enrollKey = strings.TrimSpace(input)
 	}
 
-	if key == "" {
+	if enrollKey == "" {
 		return fmt.Errorf("enrollment key is required")
 	}
 
 	// Validate key format
-	if !strings.HasPrefix(key, "dexkey-") {
+	if !strings.HasPrefix(enrollKey, "dexkey-") {
 		return fmt.Errorf("invalid enrollment key format (should start with 'dexkey-')")
 	}
 
@@ -128,35 +123,47 @@ func runEnroll(args []string) error {
 		return fmt.Errorf("already enrolled (config exists at %s). To re-enroll, remove the config file first", configPath)
 	}
 
-	// 4. Create data directory if needed
-	if err := os.MkdirAll(dataDir, 0755); err != nil {
-		return fmt.Errorf("failed to create data directory: %w", err)
+	// 4. Create data directory and mesh state directory
+	meshStateDir := filepath.Join(dataDir, "mesh")
+	if err := os.MkdirAll(meshStateDir, 0755); err != nil {
+		return fmt.Errorf("failed to create mesh state directory: %w", err)
 	}
 
-	// 5. Get hostname
+	// 5. Generate machine key for mesh registration
+	fmt.Println("Generating machine key...")
+	machineKey := key.NewMachine()
+	machineKeyPublic := machineKey.Public()
+
+	// Save machine key to state directory (tsnet format)
+	if err := saveMachineKey(meshStateDir, machineKey); err != nil {
+		return fmt.Errorf("failed to save machine key: %w", err)
+	}
+
+	// 6. Get hostname
 	hostname, _ := os.Hostname()
 
-	// 6. Call Central enrollment API
+	// 7. Call Central enrollment API with machine key
 	fmt.Println("Enrolling with Central...")
 
 	resp, err := callEnrollmentAPI(*centralURLFlag, EnrollmentRequest{
-		Key:      key,
-		Hostname: hostname,
+		Key:        enrollKey,
+		MachineKey: machineKeyPublic.String(), // Send public key to Central
+		Hostname:   hostname,
 	})
 	if err != nil {
+		// Clean up machine key on failure
+		_ = os.RemoveAll(meshStateDir)
 		return fmt.Errorf("enrollment failed: %w", err)
 	}
 
-	// 7. Build and save configuration
-	// Note: buildConfigFromResponse sets Hostname from Central's response (e.g., "hq")
-	// This is important: the HQ status check looks for given_name="hq" in the mesh
+	// 8. Build and save configuration
 	config := buildConfigFromResponse(resp)
 
 	if err := config.SaveConfig(configPath); err != nil {
 		return fmt.Errorf("failed to save config: %w", err)
 	}
 
-	// 8. Print success
+	// 9. Print success
 	fmt.Println()
 	fmt.Println("Enrollment successful!")
 	fmt.Println()
@@ -167,6 +174,34 @@ func runEnroll(args []string) error {
 	fmt.Println("Start Dex with:")
 	fmt.Printf("   dex start --base-dir %s\n", dataDir)
 	fmt.Println()
+
+	return nil
+}
+
+// saveMachineKey saves the machine private key to the tsnet state directory.
+// The key is stored in the format expected by tsnet's FileStore.
+func saveMachineKey(stateDir string, machineKey key.MachinePrivate) error {
+	// Marshal the private key to text format (privkey:hexencoded)
+	keyText, err := machineKey.MarshalText()
+	if err != nil {
+		return fmt.Errorf("failed to marshal machine key: %w", err)
+	}
+
+	// Create the state file in tsnet's expected format
+	// The state is a JSON object with "_machinekey" as the key
+	state := map[string]string{
+		"_machinekey": string(keyText),
+	}
+
+	stateJSON, err := json.MarshalIndent(state, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal state: %w", err)
+	}
+
+	statePath := filepath.Join(stateDir, "tailscaled.state")
+	if err := os.WriteFile(statePath, stateJSON, 0600); err != nil {
+		return fmt.Errorf("failed to write state file: %w", err)
+	}
 
 	return nil
 }
@@ -232,7 +267,7 @@ func buildConfigFromResponse(resp *EnrollmentResponse) *Config {
 		Mesh: MeshConfig{
 			Enabled:    true,
 			ControlURL: resp.Mesh.ControlURL,
-			AuthKey:    resp.Mesh.AuthKey,
+			// Note: AuthKey is NOT stored - it's consumed during enrollment via RegisterOnce
 		},
 		Tunnel: TunnelConfig{
 			Enabled:     true,

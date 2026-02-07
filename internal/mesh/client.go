@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"os"
 	"sync"
 	"time"
 
@@ -345,4 +346,58 @@ func (c *Client) MeshIP() string {
 	}
 
 	return ""
+}
+
+// RegisterOnce performs a one-shot mesh registration using the provided auth key.
+// It starts tsnet, waits for successful registration (IP assignment), then stops.
+// The mesh state is saved to stateDir for future connections without auth key.
+// This is used during enrollment to consume the auth key immediately.
+func RegisterOnce(controlURL, authKey, hostname, stateDir string, logf func(format string, args ...any)) error {
+	if logf == nil {
+		logf = log.Printf
+	}
+
+	if err := ensureDir(stateDir); err != nil {
+		return fmt.Errorf("failed to create state dir: %w", err)
+	}
+
+	server := &tsnet.Server{
+		Hostname:   hostname,
+		Dir:        stateDir,
+		ControlURL: controlURL,
+		AuthKey:    authKey,
+		Logf:       logf,
+	}
+
+	logf("mesh: registering with %s as %s", controlURL, hostname)
+
+	if err := server.Start(); err != nil {
+		return fmt.Errorf("mesh registration failed: %w", err)
+	}
+
+	// Wait for IP assignment (indicates successful registration)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			_ = server.Close()
+			return fmt.Errorf("timeout waiting for mesh registration")
+		case <-ticker.C:
+			ip4, _ := server.TailscaleIPs()
+			if ip4.IsValid() {
+				logf("mesh: registered successfully, IP: %s", ip4)
+				_ = server.Close()
+				return nil
+			}
+		}
+	}
+}
+
+func ensureDir(path string) error {
+	return os.MkdirAll(path, 0755)
 }

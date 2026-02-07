@@ -95,15 +95,10 @@ func TestEnrollmentSuccess(t *testing.T) {
 		}
 
 		resp := EnrollmentResponse{
-			AccountID:   "account-123",
-			NetworkID:   "network-456",
-			Namespace:   "alice",
-			PublicURL:   "https://alice.enbox.id",
-			ControlURL:  "https://central.enbox.id",
-			TunnelToken: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.test",
+			Namespace: "alice",
+			PublicURL: "https://alice.enbox.id",
 		}
 		resp.Mesh.ControlURL = "https://central.enbox.id"
-		resp.Mesh.AuthKey = "tskey-auth-test123"
 		resp.Tunnel.IngressAddr = "ingress.enbox.id:9443"
 		resp.Tunnel.Token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.test"
 		resp.ACME.Email = "alice@example.com"
@@ -203,7 +198,6 @@ func TestLoadConfig(t *testing.T) {
 		Mesh: MeshConfig{
 			Enabled:    true,
 			ControlURL: "https://central.enbox.id",
-			AuthKey:    "tskey-auth-xxx",
 		},
 		Tunnel: TunnelConfig{
 			Enabled:     true,
@@ -232,8 +226,8 @@ func TestLoadConfig(t *testing.T) {
 	if loaded.Namespace != config.Namespace {
 		t.Errorf("namespace mismatch: got %s, want %s", loaded.Namespace, config.Namespace)
 	}
-	if loaded.Mesh.AuthKey != config.Mesh.AuthKey {
-		t.Errorf("auth key mismatch: got %s, want %s", loaded.Mesh.AuthKey, config.Mesh.AuthKey)
+	if loaded.Mesh.ControlURL != config.Mesh.ControlURL {
+		t.Errorf("control URL mismatch: got %s, want %s", loaded.Mesh.ControlURL, config.Mesh.ControlURL)
 	}
 	if len(loaded.Tunnel.Endpoints) != len(config.Tunnel.Endpoints) {
 		t.Errorf("endpoints count mismatch: got %d, want %d", len(loaded.Tunnel.Endpoints), len(config.Tunnel.Endpoints))

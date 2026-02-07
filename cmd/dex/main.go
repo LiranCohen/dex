@@ -310,32 +310,17 @@ func main() {
 			controlURL = enrollConfig.Mesh.ControlURL
 		}
 
-		// Auth key: CLI flag > enrollment config
-		// BUT: only use auth key if mesh state doesn't exist (first run)
-		// After first registration, tsnet uses machine key from state dir
+		// Auth key from CLI flag only (enrollment registers directly with Central)
+		// The machine key is already saved in the state directory during enrollment
 		authKey := *meshAuthKey
-		if authKey == "" && enrollConfig != nil && enrollConfig.Mesh.AuthKey != "" {
-			authKey = enrollConfig.Mesh.AuthKey
-		}
-
-		// Check if mesh state already exists - if so, don't pass auth key
-		// This prevents "authkey already used" errors on restart
-		machineKeyPath := filepath.Join(meshState, "secret.state")
-		if _, err := os.Stat(machineKeyPath); err == nil {
-			// State exists - node already registered, don't need auth key
-			if authKey != "" {
-				fmt.Println("Mesh state exists, ignoring auth key (already registered)")
-				authKey = ""
-			}
-		}
 
 		meshConfig = &mesh.Config{
 			Enabled:    true,
 			Hostname:   hostname,
 			StateDir:   meshState,
 			ControlURL: controlURL,
-			AuthKey:    authKey,
-			IsHQ:       true, // dex server is always the HQ
+			AuthKey:    authKey, // Only used if explicitly provided via CLI
+			IsHQ:       true,    // dex server is always the HQ
 		}
 		fmt.Printf("Mesh networking enabled: hostname=%s, control=%s\n", hostname, controlURL)
 
