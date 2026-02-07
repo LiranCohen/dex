@@ -3,12 +3,14 @@ package api
 import (
 	"context"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"path/filepath"
 	"sync"
 	"time"
 
 	"github.com/labstack/echo/v4"
+	"github.com/lirancohen/dex/frontend"
 	echomw "github.com/labstack/echo/v4/middleware"
 	"github.com/lirancohen/dex/internal/api/core"
 	"github.com/lirancohen/dex/internal/api/handlers/approvals"
@@ -389,9 +391,8 @@ func NewServer(database *db.DB, cfg Config) *Server {
 	s.registerRoutes()
 
 	// Setup static file serving for frontend SPA
-	if cfg.StaticDir != "" {
-		s.setupStaticServing()
-	}
+	// Uses embedded files by default, or disk files if StaticDir is specified
+	s.setupStaticServing()
 
 	return s
 }
@@ -504,27 +505,57 @@ func (s *Server) handleHealthCheck(c echo.Context) error {
 	return c.JSON(http.StatusOK, status)
 }
 
-// setupStaticServing configures static file serving for the frontend SPA
-// It serves files from staticDir and falls back to index.html for SPA routing
+// setupStaticServing configures static file serving for the frontend SPA.
+// If staticDir is set, serves from disk. Otherwise uses embedded frontend assets.
 func (s *Server) setupStaticServing() {
-	// Serve static files from the staticDir
-	s.echo.Static("/assets", s.staticDir+"/assets")
+	if s.staticDir != "" {
+		// Serve from disk (development mode or custom frontend)
+		s.echo.Static("/assets", s.staticDir+"/assets")
+		s.echo.File("/vite.svg", s.staticDir+"/vite.svg")
 
-	// Serve other static files (favicon, etc.) from root
-	s.echo.File("/vite.svg", s.staticDir+"/vite.svg")
+		// SPA fallback for disk-based serving
+		s.echo.GET("/*", func(c echo.Context) error {
+			path := c.Request().URL.Path
+			if len(path) >= 4 && path[:4] == "/api" {
+				return echo.NewHTTPError(http.StatusNotFound, "not found")
+			}
+			return c.File(s.staticDir + "/index.html")
+		})
+		return
+	}
 
-	// SPA fallback: serve index.html for all non-API, non-asset routes
-	// This must be registered AFTER API routes
+	// Serve from embedded assets (production mode)
+	// The frontend package embeds dist/ which contains the built React app
+	distFS, err := fs.Sub(frontend.Assets, "dist")
+	if err != nil {
+		// This shouldn't happen unless the embed failed at compile time
+		fmt.Printf("Warning: failed to load embedded frontend: %v\n", err)
+		return
+	}
+
+	assetHandler := http.FileServer(http.FS(distFS))
+
+	// Serve /assets/* from embedded files
+	s.echo.GET("/assets/*", echo.WrapHandler(http.StripPrefix("/", assetHandler)))
+
+	// Serve vite.svg
+	s.echo.GET("/vite.svg", echo.WrapHandler(assetHandler))
+
+	// SPA fallback: serve index.html for all non-API routes
 	s.echo.GET("/*", func(c echo.Context) error {
 		path := c.Request().URL.Path
-
-		// Don't serve index.html for API routes (already handled)
 		if len(path) >= 4 && path[:4] == "/api" {
 			return echo.NewHTTPError(http.StatusNotFound, "not found")
 		}
 
-		// Serve index.html for all other routes (SPA client-side routing)
-		return c.File(s.staticDir + "/index.html")
+		// Serve embedded index.html
+		indexFile, err := distFS.Open("index.html")
+		if err != nil {
+			return echo.NewHTTPError(http.StatusNotFound, "frontend not available")
+		}
+		defer func() { _ = indexFile.Close() }()
+
+		return c.Stream(http.StatusOK, "text/html; charset=utf-8", indexFile)
 	})
 }
 
