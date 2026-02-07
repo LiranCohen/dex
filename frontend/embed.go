@@ -1,10 +1,10 @@
 // Package frontend provides embedded frontend assets for the Dex server.
 //
-// The dist/ directory is populated by running `npm run build` in this directory.
+// The dist/ directory is populated by running `bun run build` in this directory.
 // During CI releases, this is done automatically before building the Go binary.
 //
 // For local development, either:
-//   - Run `npm run build` here first, OR
+//   - Run `bun run build` here first, OR
 //   - Use `dex start --static ./frontend/dist` to serve from disk
 package frontend
 
