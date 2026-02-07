@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
+	"net"
 	"net/http"
 	"path/filepath"
 	"sync"
@@ -576,15 +577,6 @@ func (s *Server) setupStaticServing() {
 
 // Start begins serving HTTP/HTTPS requests
 func (s *Server) Start() error {
-	// Start mesh client if configured
-	if s.meshClient != nil {
-		ctx := context.Background()
-		if err := s.meshClient.Start(ctx); err != nil {
-			return fmt.Errorf("mesh client start failed: %w", err)
-		}
-		fmt.Println("Mesh networking started")
-	}
-
 	// Start worker manager if configured
 	if s.workerManager != nil {
 		ctx := context.Background()
@@ -609,6 +601,58 @@ func (s *Server) Start() error {
 				fmt.Printf("Warning: Forgejo started but bot token unavailable: %v\n", err)
 			}
 		}
+	}
+
+	// Start HTTP server FIRST in a goroutine, before mesh/tunnel
+	// This ensures the local services are listening before the tunnel starts routing traffic
+	httpErr := make(chan error, 1)
+
+	go func() {
+		var err error
+		if s.certFile != "" && s.keyFile != "" {
+			fmt.Printf("Starting HTTPS server on %s\n", s.addr)
+			err = s.echo.StartTLS(s.addr, s.certFile, s.keyFile)
+		} else {
+			fmt.Printf("Starting HTTP server on %s\n", s.addr)
+			err = s.echo.Start(s.addr)
+		}
+		// Always send the result (even http.ErrServerClosed for clean shutdown)
+		httpErr <- err
+	}()
+
+	// Wait for HTTP server to be ready by polling the port
+	httpAddr := s.addr
+	if httpAddr == "" || httpAddr[0] == ':' {
+		httpAddr = "127.0.0.1" + s.addr
+	}
+	httpReady := false
+	for i := 0; i < 50; i++ { // Try for up to 5 seconds
+		select {
+		case err := <-httpErr:
+			// Server failed to start
+			return err
+		default:
+		}
+		conn, err := net.DialTimeout("tcp", httpAddr, 100*time.Millisecond)
+		if err == nil {
+			_ = conn.Close()
+			httpReady = true
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if !httpReady {
+		return fmt.Errorf("HTTP server failed to start within timeout")
+	}
+	fmt.Printf("HTTP server ready on %s\n", s.addr)
+
+	// Start mesh client AFTER HTTP server is ready
+	if s.meshClient != nil {
+		ctx := context.Background()
+		if err := s.meshClient.Start(ctx); err != nil {
+			return fmt.Errorf("mesh client start failed: %w", err)
+		}
+		fmt.Println("Mesh networking started")
 	}
 
 	// Expose services on mesh network if both mesh and services are available
@@ -637,15 +681,12 @@ func (s *Server) Start() error {
 		}
 	}
 
-	if s.certFile != "" && s.keyFile != "" {
-		// HTTPS mode (for Tailscale)
-		fmt.Printf("Starting HTTPS server on %s\n", s.addr)
-		return s.echo.StartTLS(s.addr, s.certFile, s.keyFile)
+	// Block waiting for HTTP server to finish (error or clean shutdown)
+	err := <-httpErr
+	if err == http.ErrServerClosed {
+		return nil // Clean shutdown
 	}
-
-	// HTTP mode (for local development)
-	fmt.Printf("Starting HTTP server on %s\n", s.addr)
-	return s.echo.Start(s.addr)
+	return err
 }
 
 // Shutdown gracefully stops the server
