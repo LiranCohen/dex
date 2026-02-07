@@ -2,6 +2,8 @@ package certs
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -59,10 +61,14 @@ func (d *DexDNSProvider) Present(domain, token, keyAuth string) error {
 		return fmt.Errorf("invalid domain: %s", domain)
 	}
 
+	// For DNS-01, the TXT record must contain base64url(sha256(keyAuth))
+	hash := sha256.Sum256([]byte(keyAuth))
+	txtValue := base64.RawURLEncoding.EncodeToString(hash[:])
+
 	payload := map[string]interface{}{
 		"hostname":  hostname,
 		"namespace": namespace,
-		"token":     keyAuth, // This is what Let's Encrypt expects in the TXT record
+		"token":     txtValue,
 	}
 
 	body, err := json.Marshal(payload)

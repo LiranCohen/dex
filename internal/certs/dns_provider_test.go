@@ -1,6 +1,8 @@
 package certs
 
 import (
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -12,7 +14,7 @@ import (
 )
 
 func TestDexDNSProvider_Present(t *testing.T) {
-	var receivedRequest map[string]interface{}
+	var receivedRequest map[string]any
 	var receivedAuth string
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -34,22 +36,27 @@ func TestDexDNSProvider_Present(t *testing.T) {
 		BaseDomain: "enbox.id",
 	})
 
-	// Present a challenge
+	// Present a challenge - domain is the domain being certified, NOT the challenge domain
+	keyAuth := "keyAuth123"
 	err := provider.Present(
-		"_acme-challenge.myapp.alice.enbox.id",
+		"myapp.alice.enbox.id", // domain being certified
 		"token",
-		"keyAuth123",
+		keyAuth,
 	)
 	require.NoError(t, err)
+
+	// Verify the correct token value (base64url(sha256(keyAuth)))
+	expectedHash := sha256.Sum256([]byte(keyAuth))
+	expectedToken := base64.RawURLEncoding.EncodeToString(expectedHash[:])
 
 	assert.Equal(t, "Bearer test-token", receivedAuth)
 	assert.Equal(t, "myapp", receivedRequest["hostname"])
 	assert.Equal(t, "alice", receivedRequest["namespace"])
-	assert.Equal(t, "keyAuth123", receivedRequest["token"])
+	assert.Equal(t, expectedToken, receivedRequest["token"])
 }
 
 func TestDexDNSProvider_CleanUp(t *testing.T) {
-	var receivedRequest map[string]interface{}
+	var receivedRequest map[string]any
 	var receivedMethod string
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -70,9 +77,9 @@ func TestDexDNSProvider_CleanUp(t *testing.T) {
 		BaseDomain: "enbox.id",
 	})
 
-	// Clean up a challenge
+	// Clean up a challenge - domain is the domain being certified
 	err := provider.CleanUp(
-		"_acme-challenge.myapp.alice.enbox.id",
+		"myapp.alice.enbox.id",
 		"token",
 		"keyAuth123",
 	)
@@ -83,7 +90,7 @@ func TestDexDNSProvider_CleanUp(t *testing.T) {
 	assert.Equal(t, "alice", receivedRequest["namespace"])
 }
 
-func TestDexDNSProvider_ParseChallengeDomain(t *testing.T) {
+func TestDexDNSProvider_ParseDomain(t *testing.T) {
 	provider := NewDexDNSProvider(DexDNSProviderConfig{
 		BaseDomain: "enbox.id",
 	})
@@ -96,39 +103,36 @@ func TestDexDNSProvider_ParseChallengeDomain(t *testing.T) {
 		wantOK       bool
 	}{
 		{
-			name:         "valid challenge domain",
-			domain:       "_acme-challenge.myapp.alice.enbox.id",
+			name:         "hostname and namespace",
+			domain:       "myapp.alice.enbox.id",
 			wantHostname: "myapp",
 			wantNS:       "alice",
 			wantOK:       true,
 		},
 		{
-			name:         "valid with subdomain namespace",
-			domain:       "_acme-challenge.api.company.enbox.id",
+			name:         "namespace only",
+			domain:       "alice.enbox.id",
+			wantHostname: "",
+			wantNS:       "alice",
+			wantOK:       true,
+		},
+		{
+			name:         "multiple hostname parts",
+			domain:       "api.company.enbox.id",
 			wantHostname: "api",
 			wantNS:       "company",
 			wantOK:       true,
 		},
 		{
-			name:   "missing acme prefix",
-			domain: "myapp.alice.enbox.id",
-			wantOK: false,
-		},
-		{
 			name:   "wrong base domain",
-			domain: "_acme-challenge.myapp.alice.example.com",
-			wantOK: false,
-		},
-		{
-			name:   "missing namespace",
-			domain: "_acme-challenge.myapp.enbox.id",
+			domain: "myapp.alice.example.com",
 			wantOK: false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			hostname, namespace, ok := provider.parseChallengeDomain(tt.domain)
+			hostname, namespace, ok := provider.parseDomain(tt.domain)
 			assert.Equal(t, tt.wantOK, ok)
 			if ok {
 				assert.Equal(t, tt.wantHostname, hostname)
@@ -161,7 +165,7 @@ func TestDexDNSProvider_PresentError(t *testing.T) {
 	})
 
 	err := provider.Present(
-		"_acme-challenge.myapp.alice.enbox.id",
+		"myapp.alice.enbox.id",
 		"token",
 		"keyAuth123",
 	)
@@ -181,5 +185,5 @@ func TestDexDNSProvider_PresentInvalidDomain(t *testing.T) {
 		"keyAuth123",
 	)
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "invalid challenge domain")
+	assert.Contains(t, err.Error(), "invalid domain")
 }

@@ -5,9 +5,9 @@
 # Downloads pre-built binaries and runs enrollment.
 #
 # Usage:
-#   curl -fsSL https://get.enbox.id | sh
-#   curl -fsSL https://get.enbox.id | sh -s -- --key dexkey-xxx
-#   curl -fsSL https://get.enbox.id | sh -s -- dexkey-xxx
+#   curl -fsSL https://get.enbox.id | bash
+#   curl -fsSL https://get.enbox.id | bash -s -- --key dexkey-xxx
+#   curl -fsSL https://get.enbox.id | bash -s -- dexkey-xxx
 #
 # Environment variables:
 #   DEX_VERSION      - Version to install (default: latest)
@@ -513,12 +513,12 @@ BANNER
         fi
         echo ""
 
-        if [ -n "$namespace" ]; then
-            # Get hostname from config (defaults to "hq" if not set)
-            local hostname
-            hostname=$(jq -r '.hostname // "hq"' "$DATA_DIR/config.json" 2>/dev/null || echo "hq")
+        # Show public URL from config
+        local public_url
+        public_url=$(jq -r '.public_url // empty' "$DATA_DIR/config.json" 2>/dev/null || true)
+        if [ -n "$public_url" ]; then
             echo -e "    ${BOLD}Access your Dex:${NC}"
-            echo -e "      ${CYAN}https://${hostname}.${namespace}.enbox.id${NC}"
+            echo -e "      ${CYAN}${public_url}${NC}"
             echo ""
         fi
     else
