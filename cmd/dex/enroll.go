@@ -148,8 +148,9 @@ func runEnroll(args []string) error {
 	}
 
 	// 7. Build and save configuration
+	// Note: buildConfigFromResponse sets Hostname from Central's response (e.g., "hq")
+	// This is important: the HQ status check looks for given_name="hq" in the mesh
 	config := buildConfigFromResponse(resp)
-	config.Hostname = hostname
 
 	if err := config.SaveConfig(configPath); err != nil {
 		return fmt.Errorf("failed to save config: %w", err)
@@ -227,6 +228,7 @@ func buildConfigFromResponse(resp *EnrollmentResponse) *Config {
 	config := &Config{
 		Namespace: resp.Namespace,
 		PublicURL: resp.PublicURL,
+		Hostname:  hostname, // Set hostname for mesh registration (used by main.go)
 		Mesh: MeshConfig{
 			Enabled:    true,
 			ControlURL: resp.Mesh.ControlURL,
