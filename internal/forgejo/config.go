@@ -20,7 +20,7 @@ type Config struct {
 	// If empty, defaults to {DataDir}/bin/forgejo.
 	BinaryPath string
 
-	// HTTPAddr is the address Forgejo binds to (default: 127.0.0.1).
+	// HTTPAddr is the address Forgejo binds to (default: 127.0.1).
 	HTTPAddr string
 
 	// HTTPPort is the port Forgejo listens on (default: 3000).
@@ -33,6 +33,11 @@ type Config struct {
 	// DefaultOrgName is the name of the default organization created during bootstrap.
 	// Projects are created under this org. Defaults to "workspace".
 	DefaultOrgName string
+
+	// RunUser is the username to run Forgejo as.
+	// If empty and running as root, defaults to "nobody".
+	// Forgejo refuses to run as root for security reasons.
+	RunUser string
 }
 
 // DefaultConfig returns a Config with sensible defaults.

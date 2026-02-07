@@ -6,7 +6,11 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"os/user"
+	"path/filepath"
+	"strconv"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/lirancohen/dex/internal/db"
@@ -224,6 +228,36 @@ func (m *Manager) startProcess(ctx context.Context) error {
 	// Set FORGEJO_WORK_DIR so Forgejo can find its data
 	cmd.Env = append(os.Environ(), m.config.EnvVars()...)
 
+	// If running as root, drop privileges for Forgejo subprocess
+	// Forgejo refuses to run as root for security reasons
+	if os.Getuid() == 0 {
+		runUser := m.config.RunUser
+		if runUser == "" {
+			runUser = "nobody"
+		}
+
+		u, err := user.Lookup(runUser)
+		if err != nil {
+			return fmt.Errorf("failed to lookup user %s: %w", runUser, err)
+		}
+
+		uid, _ := strconv.ParseUint(u.Uid, 10, 32)
+		gid, _ := strconv.ParseUint(u.Gid, 10, 32)
+
+		// Chown the data directory so Forgejo can write to it
+		if err := chownRecursive(m.config.DataDir, int(uid), int(gid)); err != nil {
+			return fmt.Errorf("failed to chown forgejo data dir: %w", err)
+		}
+
+		cmd.SysProcAttr = &syscall.SysProcAttr{
+			Credential: &syscall.Credential{
+				Uid: uint32(uid),
+				Gid: uint32(gid),
+			},
+		}
+		fmt.Printf("Forgejo will run as user %s (uid=%d, gid=%d)\n", runUser, uid, gid)
+	}
+
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("failed to start forgejo: %w", err)
 	}
@@ -273,4 +307,14 @@ func (m *Manager) waitForHealthy(ctx context.Context, timeout time.Duration) err
 	}
 
 	return fmt.Errorf("forgejo did not become healthy within %s", timeout)
+}
+
+// chownRecursive changes ownership of a directory and all its contents.
+func chownRecursive(path string, uid, gid int) error {
+	return filepath.Walk(path, func(name string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		return os.Chown(name, uid, gid)
+	})
 }

@@ -79,6 +79,7 @@ func main() {
 	forgejoURL := flag.String("forgejo-url", "", "External URL for Forgejo (default: https://git.{mesh-hostname}.enbox.id)")
 	forgejoBinary := flag.String("forgejo-binary", "", "Path to Forgejo binary (default: auto-download)")
 	forgejoPort := flag.Int("forgejo-port", 3000, "HTTP port for Forgejo")
+	forgejoUser := flag.String("forgejo-user", "", "User to run Forgejo as when dex runs as root (default: nobody)")
 
 	flag.Parse()
 
@@ -352,6 +353,7 @@ func main() {
 	if !*forgejoDisabled {
 		cfg := forgejo.DefaultConfig(dataDir)
 		cfg.HTTPPort = *forgejoPort
+		cfg.RunUser = *forgejoUser
 		if *forgejoBinary != "" {
 			cfg.BinaryPath = *forgejoBinary
 		}
