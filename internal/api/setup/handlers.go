@@ -13,7 +13,6 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/lirancohen/dex/internal/db"
 	"github.com/lirancohen/dex/internal/toolbelt"
-	"github.com/lirancohen/dex/internal/workspace"
 )
 
 // Handler handles all setup-related HTTP requests
@@ -64,20 +63,10 @@ func NewHandler(cfg HandlerConfig) *Handler {
 
 // getWorkspaceInfo returns the workspace repo name and local path
 // All instances share one "dex-workspace" repo; instance data goes in subfolders
-// Path follows the {org}/dex-workspace/ structure when org is available
 func (h *Handler) getWorkspaceInfo() (repoName string, localPath string) {
 	dataDir := h.getDataDir()
-	repoName = workspace.WorkspaceRepoName() // Always "dex-workspace"
-
-	// Try to get the org name for the owner/repo path structure
-	progress, err := h.db.GetOnboardingProgress()
-	if err == nil && progress != nil && progress.GetGitHubOrgName() != "" {
-		// Use {org}/{repo} structure: /opt/dex/repos/{org}/dex-workspace/
-		localPath = filepath.Join(dataDir, "repos", progress.GetGitHubOrgName(), repoName)
-	} else {
-		// Fallback to flat structure
-		localPath = filepath.Join(dataDir, "repos", repoName)
-	}
+	repoName = "dex-workspace"
+	localPath = filepath.Join(dataDir, "repos", repoName)
 	return repoName, localPath
 }
 
@@ -360,15 +349,6 @@ func (h *Handler) HandleComplete(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "passkey not registered")
 	}
 
-	hasGitHubApp := h.hasGitHubApp()
-	if !hasGitHubApp {
-		return echo.NewHTTPError(http.StatusBadRequest, "GitHub App not configured")
-	}
-
-	if !h.db.HasGitHubInstallation() {
-		return echo.NewHTTPError(http.StatusBadRequest, "GitHub App not installed on any organization")
-	}
-
 	if !h.db.HasSecret(db.SecretKeyAnthropicKey) {
 		return echo.NewHTTPError(http.StatusBadRequest, "Anthropic API key not set")
 	}
@@ -379,10 +359,10 @@ func (h *Handler) HandleComplete(c echo.Context) error {
 	}
 
 	// Create workspace repo if it doesn't exist
-	repoName, workspacePath := h.getWorkspaceInfo()
+	_, workspacePath := h.getWorkspaceInfo()
 	gitService := h.getGitService()
 	if gitService != nil && !gitService.RepoExists(workspacePath) {
-		// Ensure parent directory exists (may be {dataDir}/repos/{org}/)
+		// Ensure parent directory exists
 		parentDir := filepath.Dir(workspacePath)
 		if err := os.MkdirAll(parentDir, 0755); err != nil {
 			return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("failed to create repos directory: %v", err))
@@ -390,23 +370,6 @@ func (h *Handler) HandleComplete(c echo.Context) error {
 
 		if err := initWorkspaceRepo(workspacePath); err != nil {
 			return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("failed to create workspace: %v", err))
-		}
-	}
-
-	// Initialize GitHub App if needed
-	if err := h.initGitHubApp(); err != nil {
-		fmt.Printf("Warning: failed to initialize GitHub App: %v\n", err)
-	}
-
-	// Create GitHub workspace repository
-	var workspaceError string
-	githubClient, err := h.getGitHubClient(c.Request().Context(), "")
-	if err != nil {
-		workspaceError = fmt.Sprintf("failed to get GitHub client: %v", err)
-	} else {
-		ws := workspace.NewService(githubClient, workspacePath, repoName)
-		if err := ws.EnsureRemoteExists(c.Request().Context()); err != nil {
-			workspaceError = fmt.Sprintf("failed to create GitHub workspace: %v", err)
 		}
 	}
 
@@ -428,27 +391,21 @@ func (h *Handler) HandleComplete(c echo.Context) error {
 		fmt.Printf("Warning: failed to write completion file: %v\n", err)
 	}
 
-	result := map[string]any{
+	return c.JSON(http.StatusOK, map[string]any{
 		"success":        true,
 		"message":        "Setup complete!",
 		"workspace_path": workspacePath,
-	}
-
-	if workspaceError != "" {
-		result["workspace_error"] = workspaceError
-	}
-
-	return c.JSON(http.StatusOK, result)
+	})
 }
 
 // HandleWorkspaceSetup creates or repairs the workspace repository
 func (h *Handler) HandleWorkspaceSetup(c echo.Context) error {
 	_ = h.getDataDir() // Ensure getDataDir is called for consistency
-	repoName, workspacePath := h.getWorkspaceInfo()
+	_, workspacePath := h.getWorkspaceInfo()
 
 	// Ensure local repo exists
 	if _, err := os.Stat(filepath.Join(workspacePath, ".git")); os.IsNotExist(err) {
-		// Ensure parent directory exists (may be {dataDir}/repos/{org}/)
+		// Ensure parent directory exists
 		parentDir := filepath.Dir(workspacePath)
 		if err := os.MkdirAll(parentDir, 0755); err != nil {
 			return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("failed to create repos directory: %v", err))
@@ -459,45 +416,10 @@ func (h *Handler) HandleWorkspaceSetup(c echo.Context) error {
 		}
 	}
 
-	// Try to set up GitHub remote
-	var githubURL string
-	var githubError string
-
-	if h.hasGitHubApp() {
-		if err := h.initGitHubApp(); err != nil {
-			githubError = fmt.Sprintf("GitHub App initialization failed: %v", err)
-		} else {
-			client, err := h.getGitHubClient(c.Request().Context(), "")
-			if err != nil {
-				githubError = fmt.Sprintf("failed to get GitHub client: %v", err)
-			} else {
-				ws := workspace.NewService(client, workspacePath, repoName)
-				if err := ws.EnsureRemoteExists(c.Request().Context()); err != nil {
-					githubError = fmt.Sprintf("failed to create GitHub workspace: %v", err)
-				} else {
-					githubURL = ws.GetRemoteURL()
-				}
-			}
-		}
-	} else {
-		githubError = "no GitHub App configured"
-	}
-
-	result := map[string]any{
-		"workspace_path":         workspacePath,
-		"workspace_ready":        true,
-		"workspace_github_ready": githubURL != "",
-	}
-
-	if githubURL != "" {
-		result["workspace_github_url"] = githubURL
-	}
-
-	if githubError != "" {
-		result["workspace_error"] = githubError
-	}
-
-	return c.JSON(http.StatusOK, result)
+	return c.JSON(http.StatusOK, map[string]any{
+		"workspace_path":  workspacePath,
+		"workspace_ready": true,
+	})
 }
 
 // Legacy handlers for backward compatibility

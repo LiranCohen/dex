@@ -135,6 +135,48 @@ func (db *DB) HasAnyUsers() (bool, error) {
 	return count > 0, nil
 }
 
+// ImportOwnerCredential imports a passkey from enrollment config.
+// This is called during startup if the enrollment config contains owner credentials.
+// It creates the user if they don't exist and imports their passkey.
+func (db *DB) ImportOwnerCredential(userID, email string, credentialID, publicKey []byte, publicKeyAlg int, signCount uint32) error {
+	// Check if this credential already exists
+	existing, err := db.GetWebAuthnCredentialByCredentialID(credentialID)
+	if err != nil {
+		return fmt.Errorf("failed to check existing credential: %w", err)
+	}
+	if existing != nil {
+		// Credential already imported, nothing to do
+		return nil
+	}
+
+	// Ensure user exists
+	user, err := db.GetUserByID(userID)
+	if err != nil {
+		return fmt.Errorf("failed to get user: %w", err)
+	}
+	if user == nil {
+		// Create user with the enrollment-provided ID
+		_, err = db.CreateUserWithID(userID, email)
+		if err != nil {
+			return fmt.Errorf("failed to create user: %w", err)
+		}
+	}
+
+	// Insert the credential
+	id := uuid.New().String()
+	now := time.Now()
+
+	_, err = db.Exec(`
+		INSERT INTO webauthn_credentials (id, user_id, credential_id, public_key, attestation_type, aaguid, sign_count, backup_eligible, backup_state, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, id, userID, credentialID, publicKey, "none", []byte{}, signCount, 0, 0, now)
+	if err != nil {
+		return fmt.Errorf("failed to import credential: %w", err)
+	}
+
+	return nil
+}
+
 // GetFirstUser gets the first (and typically only) user for single-user mode
 func (db *DB) GetFirstUser() (*User, error) {
 	var user User

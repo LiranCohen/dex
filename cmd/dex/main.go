@@ -125,6 +125,23 @@ func main() {
 		fmt.Printf("Loaded enrollment config: %s\n", configPath)
 		fmt.Printf("  Namespace: %s\n", cfg.Namespace)
 		fmt.Printf("  Public URL: %s\n", cfg.PublicURL)
+
+		// Import owner's passkey from enrollment if present
+		if cfg.Owner.UserID != "" && len(cfg.Owner.Passkey.CredentialID) > 0 {
+			err := database.ImportOwnerCredential(
+				cfg.Owner.UserID,
+				cfg.Owner.Email,
+				cfg.Owner.Passkey.CredentialID,
+				cfg.Owner.Passkey.PublicKey,
+				cfg.Owner.Passkey.PublicKeyAlg,
+				cfg.Owner.Passkey.SignCount,
+			)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: Failed to import owner credential: %v\n", err)
+			} else {
+				fmt.Println("  Owner passkey: imported from enrollment")
+			}
+		}
 	} else if !os.IsNotExist(err) {
 		fmt.Fprintf(os.Stderr, "Warning: Failed to load config.json: %v\n", err)
 	}
@@ -358,16 +375,18 @@ func main() {
 			cfg.BinaryPath = *forgejoBinary
 		}
 
-		// Set external URL: explicit flag > derived from mesh hostname > localhost
+		// Determine git hostname: explicit flag > namespace from enrollment > none
+		// Pattern: git.{username}.enbox.id (e.g., git.poo.enbox.id)
+		var gitHostname string
 		if *forgejoURL != "" {
 			cfg.RootURL = *forgejoURL
-		} else if meshConfig != nil && meshConfig.Hostname != "" {
-			cfg.RootURL = fmt.Sprintf("https://git.%s.enbox.id", meshConfig.Hostname)
+		} else if enrollConfig != nil && enrollConfig.Namespace != "" {
+			gitHostname = fmt.Sprintf("git.%s.enbox.id", enrollConfig.Namespace)
+			cfg.RootURL = "https://" + gitHostname
 		}
 
-		// Auto-add git endpoint to tunnel if mesh is configured
-		if meshConfig != nil && meshConfig.Tunnel.Enabled && meshConfig.Hostname != "" {
-			gitHostname := fmt.Sprintf("git.%s.enbox.id", meshConfig.Hostname)
+		// Auto-add git endpoint to tunnel if we have a git hostname
+		if gitHostname != "" && meshConfig != nil && meshConfig.Tunnel.Enabled {
 			// Check if endpoint already exists
 			gitEndpointExists := false
 			for _, ep := range meshConfig.Tunnel.Endpoints {

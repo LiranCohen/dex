@@ -29,10 +29,6 @@ export function WelcomeStep({ onContinue, isLoading }: WelcomeStepProps) {
             </li>
             <li className="app-onboarding-list__item">
               <span className="app-onboarding-list__marker">2.</span>
-              <span><strong>A GitHub organization</strong> - where Dex will create repositories</span>
-            </li>
-            <li className="app-onboarding-list__item">
-              <span className="app-onboarding-list__marker">3.</span>
               <span><strong>An Anthropic API key</strong> - to power the AI assistant</span>
             </li>
           </ul>
