@@ -187,10 +187,11 @@ func saveMachineKey(stateDir string, machineKey key.MachinePrivate) error {
 		return fmt.Errorf("failed to marshal machine key: %w", err)
 	}
 
-	// Create the state file in tsnet's expected format
-	// The state is a JSON object with "_machinekey" as the key
+	// Create the state file in tsnet's expected format.
+	// FileStore uses map[ipn.StateKey][]byte and json.Unmarshal expects
+	// []byte values to be base64-encoded strings in JSON.
 	state := map[string]string{
-		"_machinekey": string(keyText),
+		"_machinekey": base64.StdEncoding.EncodeToString(keyText),
 	}
 
 	stateJSON, err := json.MarshalIndent(state, "", "  ")
