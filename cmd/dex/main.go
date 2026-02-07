@@ -292,9 +292,22 @@ func main() {
 		}
 
 		// Auth key: CLI flag > enrollment config
+		// BUT: only use auth key if mesh state doesn't exist (first run)
+		// After first registration, tsnet uses machine key from state dir
 		authKey := *meshAuthKey
 		if authKey == "" && enrollConfig != nil && enrollConfig.Mesh.AuthKey != "" {
 			authKey = enrollConfig.Mesh.AuthKey
+		}
+
+		// Check if mesh state already exists - if so, don't pass auth key
+		// This prevents "authkey already used" errors on restart
+		machineKeyPath := filepath.Join(meshState, "secret.state")
+		if _, err := os.Stat(machineKeyPath); err == nil {
+			// State exists - node already registered, don't need auth key
+			if authKey != "" {
+				fmt.Println("Mesh state exists, ignoring auth key (already registered)")
+				authKey = ""
+			}
 		}
 
 		meshConfig = &mesh.Config{
