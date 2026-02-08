@@ -132,8 +132,11 @@ func (m *Manager) SetupSSOProvider(ctx context.Context, issuerURL string) error 
 		return nil // SSO not configured
 	}
 
-	// Check if already configured by looking for the auth source
-	// If we can get the OAuth secret, we generated it but may not have added the provider yet
+	// Ensure OAuth secret exists (generate if needed for existing installations)
+	if err := m.generateOAuthSecret(); err != nil {
+		return fmt.Errorf("failed to ensure OAuth secret: %w", err)
+	}
+
 	oauthSecret, err := m.OAuthSecret()
 	if err != nil {
 		return fmt.Errorf("OAuth secret not available: %w", err)
