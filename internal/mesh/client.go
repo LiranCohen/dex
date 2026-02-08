@@ -11,22 +11,25 @@ import (
 
 	"github.com/WebP2P/dexnet/client/local"
 	"github.com/WebP2P/dexnet/tsnet"
+	"github.com/lirancohen/dex/internal/hosts"
 )
 
 // Client wraps the tsnet mesh client for HQ integration.
 type Client struct {
-	mu     sync.RWMutex
-	server *tsnet.Server
-	tunnel *TunnelClient
-	config Config
-	logf   func(format string, args ...any)
+	mu           sync.RWMutex
+	server       *tsnet.Server
+	tunnel       *TunnelClient
+	config       Config
+	logf         func(format string, args ...any)
+	hostsManager *hosts.Manager
 }
 
 // NewClient creates a new mesh client with the given configuration.
 func NewClient(cfg Config) *Client {
 	return &Client{
-		config: cfg,
-		logf:   log.Printf,
+		config:       cfg,
+		logf:         log.Printf,
+		hostsManager: hosts.NewManager(),
 	}
 }
 
@@ -40,6 +43,13 @@ func (c *Client) SetLogf(logf func(format string, args ...any)) {
 // Start initializes and starts the mesh client.
 // It connects to Central and joins the Campus network.
 func (c *Client) Start(ctx context.Context) error {
+	// Clean up any stale hosts file entries from previous crash
+	if c.hostsManager != nil {
+		if err := c.hostsManager.Cleanup(); err != nil {
+			c.logf("mesh: warning: failed to cleanup stale hosts entries: %v", err)
+		}
+	}
+
 	if !c.config.Enabled {
 		c.logf("mesh: networking disabled")
 		// Even if mesh is disabled, we can still use tunnel
@@ -121,6 +131,20 @@ func (c *Client) startTunnel(ctx context.Context) error {
 	}
 
 	c.logf("tunnel: started with %d endpoints", len(endpoints))
+
+	// Update hosts file for local loopback routing
+	// This allows Forgejo to reach HQ directly without going through the tunnel
+	hostnames := make([]string, len(endpoints))
+	for i, ep := range endpoints {
+		hostnames[i] = ep.Hostname
+	}
+	if err := c.hostsManager.SetHostnames(hostnames); err != nil {
+		c.logf("tunnel: warning: failed to update hosts file: %v", err)
+		// Don't fail - tunnel still works, just slower for local traffic
+	} else {
+		c.logf("tunnel: configured hosts file for local routing: %v", hostnames)
+	}
+
 	return nil
 }
 
@@ -162,7 +186,17 @@ func (c *Client) Stop() error {
 
 	var errs []error
 
-	// Stop tunnel first
+	// Clean up hosts file entries first
+	if c.hostsManager != nil {
+		if err := c.hostsManager.Cleanup(); err != nil {
+			c.logf("tunnel: warning: failed to cleanup hosts file: %v", err)
+			// Don't fail shutdown for this
+		} else {
+			c.logf("tunnel: cleaned up hosts file entries")
+		}
+	}
+
+	// Stop tunnel
 	if c.tunnel != nil {
 		c.logf("tunnel: shutting down")
 		if err := c.tunnel.Stop(); err != nil {
