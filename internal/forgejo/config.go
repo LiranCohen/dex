@@ -84,7 +84,11 @@ func (c *Config) GetDefaultOrgName() string {
 
 // EnvVars returns the environment variables needed for Forgejo processes.
 func (c *Config) EnvVars() []string {
+	// HOME must point to a directory the Forgejo user can write to.
+	// Forgejo tries to manage SSH keys in $HOME/.ssh even when SSH is disabled.
+	homeDir := filepath.Join(c.DataDir, "data", "home")
 	return []string{
+		"HOME=" + homeDir,
 		"FORGEJO_WORK_DIR=" + c.DataDir,
 		"FORGEJO_CUSTOM=" + c.DataDir + "/custom",
 	}
@@ -193,6 +197,7 @@ func (c *Config) EnsureDirectories() error {
 		filepath.Join(c.DataDir, "bin"),
 		filepath.Join(c.DataDir, "custom", "conf"),
 		filepath.Join(c.DataDir, "data"),
+		filepath.Join(c.DataDir, "data", "home"), // HOME for Forgejo process (SSH keys, etc.)
 		c.GetRepoRoot(),
 		filepath.Join(c.DataDir, "log"),
 	}
