@@ -118,15 +118,17 @@ func (m *Manager) setupOAuth2SSO(ctx context.Context) error {
 
 	// Add OAuth2 authentication source via Forgejo CLI
 	// Use explicit endpoint URLs to avoid needing to reach the discovery endpoint during bootstrap
+	// Forgejo requires --use-custom-urls and uses --custom-* prefix for custom URLs
 	_, err = m.runCLI(ctx,
 		"admin", "auth", "add-oauth",
 		"--name", "hq",
 		"--provider", "openidConnect",
 		"--key", OAuthClientID,
 		"--secret", oauthSecret,
-		"--auth-url", authURL,
-		"--token-url", tokenURL,
-		"--profile-url", profileURL,
+		"--use-custom-urls",
+		"--custom-auth-url", authURL,
+		"--custom-token-url", tokenURL,
+		"--custom-profile-url", profileURL,
 		"--scopes", "openid email profile",
 	)
 	if err != nil {
