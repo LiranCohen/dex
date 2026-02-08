@@ -17,14 +17,32 @@ type User struct {
 
 // WebAuthnCredential represents a stored passkey credential
 type WebAuthnCredential struct {
-	ID           string
-	UserID       string
-	CredentialID []byte // Raw credential ID from authenticator
-	PublicKey    []byte // COSE-encoded public key
+	ID              string
+	UserID          string
+	CredentialID    []byte // Raw credential ID from authenticator
+	PublicKey       []byte // COSE-encoded public key
 	AttestationType string
-	AAGUID       []byte // Authenticator Attestation GUID
-	SignCount    uint32 // Signature counter for replay protection
-	CreatedAt    time.Time
+	AAGUID          []byte // Authenticator Attestation GUID
+	SignCount       uint32 // Signature counter for replay protection
+	RPID            string // Relying Party ID (e.g., "enbox.id" or "alice.dex")
+	DeviceName      string // User-friendly name (e.g., "MacBook Pro")
+	UserAgent       string // Browser/OS info at registration time
+	IPAddress       string // IP address at registration time
+	Location        string // Geo location from IP (e.g., "San Francisco, CA")
+	CreatedAt       time.Time
+	LastUsedAt      sql.NullTime
+	LastUsedIP      sql.NullString
+}
+
+// MeshOnboardingStatus tracks whether a user has completed mesh passkey onboarding
+type MeshOnboardingStatus struct {
+	ID                 string
+	UserID             string
+	OnboardingComplete bool   // User has gone through the onboarding flow
+	PasskeySynced      bool   // User has registered a mesh passkey
+	MeshRPID           string // The mesh rpID (e.g., "alice.dex")
+	CompletedAt        sql.NullTime
+	CreatedAt          time.Time
 }
 
 // Git provider identifiers.
@@ -108,7 +126,7 @@ type Task struct {
 	ID                string
 	ProjectID         string
 	QuestID           sql.NullString // Optional: the Quest that spawned this task
-	IssueNumber sql.NullInt64 // Issue number on the git provider (GitHub or Forgejo)
+	IssueNumber       sql.NullInt64  // Issue number on the git provider (GitHub or Forgejo)
 	Title             string
 	Description       sql.NullString
 	ParentID          sql.NullString
@@ -123,8 +141,8 @@ type Task struct {
 	BranchName        sql.NullString
 	ContentPath       sql.NullString // Path to git content (relative to repo): tasks/{task-id}/
 	PRNumber          sql.NullInt64
-	PRMergedAt        sql.NullTime   // When the PR was merged (for worktree cleanup)
-	WorktreeCleanedAt sql.NullTime   // When the worktree was cleaned up
+	PRMergedAt        sql.NullTime // When the PR was merged (for worktree cleanup)
+	WorktreeCleanedAt sql.NullTime // When the worktree was cleaned up
 	TokenBudget       sql.NullInt64
 	TimeBudgetMin     sql.NullInt64
 	TimeUsedMin       int64
@@ -359,16 +377,16 @@ const (
 
 // Quest represents a conversation with Dex that spawns tasks
 type Quest struct {
-	ID                string
-	ProjectID         string
-	Title             sql.NullString
-	Status            string
-	Model             string
-	AutoStartDefault  bool
-	ConversationPath  sql.NullString // Path to git conversation file: quests/{quest-id}/conversation.md
-	IssueNumber sql.NullInt64 // Issue number on the git provider (GitHub or Forgejo)
-	CreatedAt         time.Time
-	CompletedAt       sql.NullTime
+	ID               string
+	ProjectID        string
+	Title            sql.NullString
+	Status           string
+	Model            string
+	AutoStartDefault bool
+	ConversationPath sql.NullString // Path to git conversation file: quests/{quest-id}/conversation.md
+	IssueNumber      sql.NullInt64  // Issue number on the git provider (GitHub or Forgejo)
+	CreatedAt        time.Time
+	CompletedAt      sql.NullTime
 }
 
 // GetTitle returns the title string, or empty if null

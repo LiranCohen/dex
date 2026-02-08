@@ -462,6 +462,7 @@ func (s *Server) registerRoutes() {
 		TunnelToken: s.tunnelToken,
 		CentralURL:  s.centralURL,
 	})
+	meshOnboardHandler := authhandlers.NewMeshOnboardHandler(s.deps, s.namespace)
 
 	// Wire up callbacks for issue sync (Forgejo)
 	questsHandler.SyncQuestToIssue = s.handlersSyncSvc.SyncQuestToIssue
@@ -515,6 +516,7 @@ func (s *Server) registerRoutes() {
 	workersHandler.RegisterRoutes(protected)
 	forgejoHandler.RegisterRoutes(protected)
 	devicesHandler.RegisterRoutes(protected)
+	meshOnboardHandler.RegisterRoutes(protected)
 
 	// Centrifuge WebSocket endpoint for real-time updates
 	// Auth is handled via Centrifuge protocol in Node.OnConnecting, not HTTP middleware

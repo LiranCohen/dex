@@ -68,6 +68,7 @@ func (db *DB) Migrate() error {
 		migrationEvents,
 		migrationWorkers,
 		migrationForgejoConfig,
+		migrationMeshOnboardingStatus,
 	}
 
 	for i, migration := range migrations {
@@ -122,6 +123,14 @@ func (db *DB) Migrate() error {
 		"ALTER TABLE quests RENAME COLUMN github_issue_number TO issue_number",
 		// User email for OIDC sessions
 		"ALTER TABLE users ADD COLUMN email TEXT",
+		// Extended passkey fields for multi-device support
+		"ALTER TABLE webauthn_credentials ADD COLUMN rp_id TEXT DEFAULT ''",
+		"ALTER TABLE webauthn_credentials ADD COLUMN device_name TEXT DEFAULT ''",
+		"ALTER TABLE webauthn_credentials ADD COLUMN user_agent TEXT DEFAULT ''",
+		"ALTER TABLE webauthn_credentials ADD COLUMN ip_address TEXT DEFAULT ''",
+		"ALTER TABLE webauthn_credentials ADD COLUMN location TEXT DEFAULT ''",
+		"ALTER TABLE webauthn_credentials ADD COLUMN last_used_at DATETIME",
+		"ALTER TABLE webauthn_credentials ADD COLUMN last_used_ip TEXT",
 	}
 	for _, migration := range optionalMigrations {
 		_, _ = db.Exec(migration) // Ignore errors - column may already exist
@@ -533,4 +542,20 @@ CREATE TABLE IF NOT EXISTS forgejo_config (
 	created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 	updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
+`
+
+const migrationMeshOnboardingStatus = `
+-- Mesh onboarding status tracks whether a user has completed mesh passkey setup
+CREATE TABLE IF NOT EXISTS mesh_onboarding_status (
+	id TEXT PRIMARY KEY,
+	user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+	onboarding_complete INTEGER NOT NULL DEFAULT 0,
+	passkey_synced INTEGER NOT NULL DEFAULT 0,
+	mesh_rp_id TEXT NOT NULL DEFAULT '',
+	completed_at DATETIME,
+	created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+	UNIQUE(user_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_mesh_onboarding_user ON mesh_onboarding_status(user_id);
 `

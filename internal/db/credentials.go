@@ -196,3 +196,251 @@ func (db *DB) GetFirstUser() (*User, error) {
 	user.Email = email.String
 	return &user, nil
 }
+
+// CreateWebAuthnCredentialWithMetadata stores a new WebAuthn credential with device metadata
+func (db *DB) CreateWebAuthnCredentialWithMetadata(userID string, cred *webauthn.Credential, rpID, deviceName, userAgent, ipAddress, location string) (*WebAuthnCredential, error) {
+	id := uuid.New().String()
+	now := time.Now()
+
+	// Convert flags to integers for storage
+	backupEligible := 0
+	backupState := 0
+	if cred.Flags.BackupEligible {
+		backupEligible = 1
+	}
+	if cred.Flags.BackupState {
+		backupState = 1
+	}
+
+	_, err := db.Exec(`
+		INSERT INTO webauthn_credentials (id, user_id, credential_id, public_key, attestation_type, aaguid, sign_count, backup_eligible, backup_state, rp_id, device_name, user_agent, ip_address, location, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, id, userID, cred.ID, cred.PublicKey, cred.AttestationType, cred.Authenticator.AAGUID, cred.Authenticator.SignCount, backupEligible, backupState, rpID, deviceName, userAgent, ipAddress, location, now)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create credential: %w", err)
+	}
+
+	return &WebAuthnCredential{
+		ID:              id,
+		UserID:          userID,
+		CredentialID:    cred.ID,
+		PublicKey:       cred.PublicKey,
+		AttestationType: cred.AttestationType,
+		AAGUID:          cred.Authenticator.AAGUID,
+		SignCount:       cred.Authenticator.SignCount,
+		RPID:            rpID,
+		DeviceName:      deviceName,
+		UserAgent:       userAgent,
+		IPAddress:       ipAddress,
+		Location:        location,
+		CreatedAt:       now,
+	}, nil
+}
+
+// ListUserPasskeys returns all passkeys for a user with metadata
+func (db *DB) ListUserPasskeys(userID string) ([]WebAuthnCredential, error) {
+	rows, err := db.Query(`
+		SELECT id, user_id, credential_id, public_key, attestation_type, aaguid, sign_count, 
+		       COALESCE(rp_id, ''), COALESCE(device_name, ''), COALESCE(user_agent, ''), 
+		       COALESCE(ip_address, ''), COALESCE(location, ''), created_at, last_used_at, last_used_ip
+		FROM webauthn_credentials
+		WHERE user_id = ?
+		ORDER BY created_at DESC
+	`, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query passkeys: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var passkeys []WebAuthnCredential
+	for rows.Next() {
+		var cred WebAuthnCredential
+		if err := rows.Scan(
+			&cred.ID, &cred.UserID, &cred.CredentialID, &cred.PublicKey, &cred.AttestationType,
+			&cred.AAGUID, &cred.SignCount, &cred.RPID, &cred.DeviceName, &cred.UserAgent,
+			&cred.IPAddress, &cred.Location, &cred.CreatedAt, &cred.LastUsedAt, &cred.LastUsedIP,
+		); err != nil {
+			return nil, fmt.Errorf("failed to scan passkey: %w", err)
+		}
+		passkeys = append(passkeys, cred)
+	}
+
+	return passkeys, rows.Err()
+}
+
+// GetPasskeyByID retrieves a passkey by its database ID
+func (db *DB) GetPasskeyByID(id string) (*WebAuthnCredential, error) {
+	var cred WebAuthnCredential
+	err := db.QueryRow(`
+		SELECT id, user_id, credential_id, public_key, attestation_type, aaguid, sign_count,
+		       COALESCE(rp_id, ''), COALESCE(device_name, ''), COALESCE(user_agent, ''),
+		       COALESCE(ip_address, ''), COALESCE(location, ''), created_at, last_used_at, last_used_ip
+		FROM webauthn_credentials
+		WHERE id = ?
+	`, id).Scan(
+		&cred.ID, &cred.UserID, &cred.CredentialID, &cred.PublicKey, &cred.AttestationType,
+		&cred.AAGUID, &cred.SignCount, &cred.RPID, &cred.DeviceName, &cred.UserAgent,
+		&cred.IPAddress, &cred.Location, &cred.CreatedAt, &cred.LastUsedAt, &cred.LastUsedIP,
+	)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get passkey: %w", err)
+	}
+	return &cred, nil
+}
+
+// UpdatePasskeyName updates the friendly name of a passkey
+func (db *DB) UpdatePasskeyName(id, newName string) error {
+	result, err := db.Exec(`
+		UPDATE webauthn_credentials
+		SET device_name = ?
+		WHERE id = ?
+	`, newName, id)
+	if err != nil {
+		return fmt.Errorf("failed to update passkey name: %w", err)
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("passkey not found")
+	}
+	return nil
+}
+
+// DeletePasskey removes a passkey by ID
+func (db *DB) DeletePasskey(id string) error {
+	result, err := db.Exec(`DELETE FROM webauthn_credentials WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("failed to delete passkey: %w", err)
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("passkey not found")
+	}
+	return nil
+}
+
+// UpdatePasskeyLastUsed updates the last used timestamp and IP for a credential
+func (db *DB) UpdatePasskeyLastUsed(credentialID []byte, ipAddress string) error {
+	now := time.Now()
+	_, err := db.Exec(`
+		UPDATE webauthn_credentials
+		SET last_used_at = ?, last_used_ip = ?
+		WHERE credential_id = ?
+	`, now, ipAddress, credentialID)
+	if err != nil {
+		return fmt.Errorf("failed to update passkey last used: %w", err)
+	}
+	return nil
+}
+
+// GetCredentialsByRPID retrieves credentials for a user filtered by rpID
+func (db *DB) GetCredentialsByRPID(userID, rpID string) ([]webauthn.Credential, error) {
+	rows, err := db.Query(`
+		SELECT credential_id, public_key, attestation_type, aaguid, sign_count, backup_eligible, backup_state
+		FROM webauthn_credentials
+		WHERE user_id = ? AND rp_id = ?
+	`, userID, rpID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query credentials: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var credentials []webauthn.Credential
+	for rows.Next() {
+		var credID, publicKey, aaguid []byte
+		var attestationType string
+		var signCount uint32
+		var backupEligible, backupState int
+
+		if err := rows.Scan(&credID, &publicKey, &attestationType, &aaguid, &signCount, &backupEligible, &backupState); err != nil {
+			return nil, fmt.Errorf("failed to scan credential: %w", err)
+		}
+
+		credentials = append(credentials, webauthn.Credential{
+			ID:              credID,
+			PublicKey:       publicKey,
+			AttestationType: attestationType,
+			Flags: webauthn.CredentialFlags{
+				BackupEligible: backupEligible == 1,
+				BackupState:    backupState == 1,
+			},
+			Authenticator: webauthn.Authenticator{
+				AAGUID:    aaguid,
+				SignCount: signCount,
+			},
+		})
+	}
+
+	return credentials, rows.Err()
+}
+
+// Mesh Onboarding Status Operations
+
+// GetMeshOnboardingStatus retrieves the mesh onboarding status for a user
+func (db *DB) GetMeshOnboardingStatus(userID string) (*MeshOnboardingStatus, error) {
+	var status MeshOnboardingStatus
+	var onboardingComplete, passkeySynced int
+	err := db.QueryRow(`
+		SELECT id, user_id, onboarding_complete, passkey_synced, mesh_rp_id, completed_at, created_at
+		FROM mesh_onboarding_status
+		WHERE user_id = ?
+	`, userID).Scan(&status.ID, &status.UserID, &onboardingComplete, &passkeySynced, &status.MeshRPID, &status.CompletedAt, &status.CreatedAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get mesh onboarding status: %w", err)
+	}
+	status.OnboardingComplete = onboardingComplete == 1
+	status.PasskeySynced = passkeySynced == 1
+	return &status, nil
+}
+
+// CreateOrUpdateMeshOnboardingStatus creates or updates mesh onboarding status
+func (db *DB) CreateOrUpdateMeshOnboardingStatus(userID, meshRPID string, onboardingComplete, passkeySynced bool) error {
+	now := time.Now()
+	id := uuid.New().String()
+
+	onboardingInt := 0
+	if onboardingComplete {
+		onboardingInt = 1
+	}
+	passkeySyncedInt := 0
+	if passkeySynced {
+		passkeySyncedInt = 1
+	}
+
+	var completedAt interface{}
+	if onboardingComplete {
+		completedAt = now
+	}
+
+	_, err := db.Exec(`
+		INSERT INTO mesh_onboarding_status (id, user_id, onboarding_complete, passkey_synced, mesh_rp_id, completed_at, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(user_id) DO UPDATE SET
+			onboarding_complete = excluded.onboarding_complete,
+			passkey_synced = excluded.passkey_synced,
+			mesh_rp_id = excluded.mesh_rp_id,
+			completed_at = CASE WHEN excluded.onboarding_complete = 1 AND mesh_onboarding_status.completed_at IS NULL THEN excluded.completed_at ELSE mesh_onboarding_status.completed_at END
+	`, id, userID, onboardingInt, passkeySyncedInt, meshRPID, completedAt, now)
+	if err != nil {
+		return fmt.Errorf("failed to create/update mesh onboarding status: %w", err)
+	}
+	return nil
+}
+
+// MarkMeshPasskeySynced marks that the user has registered a mesh passkey
+func (db *DB) MarkMeshPasskeySynced(userID string) error {
+	_, err := db.Exec(`
+		UPDATE mesh_onboarding_status
+		SET passkey_synced = 1
+		WHERE user_id = ?
+	`, userID)
+	if err != nil {
+		return fmt.Errorf("failed to mark mesh passkey synced: %w", err)
+	}
+	return nil
+}
