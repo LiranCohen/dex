@@ -19,7 +19,7 @@
 set -e
 
 # Installer version - update this when making changes to the installer
-INSTALLER_VERSION="0.1.23"
+INSTALLER_VERSION="0.1.24"
 
 # =============================================================================
 # Configuration
@@ -259,7 +259,7 @@ do_detect_platform() {
     return 0
 }
 
-# Step 1: Check permissions
+# Step 1: Check permissions and system time
 do_check_permissions() {
     SUDO=""
     if [ "$EUID" -ne 0 ]; then
@@ -272,6 +272,15 @@ do_check_permissions() {
     else
         log_activity "Permissions: Running as root"
     fi
+
+    # Check system time is reasonable (for TLS certificate validity)
+    CURRENT_YEAR=$(date +%Y)
+    if [ "$CURRENT_YEAR" -lt 2025 ] || [ "$CURRENT_YEAR" -gt 2030 ]; then
+        log_activity "WARNING: System clock may be wrong (year=$CURRENT_YEAR)"
+        log_activity "This can cause TLS certificate errors"
+        log_activity "Please sync your system clock (e.g., timedatectl set-ntp true)"
+    fi
+
     return 0
 }
 
