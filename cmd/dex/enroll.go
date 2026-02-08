@@ -19,9 +19,9 @@ import (
 
 // EnrollmentRequest is sent to Central
 type EnrollmentRequest struct {
-	Key        string `json:"key"`                   // Enrollment key (dexkey-xxx)
-	MachineKey string `json:"machine_key"`           // Machine's public key for mesh registration
-	Hostname   string `json:"hostname,omitempty"`    // Requested hostname
+	Key        string `json:"key"`                // Enrollment key (dexkey-xxx)
+	MachineKey string `json:"machine_key"`        // Machine's public key for mesh registration
+	Hostname   string `json:"hostname,omitempty"` // Requested hostname
 }
 
 // EnrollmentResponse is returned by Central's /api/v1/enroll endpoint
@@ -30,25 +30,28 @@ type EnrollmentResponse struct {
 	Hostname  string `json:"hostname"`   // Server hostname (e.g., "hq")
 	PublicURL string `json:"public_url"` // e.g., "https://hq.alice.enbox.id"
 
-	// Mesh configuration for dexnet
+	// Mesh configuration for dexnet (always present)
 	Mesh struct {
 		ControlURL string `json:"control_url"` // Central coordination service URL
 	} `json:"mesh"`
 
-	// Tunnel configuration for Edge connection
-	Tunnel struct {
+	// Tunnel configuration for Edge connection (only for public nodes)
+	// Nil for mesh-only nodes (HQ and private Outposts)
+	Tunnel *struct {
 		IngressAddr string `json:"ingress_addr"` // Edge address (e.g., "edge.enbox.id:443")
 		Token       string `json:"token"`        // JWT for tunnel authentication
-	} `json:"tunnel"`
+	} `json:"tunnel,omitempty"`
 
-	// ACME configuration for TLS certificates
-	ACME struct {
+	// ACME configuration for TLS certificates (only for public nodes)
+	// Nil for mesh-only nodes
+	ACME *struct {
 		Email  string `json:"email"`   // Email for Let's Encrypt
 		DNSAPI string `json:"dns_api"` // Central's DNS API for ACME challenges
-	} `json:"acme"`
+	} `json:"acme,omitempty"`
 
-	// Owner identity for authentication
-	Owner struct {
+	// Owner identity for authentication (only for HQ nodes)
+	// Nil for Outpost nodes
+	Owner *struct {
 		UserID      string `json:"user_id"`
 		Email       string `json:"email"`
 		DisplayName string `json:"display_name,omitempty"`
@@ -58,7 +61,7 @@ type EnrollmentResponse struct {
 			PublicKeyAlg int    `json:"public_key_alg"` // COSE algorithm
 			SignCount    uint32 `json:"sign_count"`
 		} `json:"passkey,omitempty"`
-	} `json:"owner"`
+	} `json:"owner,omitempty"`
 }
 
 const (
@@ -168,7 +171,12 @@ func runEnroll(args []string) error {
 	fmt.Println("Enrollment successful!")
 	fmt.Println()
 	fmt.Printf("   Server:     %s.%s\n", resp.Hostname, resp.Namespace)
-	fmt.Printf("   Public URL: %s\n", resp.PublicURL)
+	if config.Tunnel.Enabled {
+		fmt.Printf("   Public URL: %s\n", resp.PublicURL)
+		fmt.Println("   Access:     Public (via Edge tunnel)")
+	} else {
+		fmt.Println("   Access:     Mesh-only (private)")
+	}
 	fmt.Printf("   Config:     %s\n", configPath)
 	fmt.Println()
 	fmt.Println("Start Dex with:")
@@ -270,7 +278,19 @@ func buildConfigFromResponse(resp *EnrollmentResponse) *Config {
 			ControlURL: resp.Mesh.ControlURL,
 			// Note: AuthKey is NOT stored - it's consumed during enrollment via RegisterOnce
 		},
+		// Tunnel and ACME are disabled by default (mesh-only mode)
+		// They're only enabled for public Outposts
 		Tunnel: TunnelConfig{
+			Enabled: false,
+		},
+		ACME: ACMEConfig{
+			Enabled: false,
+		},
+	}
+
+	// Configure tunnel if provided (only for public nodes)
+	if resp.Tunnel != nil && resp.Tunnel.IngressAddr != "" {
+		config.Tunnel = TunnelConfig{
 			Enabled:     true,
 			IngressAddr: resp.Tunnel.IngressAddr,
 			Token:       resp.Tunnel.Token,
@@ -280,38 +300,46 @@ func buildConfigFromResponse(resp *EnrollmentResponse) *Config {
 					LocalPort: 8080,
 				},
 			},
-		},
-		ACME: ACMEConfig{
+		}
+	}
+
+	// Configure ACME if provided (only for public nodes)
+	if resp.ACME != nil && resp.ACME.Email != "" {
+		config.ACME = ACMEConfig{
 			Enabled: true,
 			Email:   resp.ACME.Email,
 			DNSAPI:  resp.ACME.DNSAPI,
-		},
-		Owner: OwnerConfig{
+		}
+	}
+
+	// Configure owner if provided (only for HQ nodes)
+	if resp.Owner != nil {
+		config.Owner = OwnerConfig{
 			UserID:      resp.Owner.UserID,
 			Email:       resp.Owner.Email,
 			DisplayName: resp.Owner.DisplayName,
-		},
-	}
-
-	// Parse passkey if provided
-	if resp.Owner.Passkey != nil {
-		credID, err := base64.RawURLEncoding.DecodeString(resp.Owner.Passkey.CredentialID)
-		if err != nil {
-			// Log but don't fail - passkey is optional
-			fmt.Fprintf(os.Stderr, "Warning: failed to decode passkey credential ID: %v\n", err)
-		}
-		pubKey, err := base64.RawURLEncoding.DecodeString(resp.Owner.Passkey.PublicKey)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: failed to decode passkey public key: %v\n", err)
 		}
 
-		// Only set passkey config if both decoded successfully
-		if len(credID) > 0 && len(pubKey) > 0 {
-			config.Owner.Passkey = PasskeyConfig{
-				CredentialID: credID,
-				PublicKey:    pubKey,
-				PublicKeyAlg: resp.Owner.Passkey.PublicKeyAlg,
-				SignCount:    resp.Owner.Passkey.SignCount,
+		// Parse passkey if provided
+		if resp.Owner.Passkey != nil {
+			credID, err := base64.RawURLEncoding.DecodeString(resp.Owner.Passkey.CredentialID)
+			if err != nil {
+				// Log but don't fail - passkey is optional
+				fmt.Fprintf(os.Stderr, "Warning: failed to decode passkey credential ID: %v\n", err)
+			}
+			pubKey, err := base64.RawURLEncoding.DecodeString(resp.Owner.Passkey.PublicKey)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to decode passkey public key: %v\n", err)
+			}
+
+			// Only set passkey config if both decoded successfully
+			if len(credID) > 0 && len(pubKey) > 0 {
+				config.Owner.Passkey = PasskeyConfig{
+					CredentialID: credID,
+					PublicKey:    pubKey,
+					PublicKeyAlg: resp.Owner.Passkey.PublicKeyAlg,
+					SignCount:    resp.Owner.Passkey.SignCount,
+				}
 			}
 		}
 	}

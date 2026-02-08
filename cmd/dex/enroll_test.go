@@ -94,18 +94,41 @@ func TestEnrollmentSuccess(t *testing.T) {
 			t.Errorf("expected key dexkey-alice-abc123, got %s", req.Key)
 		}
 
+		// Build response with optional fields populated (simulates public node enrollment)
 		resp := EnrollmentResponse{
 			Namespace: "alice",
 			PublicURL: "https://alice.enbox.id",
+			Tunnel: &struct {
+				IngressAddr string `json:"ingress_addr"`
+				Token       string `json:"token"`
+			}{
+				IngressAddr: "ingress.enbox.id:9443",
+				Token:       "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.test",
+			},
+			ACME: &struct {
+				Email  string `json:"email"`
+				DNSAPI string `json:"dns_api"`
+			}{
+				Email:  "alice@example.com",
+				DNSAPI: "https://central.enbox.id/api/v1/dns/acme-challenge",
+			},
+			Owner: &struct {
+				UserID      string `json:"user_id"`
+				Email       string `json:"email"`
+				DisplayName string `json:"display_name,omitempty"`
+				Passkey     *struct {
+					CredentialID string `json:"credential_id"`
+					PublicKey    string `json:"public_key"`
+					PublicKeyAlg int    `json:"public_key_alg"`
+					SignCount    uint32 `json:"sign_count"`
+				} `json:"passkey,omitempty"`
+			}{
+				UserID:      "user-123",
+				Email:       "alice@example.com",
+				DisplayName: "Alice",
+			},
 		}
 		resp.Mesh.ControlURL = "https://central.enbox.id"
-		resp.Tunnel.IngressAddr = "ingress.enbox.id:9443"
-		resp.Tunnel.Token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.test"
-		resp.ACME.Email = "alice@example.com"
-		resp.ACME.DNSAPI = "https://central.enbox.id/api/v1/dns/acme-challenge"
-		resp.Owner.UserID = "user-123"
-		resp.Owner.Email = "alice@example.com"
-		resp.Owner.DisplayName = "Alice"
 
 		w.WriteHeader(http.StatusOK)
 		_ = json.NewEncoder(w).Encode(resp)
@@ -162,6 +185,68 @@ func TestEnrollmentSuccess(t *testing.T) {
 	}
 	if config.Owner.Email != "alice@example.com" {
 		t.Errorf("expected owner email alice@example.com, got %s", config.Owner.Email)
+	}
+}
+
+func TestEnrollmentMeshOnly(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create a mock Central server that returns mesh-only config (no tunnel)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Response without Tunnel, ACME, or Owner - simulates HQ enrollment
+		resp := EnrollmentResponse{
+			Namespace: "alice",
+			Hostname:  "hq",
+			PublicURL: "", // No public URL for mesh-only
+			// Tunnel, ACME, Owner are nil (not included)
+		}
+		resp.Mesh.ControlURL = "https://central.enbox.id"
+
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	err := runEnroll([]string{
+		"--key", "dexkey-alice-abc123",
+		"--data-dir", tmpDir,
+		"--central-url", server.URL,
+	})
+	if err != nil {
+		t.Fatalf("enrollment failed: %v", err)
+	}
+
+	// Verify config was saved
+	configPath := filepath.Join(tmpDir, "config.json")
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("failed to read config: %v", err)
+	}
+
+	var config Config
+	if err := json.Unmarshal(data, &config); err != nil {
+		t.Fatalf("failed to parse config: %v", err)
+	}
+
+	if config.Namespace != "alice" {
+		t.Errorf("expected namespace alice, got %s", config.Namespace)
+	}
+	if config.Hostname != "hq" {
+		t.Errorf("expected hostname hq, got %s", config.Hostname)
+	}
+	if !config.Mesh.Enabled {
+		t.Error("expected mesh to be enabled")
+	}
+	if config.Mesh.ControlURL != "https://central.enbox.id" {
+		t.Errorf("expected mesh control URL https://central.enbox.id, got %s", config.Mesh.ControlURL)
+	}
+	// Tunnel should be DISABLED for mesh-only nodes
+	if config.Tunnel.Enabled {
+		t.Error("expected tunnel to be DISABLED for mesh-only node")
+	}
+	// ACME should be DISABLED for mesh-only nodes
+	if config.ACME.Enabled {
+		t.Error("expected ACME to be DISABLED for mesh-only node")
 	}
 }
 
