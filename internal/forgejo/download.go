@@ -62,34 +62,45 @@ func (m *Manager) ensureBinary(ctx context.Context) error {
 
 	fmt.Printf("Downloading Forgejo v%s for %s...\n", ForgejoVersion, platform)
 
-	// Try each URL
+	// Try each URL with retries
+	const maxRetries = 3
 	var lastErr error
+
 	for _, url := range urls {
-		if err := downloadFile(ctx, url, binaryPath); err != nil {
-			lastErr = err
-			fmt.Printf("  Failed from %s: %v\n", url, err)
-			continue
-		}
+		for attempt := 1; attempt <= maxRetries; attempt++ {
+			if attempt > 1 {
+				// Exponential backoff: 2s, 4s
+				backoff := time.Duration(1<<uint(attempt)) * time.Second
+				fmt.Printf("  Retrying in %v (attempt %d/%d)...\n", backoff, attempt, maxRetries)
+				time.Sleep(backoff)
+			}
 
-		// Verify checksum if available
-		expectedChecksum := platformChecksum()
-		if expectedChecksum != "" && !checksumMatches(binaryPath, expectedChecksum) {
-			lastErr = fmt.Errorf("checksum mismatch after download from %s", url)
-			_ = os.Remove(binaryPath)
-			fmt.Printf("  Checksum mismatch from %s\n", url)
-			continue
-		}
+			if err := downloadFile(ctx, url, binaryPath); err != nil {
+				lastErr = err
+				fmt.Printf("  Failed from %s: %v\n", url, err)
+				continue
+			}
 
-		// Make executable
-		if err := os.Chmod(binaryPath, 0755); err != nil {
-			return fmt.Errorf("failed to make forgejo executable: %w", err)
-		}
+			// Verify checksum if available
+			expectedChecksum := platformChecksum()
+			if expectedChecksum != "" && !checksumMatches(binaryPath, expectedChecksum) {
+				lastErr = fmt.Errorf("checksum mismatch after download from %s", url)
+				_ = os.Remove(binaryPath)
+				fmt.Printf("  Checksum mismatch from %s\n", url)
+				continue
+			}
 
-		fmt.Printf("Forgejo v%s downloaded successfully\n", ForgejoVersion)
-		return nil
+			// Make executable
+			if err := os.Chmod(binaryPath, 0755); err != nil {
+				return fmt.Errorf("failed to make forgejo executable: %w", err)
+			}
+
+			fmt.Printf("Forgejo v%s downloaded successfully\n", ForgejoVersion)
+			return nil
+		}
 	}
 
-	return fmt.Errorf("failed to download forgejo from all sources: %w", lastErr)
+	return fmt.Errorf("failed to download forgejo from all sources after retries: %w", lastErr)
 }
 
 func platformChecksum() string {
