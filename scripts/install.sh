@@ -18,6 +18,9 @@
 #
 set -e
 
+# Installer version - update this when making changes to the installer
+INSTALLER_VERSION="0.1.22"
+
 # =============================================================================
 # Configuration
 # =============================================================================
@@ -110,7 +113,7 @@ draw_ui() {
 
     # Header
     echo -e "${CYAN}"
-    cat << 'BANNER'
+    cat << BANNER
     ╭──────────────────────────────────────────────────╮
     │                                                  │
     │    ██████╗ ███████╗██╗  ██╗                      │
@@ -121,7 +124,7 @@ draw_ui() {
     │    ╚═════╝ ╚══════╝╚═╝  ╚═╝                      │
     │                                                  │
     │         AI Coding Agents on Your Terms           │
-    │                                                  │
+    │                    v${INSTALLER_VERSION}                         │
     ╰──────────────────────────────────────────────────╯
 BANNER
     echo -e "${NC}"
@@ -473,8 +476,12 @@ EOF
 show_completion() {
     clear_screen
 
+    # Get installed dex version
+    local dex_version
+    dex_version=$("$INSTALL_DIR/dex" version 2>/dev/null | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | head -1 || echo "unknown")
+
     echo -e "${GREEN}"
-    cat << 'BANNER'
+    cat << BANNER
     ╭──────────────────────────────────────────────────╮
     │                                                  │
     │    ██████╗ ███████╗██╗  ██╗                      │
@@ -485,7 +492,7 @@ show_completion() {
     │    ╚═════╝ ╚══════╝╚═╝  ╚═╝                      │
     │                                                  │
     │      ✔  Installation Complete!                   │
-    │                                                  │
+    │         Dex ${dex_version}                                │
     ╰──────────────────────────────────────────────────╯
 BANNER
     echo -e "${NC}"
@@ -538,7 +545,7 @@ show_failure() {
     clear_screen
 
     echo -e "${RED}"
-    cat << 'BANNER'
+    cat << BANNER
     ╭──────────────────────────────────────────────────╮
     │                                                  │
     │    ██████╗ ███████╗██╗  ██╗                      │
@@ -549,7 +556,7 @@ show_failure() {
     │    ╚═════╝ ╚══════╝╚═╝  ╚═╝                      │
     │                                                  │
     │      ✖  Installation Failed                      │
-    │                                                  │
+    │         Installer v${INSTALLER_VERSION}                       │
     ╰──────────────────────────────────────────────────╯
 BANNER
     echo -e "${NC}"
