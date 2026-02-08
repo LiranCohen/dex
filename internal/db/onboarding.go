@@ -12,11 +12,6 @@ const (
 	OnboardingStepPasskey   = "passkey"
 	OnboardingStepAnthropic = "anthropic"
 	OnboardingStepComplete  = "complete"
-
-	// Deprecated: GitHub steps are no longer used (replaced by embedded Forgejo)
-	OnboardingStepGitHubOrg     = "github_org"
-	OnboardingStepGitHubApp     = "github_app"
-	OnboardingStepGitHubInstall = "github_install"
 )
 
 // OnboardingProgress represents the current state of onboarding
@@ -118,48 +113,6 @@ func (db *DB) CompletePasskeyStep() error {
 	`, now, OnboardingStepAnthropic, now)
 	if err != nil {
 		return fmt.Errorf("failed to complete passkey step: %w", err)
-	}
-	return nil
-}
-
-// SetGitHubOrg sets the GitHub org name and ID and advances to the next step
-func (db *DB) SetGitHubOrg(orgName string, orgID int64) error {
-	now := time.Now()
-	_, err := db.Exec(`
-		UPDATE onboarding_progress
-		SET github_org_name = ?, github_org_id = ?, current_step = ?, updated_at = ?
-		WHERE id = 1
-	`, orgName, orgID, OnboardingStepGitHubApp, now)
-	if err != nil {
-		return fmt.Errorf("failed to set GitHub org: %w", err)
-	}
-	return nil
-}
-
-// CompleteGitHubAppStep marks the GitHub App creation as complete
-func (db *DB) CompleteGitHubAppStep() error {
-	now := time.Now()
-	_, err := db.Exec(`
-		UPDATE onboarding_progress
-		SET github_app_completed_at = ?, current_step = ?, updated_at = ?
-		WHERE id = 1
-	`, now, OnboardingStepGitHubInstall, now)
-	if err != nil {
-		return fmt.Errorf("failed to complete GitHub App step: %w", err)
-	}
-	return nil
-}
-
-// CompleteGitHubInstallStep marks the GitHub App installation as complete
-func (db *DB) CompleteGitHubInstallStep() error {
-	now := time.Now()
-	_, err := db.Exec(`
-		UPDATE onboarding_progress
-		SET github_install_completed_at = ?, current_step = ?, updated_at = ?
-		WHERE id = 1
-	`, now, OnboardingStepAnthropic, now)
-	if err != nil {
-		return fmt.Errorf("failed to complete GitHub install step: %w", err)
 	}
 	return nil
 }

@@ -137,8 +137,10 @@ type EnrollmentRequest struct {
 	Timestamp time.Time `json:"timestamp"`
 }
 
-// EnrollmentResponse is sent by HQ in response to an enrollment request.
-type EnrollmentResponse struct {
+// WorkerEnrollmentResponse is sent by HQ in response to a worker enrollment request.
+// Note: This is different from cmd/dex/enroll.go's EnrollmentResponse which is
+// for node enrollment with Central.
+type WorkerEnrollmentResponse struct {
 	Approved    bool   `json:"approved"`
 	Message     string `json:"message,omitempty"`
 	HQPublicKey string `json:"hq_public_key"` // For worker to encrypt messages to HQ
