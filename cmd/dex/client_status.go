@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/lirancohen/dex/internal/daemon"
 	"github.com/lirancohen/dex/internal/mesh"
 )
 
@@ -155,18 +156,31 @@ func runClientStop(args []string) error {
 		dataDir = DefaultClientDataDir()
 	}
 
-	// TODO: Implement proper PID-based stop mechanism
-	// For now, we just check if the config exists
-	configPath := filepath.Join(dataDir, "config.json")
-	if _, err := os.Stat(configPath); os.IsNotExist(err) {
-		fmt.Println("Client not enrolled")
+	// Check PID file
+	pidFile := daemon.NewPIDFile(dataDir, "dex-client")
+	if !pidFile.IsRunning() {
+		fmt.Println("Client is not running")
 		return nil
 	}
 
-	fmt.Println("Note: 'dex client stop' is used to stop background client processes.")
-	fmt.Println("If running in foreground, use Ctrl+C to stop.")
-	fmt.Println()
-	fmt.Println("Background client mode is not yet implemented.")
+	// Read PID for display
+	pid, _ := pidFile.Read()
+	fmt.Printf("Stopping client (PID %d)...\n", pid)
 
+	// Send SIGTERM
+	if err := pidFile.StopProcess(); err != nil {
+		return fmt.Errorf("failed to stop client: %w", err)
+	}
+
+	// Wait for process to exit (up to 10 seconds)
+	for i := 0; i < 20; i++ {
+		if !pidFile.IsRunning() {
+			fmt.Println("Client stopped")
+			return nil
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+
+	fmt.Println("Client may still be shutting down")
 	return nil
 }

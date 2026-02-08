@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/lirancohen/dex/internal/daemon"
 	"github.com/lirancohen/dex/internal/mesh"
 )
 
@@ -47,6 +48,32 @@ func runClientStart(args []string) error {
 		}
 		return fmt.Errorf("failed to load config: %w", err)
 	}
+
+	// Handle background mode
+	pidFile := daemon.NewPIDFile(dataDir, "dex-client")
+	if !*foregroundFlag {
+		// Check if already running
+		if pidFile.IsRunning() {
+			return fmt.Errorf("client already running (PID file: %s)", pidFile.Path)
+		}
+
+		// Fork to background
+		isParent, err := daemon.Daemonize([]string{"client", "start", "--foreground", "--data-dir", dataDir})
+		if err != nil {
+			return fmt.Errorf("failed to daemonize: %w", err)
+		}
+		if isParent {
+			fmt.Println("Client started in background")
+			return nil
+		}
+		// Child continues below
+	}
+
+	// Write PID file (for both foreground and background modes)
+	if err := pidFile.Write(); err != nil {
+		return fmt.Errorf("failed to write PID file: %w", err)
+	}
+	defer func() { _ = pidFile.Remove() }()
 
 	fmt.Println("Dex Client - Connecting to mesh network")
 	fmt.Printf("  Namespace: %s\n", config.Namespace)
@@ -97,11 +124,6 @@ func runClientStart(args []string) error {
 
 	if meshIP != "" {
 		fmt.Printf("Mesh IP: %s\n", meshIP)
-	}
-
-	if !*foregroundFlag {
-		// TODO: Implement background mode with PID file
-		fmt.Println("Background mode not yet implemented")
 	}
 
 	// Wait for interrupt signal

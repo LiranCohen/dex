@@ -248,7 +248,7 @@ func (h *Handler) HandleCancelTask(c echo.Context) error {
 	})
 }
 
-// HandleTaskLogs returns logs for a task's session.
+// HandleTaskLogs returns logs for a task's sessions.
 // GET /api/v1/tasks/:id/logs
 func (h *Handler) HandleTaskLogs(c echo.Context) error {
 	taskID := c.Param("id")
@@ -258,10 +258,20 @@ func (h *Handler) HandleTaskLogs(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusNotFound, err.Error())
 	}
 
-	// Placeholder response
+	// Get all activity for this task's sessions
+	activities, err := h.deps.DB.ListTaskActivity(taskID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+
+	// Convert to response format
+	responses := make([]core.ActivityResponse, len(activities))
+	for i, a := range activities {
+		responses[i] = core.ToActivityResponse(a)
+	}
+
 	return c.JSON(http.StatusOK, map[string]any{
-		"logs":    []any{},
-		"message": "log streaming not yet implemented",
+		"logs":    responses,
 		"task_id": taskID,
 	})
 }
