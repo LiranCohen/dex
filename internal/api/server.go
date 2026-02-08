@@ -74,6 +74,7 @@ type Server struct {
 	tokenConfig       *auth.TokenConfig
 	staticDir         string
 	baseDir    string       // Base Dex directory (e.g., /opt/dex)
+	publicURL  string       // Public URL for OIDC issuer (e.g., https://hq.alice.enbox.id)
 	toolbeltMu sync.RWMutex // Protects toolbelt updates
 }
 
@@ -168,6 +169,7 @@ func NewServer(database *db.DB, cfg Config) *Server {
 		tokenConfig: cfg.TokenConfig,
 		staticDir:   cfg.StaticDir,
 		baseDir:     cfg.BaseDir,
+		publicURL:   cfg.PublicURL,
 	}
 
 	// Setup git service with derived paths from base directory
@@ -666,7 +668,7 @@ func (s *Server) Start() error {
 	// Setup Forgejo SSO provider AFTER HTTP is ready (needs OIDC discovery to be reachable)
 	if s.forgejoManager != nil && s.forgejoManager.IsRunning() {
 		ctx := context.Background()
-		if err := s.forgejoManager.SetupSSOProvider(ctx); err != nil {
+		if err := s.forgejoManager.SetupSSOProvider(ctx, s.publicURL); err != nil {
 			fmt.Printf("Warning: failed to setup Forgejo SSO: %v\n", err)
 		}
 	}

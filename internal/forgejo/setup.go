@@ -120,8 +120,15 @@ func (m *Manager) generateOAuthSecret() error {
 // SetupSSOProvider configures Forgejo to use HQ as its OAuth2/OIDC provider.
 // This must be called AFTER the HQ HTTP server is running and reachable,
 // because Forgejo validates the OIDC discovery URL.
-func (m *Manager) SetupSSOProvider(ctx context.Context) error {
-	if m.config.OIDCIssuer == "" {
+// The issuerURL parameter is the OIDC issuer (e.g., https://hq.alice.enbox.id).
+// If empty, falls back to m.config.OIDCIssuer.
+func (m *Manager) SetupSSOProvider(ctx context.Context, issuerURL string) error {
+	// Use provided issuer URL, fall back to config
+	issuer := issuerURL
+	if issuer == "" {
+		issuer = m.config.OIDCIssuer
+	}
+	if issuer == "" {
 		return nil // SSO not configured
 	}
 
@@ -133,7 +140,6 @@ func (m *Manager) SetupSSOProvider(ctx context.Context) error {
 	}
 
 	// Configure OIDC endpoints
-	issuer := m.config.OIDCIssuer
 	discoveryURL := issuer + "/.well-known/openid-configuration"
 
 	// Add OAuth2 authentication source via Forgejo CLI
