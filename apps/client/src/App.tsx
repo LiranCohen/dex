@@ -5,17 +5,23 @@ import { ConnectDialog } from "./components/ConnectDialog";
 import { Dashboard } from "./components/Dashboard";
 
 function App() {
-  const { state, connect } = useMeshStore();
+  const { state, connect, isReconnecting, config } = useMeshStore();
   const [showConnectDialog, setShowConnectDialog] = useState(false);
 
-  // Show connect dialog if not connected
+  // Show connect dialog only if not connected AND not auto-reconnecting
   useEffect(() => {
-    if (state === "NoState" || state === "NeedsLogin") {
+    const needsConnection = state === "NoState" || state === "NeedsLogin";
+    const hasExistingConfig = config !== null;
+
+    // Don't show dialog if we're reconnecting or have a config (auto-reconnect will handle it)
+    if (needsConnection && !isReconnecting && !hasExistingConfig) {
       setShowConnectDialog(true);
     } else {
       setShowConnectDialog(false);
     }
-  }, [state]);
+  }, [state, isReconnecting, config]);
+
+  const isConnecting = state === "Starting" || isReconnecting;
 
   return (
     <div className="app">
@@ -29,9 +35,12 @@ function App() {
           <Dashboard />
         ) : (
           <div className="connecting-message">
-            {state === "Starting" && <p>Connecting to mesh network...</p>}
+            {isConnecting && <p>Connecting to mesh network...</p>}
             {state === "NeedsMachineAuth" && (
               <p>Waiting for machine authorization...</p>
+            )}
+            {state === "NoState" && isReconnecting && (
+              <p>Connection lost. Reconnecting...</p>
             )}
           </div>
         )}
@@ -39,8 +48,8 @@ function App() {
 
       {showConnectDialog && (
         <ConnectDialog
-          onConnect={(config) => {
-            connect(config);
+          onConnect={(meshConfig) => {
+            connect(meshConfig);
             setShowConnectDialog(false);
           }}
           onCancel={() => setShowConnectDialog(false)}

@@ -112,7 +112,7 @@ func (h *Handler) CreateEnrollmentKey(c echo.Context) error {
 		})
 	}
 
-	url := strings.TrimSuffix(h.centralURL, "/") + "/api/v1/enrollment-keys"
+	url := strings.TrimSuffix(h.centralURL, "/") + "/api/v1/hq/client-enrollment-key"
 	httpReq, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(reqBody))
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{
@@ -140,8 +140,10 @@ func (h *Handler) CreateEnrollmentKey(c echo.Context) error {
 	}
 
 	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
-		return c.JSON(resp.StatusCode, map[string]string{
-			"error": "Central returned error: " + string(body),
+		// Don't forward Central's status code (especially 401) to frontend
+		// as it triggers frontend logout. Use 502 Bad Gateway instead.
+		return c.JSON(http.StatusBadGateway, map[string]string{
+			"error": fmt.Sprintf("Central returned %d: %s", resp.StatusCode, string(body)),
 		})
 	}
 
