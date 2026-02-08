@@ -74,6 +74,12 @@ func loadKeyPair(privPath, pubPath string) (*KeyPair, error) {
 
 // generateAndSaveKeyPair generates a new RSA key pair and saves to disk.
 func generateAndSaveKeyPair(privPath, pubPath string) (*KeyPair, error) {
+	// Ensure directory exists
+	dir := filepath.Dir(privPath)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return nil, fmt.Errorf("failed to create key directory: %w", err)
+	}
+
 	privateKey, err := rsa.GenerateKey(rand.Reader, rsaKeySize)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate RSA key: %w", err)

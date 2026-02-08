@@ -107,17 +107,26 @@ func (m *Manager) setupOAuth2SSO(ctx context.Context) error {
 		return fmt.Errorf("failed to store OAuth secret: %w", err)
 	}
 
-	// Build the auto-discovery URL
-	autoDiscoverURL := m.config.OIDCIssuer + "/.well-known/openid-configuration"
+	// Use explicit OIDC endpoints instead of auto-discovery URL.
+	// Auto-discovery requires the HQ OIDC provider to be reachable during bootstrap,
+	// but the HQ HTTP server starts AFTER Forgejo bootstrap completes.
+	// By using explicit endpoints, we avoid the chicken-and-egg problem.
+	issuer := m.config.OIDCIssuer
+	authURL := issuer + "/oidc/authorize"
+	tokenURL := issuer + "/oidc/token"
+	profileURL := issuer + "/oidc/userinfo"
 
 	// Add OAuth2 authentication source via Forgejo CLI
+	// Use explicit endpoint URLs to avoid needing to reach the discovery endpoint during bootstrap
 	_, err = m.runCLI(ctx,
 		"admin", "auth", "add-oauth",
 		"--name", "hq",
 		"--provider", "openidConnect",
 		"--key", OAuthClientID,
 		"--secret", oauthSecret,
-		"--auto-discover-url", autoDiscoverURL,
+		"--auth-url", authURL,
+		"--token-url", tokenURL,
+		"--profile-url", profileURL,
 		"--scopes", "openid email profile",
 	)
 	if err != nil {
