@@ -221,7 +221,7 @@ type ManagerConfig struct {
 // DefaultManagerConfig returns a ManagerConfig with sensible defaults.
 func DefaultManagerConfig() *ManagerConfig {
 	return &ManagerConfig{
-		MaxLocalWorkers:        4, // Conservative default
+		MaxLocalWorkers:        0, // Disabled by default - requires dex-worker binary
 		MaxRemoteWorkers:       0, // Unlimited
 		SpawnTimeout:           30 * time.Second,
 		HealthCheckInterval:    10 * time.Second,
