@@ -124,6 +124,16 @@ func (m *Manager) setupOAuth2SSO(ctx context.Context) error {
 		return fmt.Errorf("failed to add OAuth2 source: %w", err)
 	}
 
+	// Delete the default "Local" authentication source (ID 1) to hide username/password form
+	// This makes SSO the ONLY way to sign in
+	_, err = m.runCLI(ctx, "admin", "auth", "delete", "--id", "1")
+	if err != nil {
+		// Log but don't fail - the local source might already be removed
+		fmt.Printf("Note: Could not delete local auth source: %v\n", err)
+	} else {
+		fmt.Println("Deleted local authentication source (SSO-only mode)")
+	}
+
 	fmt.Println("OAuth2 SSO configured with HQ as identity provider")
 	return nil
 }

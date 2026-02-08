@@ -79,7 +79,7 @@ func (h *PasskeyHandler) getWebAuthnConfig(c echo.Context) *auth.PasskeyConfig {
 		origin = scheme + "://" + c.Request().Host
 	}
 
-	// Extract hostname for RPID (domain without port)
+	// Extract hostname (without port)
 	host := c.Request().Host
 	if colonIdx := len(host) - 1; colonIdx > 0 {
 		for i := len(host) - 1; i >= 0; i-- {
@@ -94,11 +94,57 @@ func (h *PasskeyHandler) getWebAuthnConfig(c echo.Context) *auth.PasskeyConfig {
 		}
 	}
 
+	// Use base domain as RPID for cross-subdomain passkey support.
+	// Passkeys registered on central.enbox.id with RPID "enbox.id" can be
+	// used on any *.enbox.id subdomain (like hq.alice.enbox.id).
+	rpid := extractBaseDomain(host)
+
 	return &auth.PasskeyConfig{
 		RPDisplayName: "Poindexter",
-		RPID:          host,
+		RPID:          rpid,
 		RPOrigin:      origin,
 	}
+}
+
+// extractBaseDomain extracts the registrable domain from a hostname.
+// For *.enbox.id hosts, returns "enbox.id".
+// For localhost or other hosts, returns the host unchanged.
+func extractBaseDomain(host string) string {
+	// Handle localhost for development
+	if host == "localhost" || host == "127.0.0.1" {
+		return host
+	}
+
+	// For enbox.id subdomains, use enbox.id as the RPID
+	// This enables passkeys registered on central.enbox.id to work on hq.*.enbox.id
+	if len(host) > len(".enbox.id") && host[len(host)-len(".enbox.id"):] == ".enbox.id" {
+		return "enbox.id"
+	}
+
+	// For other domains, try to extract the registrable domain (last two parts)
+	// This is a simplified heuristic; a proper implementation would use the Public Suffix List
+	parts := splitHost(host)
+	if len(parts) >= 2 {
+		return parts[len(parts)-2] + "." + parts[len(parts)-1]
+	}
+
+	return host
+}
+
+// splitHost splits a hostname by dots.
+func splitHost(host string) []string {
+	var parts []string
+	start := 0
+	for i := 0; i < len(host); i++ {
+		if host[i] == '.' {
+			parts = append(parts, host[start:i])
+			start = i + 1
+		}
+	}
+	if start < len(host) {
+		parts = append(parts, host[start:])
+	}
+	return parts
 }
 
 // HandleStatus returns whether passkeys are configured.
