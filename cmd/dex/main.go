@@ -389,10 +389,24 @@ func main() {
 			}
 		}
 
+		// Configure OIDC issuer for SSO if enrollment config has a public URL
+		if enrollConfig != nil && enrollConfig.PublicURL != "" {
+			cfg.OIDCIssuer = enrollConfig.PublicURL
+		}
+
 		forgejoConfig = &cfg
 		fmt.Printf("Embedded Forgejo enabled: port=%d, url=%s, data=%s\n", cfg.HTTPPort, cfg.RootURL, cfg.DataDir)
+		if cfg.OIDCIssuer != "" {
+			fmt.Printf("  SSO enabled: OIDC issuer=%s\n", cfg.OIDCIssuer)
+		}
 	} else {
 		fmt.Println("Embedded Forgejo disabled")
+	}
+
+	// Determine public URL for OIDC
+	var publicURL string
+	if enrollConfig != nil && enrollConfig.PublicURL != "" {
+		publicURL = enrollConfig.PublicURL
 	}
 
 	// Create API server
@@ -407,6 +421,7 @@ func main() {
 		Mesh:        meshConfig,
 		Encryption:  encConfig,
 		Forgejo:     forgejoConfig,
+		PublicURL:   publicURL,
 	})
 
 	// Start server in goroutine

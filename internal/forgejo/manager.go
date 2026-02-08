@@ -21,7 +21,11 @@ const (
 	SecretKeyAdminToken    = "forgejo_admin_token"
 	SecretKeyBotToken      = "forgejo_bot_token"
 	SecretKeyAdminPassword = "forgejo_admin_password"
+	SecretKeyOAuthSecret   = "forgejo_oauth_secret"
 )
+
+// OAuthClientID is the client ID used when registering Forgejo with HQ's OIDC provider.
+const OAuthClientID = "forgejo"
 
 // Manager controls the lifecycle of an embedded Forgejo instance.
 type Manager struct {
@@ -180,6 +184,18 @@ func (m *Manager) AdminToken() (string, error) {
 		return "", fmt.Errorf("forgejo admin token not configured (bootstrap may not have run)")
 	}
 	return token, nil
+}
+
+// OAuthSecret returns the OAuth client secret for OIDC integration.
+func (m *Manager) OAuthSecret() (string, error) {
+	secret, err := m.db.GetSecret(SecretKeyOAuthSecret)
+	if err != nil {
+		return "", fmt.Errorf("failed to get OAuth secret: %w", err)
+	}
+	if secret == "" {
+		return "", fmt.Errorf("forgejo OAuth secret not configured (SSO bootstrap may not have run)")
+	}
+	return secret, nil
 }
 
 // AccessInfo returns the credentials needed to log into the Forgejo web UI.

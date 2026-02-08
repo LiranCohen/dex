@@ -30,6 +30,7 @@ import (
 	"github.com/lirancohen/dex/internal/api/middleware"
 	"github.com/lirancohen/dex/internal/api/setup"
 	"github.com/lirancohen/dex/internal/auth"
+	"github.com/lirancohen/dex/internal/auth/oidc"
 	"github.com/lirancohen/dex/internal/crypto"
 	"github.com/lirancohen/dex/internal/db"
 	"github.com/lirancohen/dex/internal/forgejo"
@@ -601,6 +602,13 @@ func (s *Server) Start() error {
 				fmt.Printf("Warning: Forgejo started but bot token unavailable: %v\n", err)
 			}
 		}
+
+		// Register Forgejo as OIDC client if both OIDC and OAuth are configured
+		if s.oidcHandler != nil {
+			if err := s.registerForgejoOIDCClient(); err != nil {
+				fmt.Printf("Warning: failed to register Forgejo as OIDC client: %v\n", err)
+			}
+		}
 	}
 
 	// Start HTTP server FIRST in a goroutine, before mesh/tunnel
@@ -724,4 +732,38 @@ func (s *Server) Shutdown(ctx context.Context) error {
 		}
 	}
 	return s.echo.Shutdown(ctx)
+}
+
+// registerForgejoOIDCClient registers Forgejo as an OIDC client with HQ's OIDC provider.
+// This allows Forgejo to authenticate users via HQ's passkey-based login.
+func (s *Server) registerForgejoOIDCClient() error {
+	// Get the OAuth secret that was generated during Forgejo bootstrap
+	oauthSecret, err := s.forgejoManager.OAuthSecret()
+	if err != nil {
+		return fmt.Errorf("OAuth secret not available: %w", err)
+	}
+
+	// Build the redirect URI based on Forgejo's root URL
+	// Forgejo uses /user/oauth2/{provider}/callback as the callback path
+	forgejoConfig := s.forgejoManager.Config()
+	rootURL := forgejoConfig.RootURL
+	if rootURL == "" {
+		rootURL = s.forgejoManager.BaseURL()
+	}
+	callbackURL := rootURL + "/user/oauth2/hq/callback"
+
+	// Register Forgejo as an OIDC client
+	client := &oidc.Client{
+		ID:           forgejo.OAuthClientID,
+		Secret:       oauthSecret,
+		RedirectURIs: []string{callbackURL},
+		Name:         "Forgejo",
+	}
+
+	if err := s.oidcHandler.RegisterClient(client); err != nil {
+		return fmt.Errorf("failed to register OIDC client: %w", err)
+	}
+
+	fmt.Printf("Registered Forgejo as OIDC client (callback: %s)\n", callbackURL)
+	return nil
 }

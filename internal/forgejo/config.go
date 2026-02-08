@@ -38,6 +38,10 @@ type Config struct {
 	// If empty and running as root, defaults to "nobody".
 	// Forgejo refuses to run as root for security reasons.
 	RunUser string
+
+	// OIDCIssuer is the OIDC provider URL for SSO (e.g., https://hq.alice.enbox.id).
+	// If set, Forgejo will be configured to use HQ as its OAuth2 provider.
+	OIDCIssuer string
 }
 
 // DefaultConfig returns a Config with sensible defaults.
@@ -135,6 +139,34 @@ func (c *Config) WriteAppIni() error {
 		rootURL = fmt.Sprintf("http://%s:%d", httpAddr, httpPort)
 	}
 
+	// Build service section based on whether OIDC is enabled
+	serviceSection := `[service]
+DISABLE_REGISTRATION = true
+REQUIRE_SIGNIN_VIEW  = true
+ENABLE_NOTIFY_MAIL   = false
+`
+	// If OIDC is configured, add settings for SSO-only authentication
+	if c.OIDCIssuer != "" {
+		serviceSection = `[service]
+DISABLE_REGISTRATION              = true
+REQUIRE_SIGNIN_VIEW               = true
+ENABLE_NOTIFY_MAIL                = false
+ALLOW_ONLY_EXTERNAL_REGISTRATION  = true
+ENABLE_BASIC_AUTHENTICATION       = false
+`
+	}
+
+	// Build oauth2 section if OIDC is enabled
+	oauth2Section := ""
+	if c.OIDCIssuer != "" {
+		oauth2Section = `
+[oauth2_client]
+ENABLE_AUTO_REGISTRATION = true
+ACCOUNT_LINKING          = auto
+USERNAME                 = email
+`
+	}
+
 	ini := fmt.Sprintf(`; Forgejo configuration — managed by Dex
 ; Do not edit manually; regenerated on startup.
 
@@ -155,11 +187,7 @@ INSTALL_LOCK   = true
 SECRET_KEY     = %s
 INTERNAL_TOKEN = %s
 
-[service]
-DISABLE_REGISTRATION = true
-REQUIRE_SIGNIN_VIEW  = true
-ENABLE_NOTIFY_MAIL   = false
-
+%s
 [repository]
 DEFAULT_PRIVATE = private
 ROOT            = %s
@@ -177,7 +205,7 @@ ENABLED = false
 [indexer]
 ISSUE_INDEXER_TYPE = bleve
 REPO_INDEXER_ENABLED = false
-`,
+%s`,
 		httpAddr,
 		httpPort,
 		rootURL,
@@ -185,7 +213,9 @@ REPO_INDEXER_ENABLED = false
 		c.GetDBPath(),
 		secretKey,
 		internalToken,
+		serviceSection,
 		c.GetRepoRoot(),
+		oauth2Section,
 	)
 
 	return os.WriteFile(iniPath, []byte(ini), 0600)
