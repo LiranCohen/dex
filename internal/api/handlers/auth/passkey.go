@@ -106,8 +106,15 @@ func (h *PasskeyHandler) getWebAuthnConfig(c echo.Context) *auth.PasskeyConfig {
 func (h *PasskeyHandler) HandleStatus(c echo.Context) error {
 	hasCredentials, err := h.deps.DB.HasAnyCredentials()
 	if err != nil {
+		log.Printf("Passkey status: failed to check credentials: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to check credentials")
 	}
+
+	// Also check if we have any users (for debugging)
+	hasUsers, _ := h.deps.DB.HasAnyUsers()
+
+	cfg := h.getWebAuthnConfig(c)
+	log.Printf("Passkey status: configured=%v, hasUsers=%v, RPID=%s, origin=%s", hasCredentials, hasUsers, cfg.RPID, cfg.RPOrigin)
 
 	return c.JSON(http.StatusOK, map[string]any{
 		"configured": hasCredentials,
@@ -238,18 +245,22 @@ func (h *PasskeyHandler) HandleLoginBegin(c echo.Context) error {
 	// Get the first user (single-user mode)
 	user, err := h.deps.DB.GetFirstUser()
 	if err != nil {
+		log.Printf("Passkey login begin: failed to get user: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to get user")
 	}
 	if user == nil {
+		log.Printf("Passkey login begin: no user registered")
 		return echo.NewHTTPError(http.StatusNotFound, "no user registered")
 	}
 
 	// Get user's credentials
 	credentials, err := h.deps.DB.GetWebAuthnCredentialsByUserID(user.ID)
 	if err != nil {
+		log.Printf("Passkey login begin: failed to get credentials for user %s: %v", user.ID, err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to get credentials")
 	}
 	if len(credentials) == 0 {
+		log.Printf("Passkey login begin: no passkeys registered for user %s", user.ID)
 		return echo.NewHTTPError(http.StatusNotFound, "no passkeys registered")
 	}
 
@@ -257,8 +268,11 @@ func (h *PasskeyHandler) HandleLoginBegin(c echo.Context) error {
 	cfg := h.getWebAuthnConfig(c)
 	wa, err := auth.NewWebAuthn(cfg)
 	if err != nil {
+		log.Printf("Passkey login begin: failed to initialize WebAuthn: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to initialize WebAuthn")
 	}
+
+	log.Printf("Passkey login begin: user=%s, credentials=%d, RPID=%s, origin=%s", user.ID, len(credentials), cfg.RPID, cfg.RPOrigin)
 
 	// Create WebAuthn user with credentials
 	waUser := auth.NewWebAuthnUser(user.ID, "owner", credentials)
@@ -266,6 +280,7 @@ func (h *PasskeyHandler) HandleLoginBegin(c echo.Context) error {
 	// Generate assertion options
 	options, session, err := wa.BeginLogin(waUser)
 	if err != nil {
+		log.Printf("Passkey login begin: BeginLogin failed: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to begin login: "+err.Error())
 	}
 
@@ -288,12 +303,14 @@ func (h *PasskeyHandler) HandleLoginFinish(c echo.Context) error {
 	userID := c.QueryParam("user_id")
 
 	if sessionID == "" || userID == "" {
+		log.Printf("Passkey login finish: missing session_id or user_id")
 		return echo.NewHTTPError(http.StatusBadRequest, "missing session_id or user_id")
 	}
 
 	// Get session data
 	session := passkeyStore.Get(sessionID)
 	if session == nil {
+		log.Printf("Passkey login finish: invalid or expired session: %s", sessionID)
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid or expired session")
 	}
 	defer passkeyStore.Delete(sessionID)
@@ -301,12 +318,14 @@ func (h *PasskeyHandler) HandleLoginFinish(c echo.Context) error {
 	// Get user
 	user, err := h.deps.DB.GetUserByID(userID)
 	if err != nil || user == nil {
+		log.Printf("Passkey login finish: user not found: %s", userID)
 		return echo.NewHTTPError(http.StatusNotFound, "user not found")
 	}
 
 	// Get user's credentials
 	credentials, err := h.deps.DB.GetWebAuthnCredentialsByUserID(user.ID)
 	if err != nil {
+		log.Printf("Passkey login finish: failed to get credentials for user %s: %v", user.ID, err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to get credentials")
 	}
 
@@ -314,8 +333,11 @@ func (h *PasskeyHandler) HandleLoginFinish(c echo.Context) error {
 	cfg := h.getWebAuthnConfig(c)
 	wa, err := auth.NewWebAuthn(cfg)
 	if err != nil {
+		log.Printf("Passkey login finish: failed to initialize WebAuthn: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to initialize WebAuthn")
 	}
+
+	log.Printf("Passkey login finish: user=%s, credentials=%d, RPID=%s, origin=%s", user.ID, len(credentials), cfg.RPID, cfg.RPOrigin)
 
 	// Create WebAuthn user
 	waUser := auth.NewWebAuthnUser(user.ID, "owner", credentials)
@@ -323,12 +345,15 @@ func (h *PasskeyHandler) HandleLoginFinish(c echo.Context) error {
 	// Parse the credential assertion from request body
 	parsedAssertion, err := protocol.ParseCredentialRequestResponseBody(c.Request().Body)
 	if err != nil {
+		log.Printf("Passkey login finish: failed to parse credential: %v", err)
 		return echo.NewHTTPError(http.StatusBadRequest, "failed to parse credential: "+err.Error())
 	}
 
 	// Finish login using ValidateLogin
 	credential, err := wa.ValidateLogin(waUser, *session, parsedAssertion)
 	if err != nil {
+		// Log detailed error for debugging RPID mismatches
+		log.Printf("Passkey login finish: ValidateLogin failed: %v (RPID=%s, origin=%s)", err, cfg.RPID, cfg.RPOrigin)
 		return echo.NewHTTPError(http.StatusUnauthorized, "authentication failed: "+err.Error())
 	}
 
@@ -337,16 +362,20 @@ func (h *PasskeyHandler) HandleLoginFinish(c echo.Context) error {
 
 	// Generate JWT token
 	if h.deps.TokenConfig == nil {
+		log.Printf("Passkey login finish: TokenConfig is nil")
 		return echo.NewHTTPError(http.StatusInternalServerError, "authentication not configured")
 	}
 
 	token, err := auth.GenerateToken(user.ID, h.deps.TokenConfig)
 	if err != nil {
+		log.Printf("Passkey login finish: failed to generate token: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to generate token")
 	}
 
 	// Update last login
 	_ = h.deps.DB.UpdateUserLastLogin(user.ID)
+
+	log.Printf("Passkey login finish: success for user %s", user.ID)
 
 	return c.JSON(http.StatusOK, map[string]any{
 		"token":   token,

@@ -2,8 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/ed25519"
-	"crypto/rand"
 	"flag"
 	"fmt"
 	"os"
@@ -264,21 +262,22 @@ func main() {
 		}
 	}
 
-	// Set up JWT token configuration with ED25519 keys
-	// Generate new keys on each startup (tokens won't survive restarts)
-	// For persistence, keys should be loaded from a file
-	pubKey, privKey, err := ed25519.GenerateKey(rand.Reader)
+	// Set up JWT token configuration with persistent ED25519 keys
+	// Keys are loaded from file or generated on first run
+	fmt.Println("Initializing JWT signing keys...")
+	jwtKeys, err := auth.EnsureJWTKeyPair(dataDir)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error generating JWT keys: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Error initializing JWT keys: %v\n", err)
 		os.Exit(1)
 	}
+	fmt.Println("  - JWT signing keys: INITIALIZED (tokens persist across restarts)")
 
 	tokenConfig := &auth.TokenConfig{
 		Issuer:       "poindexter",
 		ExpiryHours:  24 * 7, // 1 week
 		RefreshHours: 24,     // Can refresh within 24 hours of expiry
-		SigningKey:   privKey,
-		VerifyingKey: pubKey,
+		SigningKey:   jwtKeys.PrivateKey,
+		VerifyingKey: jwtKeys.PublicKey,
 	}
 	// Configure mesh networking
 	// Priority: CLI flags > enrollment config > defaults
