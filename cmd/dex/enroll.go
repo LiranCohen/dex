@@ -269,10 +269,14 @@ func buildConfigFromResponse(resp *EnrollmentResponse) *Config {
 		hostname = "hq"
 	}
 
+	// Determine if this is a public node (has tunnel config)
+	isPublic := resp.Tunnel != nil && resp.Tunnel.IngressAddr != ""
+
 	config := &Config{
 		Namespace: resp.Namespace,
 		PublicURL: resp.PublicURL,
 		Hostname:  hostname, // Set hostname for mesh registration (used by main.go)
+		IsPublic:  isPublic, // Explicit flag for public accessibility
 		Mesh: MeshConfig{
 			Enabled:    true,
 			ControlURL: resp.Mesh.ControlURL,
@@ -289,7 +293,7 @@ func buildConfigFromResponse(resp *EnrollmentResponse) *Config {
 	}
 
 	// Configure tunnel if provided (only for public nodes)
-	if resp.Tunnel != nil && resp.Tunnel.IngressAddr != "" {
+	if isPublic {
 		config.Tunnel = TunnelConfig{
 			Enabled:     true,
 			IngressAddr: resp.Tunnel.IngressAddr,

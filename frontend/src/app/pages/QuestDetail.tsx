@@ -10,19 +10,17 @@ import {
   MessageList,
   ConnectionStatusBanner,
   SearchInput,
-  type AnsweredQuestion,
+  BlockingQuestion,
   type AcceptedDraft,
-  type PendingQuestionWithMessage,
   type MessageErrorInfo,
   type ErrorType,
 } from '../components';
 import type { SearchInputRef } from '../components/SearchInput';
-import { filterPendingDrafts, draftsToMap } from '../utils/draftUtils';
-import { fetchQuest, fetchQuestTasks, sendQuestMessage, createObjective, createObjectivesBatch, fetchApprovals, cancelQuestSession, isApiError } from '../../lib/api';
+
+import { fetchQuest, fetchQuestTasks, sendQuestMessage, createObjective, createObjectivesBatch, fetchApprovals, cancelQuestSession, answerQuestQuestion, isApiError } from '../../lib/api';
 import { useWebSocket } from '../../hooks/useWebSocket';
 import { useKeyboardNavigation } from '../hooks/useKeyboardNavigation';
-import type { Quest, QuestMessage, Task, Approval, WebSocketEvent, ObjectiveDraft } from '../../lib/types';
-import { parseObjectiveDrafts, parseQuestions } from '../../components/QuestChat';
+import type { Quest, QuestMessage, Task, Approval, WebSocketEvent, ObjectiveDraft, PendingQuestion } from '../../lib/types';
 
 // Type guards for WebSocket payloads
 function isQuestMessage(obj: unknown): obj is QuestMessage {
@@ -49,8 +47,6 @@ export function QuestDetail() {
   const [streamingContent, setStreamingContent] = useState<string>('');
   const [activeTools, setActiveTools] = useState<Map<string, { tool: string; status: 'running' | 'complete' | 'error' }>>(new Map());
   const [pendingDrafts, setPendingDrafts] = useState<Map<string, ObjectiveDraft>>(new Map());
-  const [pendingQuestions, setPendingQuestions] = useState<PendingQuestionWithMessage[]>([]);
-  const [answeredQuestions, setAnsweredQuestions] = useState<AnsweredQuestion[]>([]);
   const [acceptedDrafts, setAcceptedDrafts] = useState<Map<string, AcceptedDraft>>(new Map());
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [commandHistory, setCommandHistory] = useState<string[]>([]);
@@ -73,6 +69,9 @@ export function QuestDetail() {
   const [searchQuery, setSearchQuery] = useState('');
   const [showSearch, setShowSearch] = useState(false);
   const searchInputRef = useRef<SearchInputRef>(null);
+  // Blocking tool question (from ask_question tool)
+  const [blockingQuestion, setBlockingQuestion] = useState<PendingQuestion | null>(null);
+  const [answeringQuestion, setAnsweringQuestion] = useState(false);
   const { subscribe, subscribeToChannel, connected: isConnected, connectionState, connectionQuality, latency, reconnectAttempts, reconnect } = useWebSocket();
 
   // Subscribe to quest-specific channel for targeted updates
@@ -91,8 +90,6 @@ export function QuestDetail() {
   const isMountedRef = useRef(true);
   // Track in-flight draft acceptance requests synchronously to prevent duplicates
   const inFlightAcceptsRef = useRef<Set<string>>(new Set());
-  // Track in-flight question answers to prevent clearing during processing
-  const inFlightAnswersRef = useRef<Set<string>>(new Set());
 
   // Keep ref in sync with state
   useEffect(() => {
@@ -192,27 +189,8 @@ export function QuestDetail() {
       setTasks(tasksData || []);
       setApprovalCount((approvalsData.approvals || []).filter((a: Approval) => a.status === 'pending').length);
 
-      // Parse any pending drafts/questions from last assistant message
-      // Only show drafts that haven't already been created as tasks
-      const lastAssistantMsg = [...(questData.messages || [])].reverse().find((m: QuestMessage) => m.role === 'assistant');
-      if (lastAssistantMsg) {
-        const drafts = parseObjectiveDrafts(lastAssistantMsg.content);
-        const questions = parseQuestions(lastAssistantMsg.content);
-
-        // Filter out drafts that already exist as tasks or have been accepted
-        const currentAccepted = acceptedDraftsRef.current;
-        const newDrafts = filterPendingDrafts(drafts, tasksData || [], currentAccepted);
-        setPendingDrafts(newDrafts.length > 0 ? draftsToMap(newDrafts) : new Map());
-
-        if (questions.length > 0) {
-          // Add message ID to questions for inline rendering
-          const questionsWithMessageId = questions.map(q => ({
-            ...q,
-            messageId: lastAssistantMsg.id,
-          }));
-          setPendingQuestions(questionsWithMessageId);
-        }
-      }
+      // Note: Pending drafts and questions now come from WebSocket events via tools
+      // (propose_objective broadcasts quest.objective_draft, ask_question broadcasts quest.question)
     } catch (err) {
       console.error('Failed to load quest:', err);
       showToast('Failed to load quest', 'error');
@@ -245,7 +223,6 @@ export function QuestDetail() {
 
     setSending(true);
     setPendingDrafts(new Map());
-    setPendingQuestions([]);
 
     // Track command history
     setCommandHistory((prev) => {
@@ -462,34 +439,25 @@ export function QuestDetail() {
               setStreamingContent('');
               setMessages((prev) => [...prev, msg]);
               setSending(false);
+              // Note: Drafts and questions are now handled via tool events
+              // (quest.objective_draft and quest.question)
+            }
+          }
+          break;
 
-              // Clear pending questions that aren't currently being answered
-              // (answered questions are already in answeredQuestions state)
-              setPendingQuestions((prev) => {
-                // Keep questions that are currently being answered (in-flight)
-                const inFlight = inFlightAnswersRef.current;
-                if (inFlight.size === 0) return [];
-                return prev.filter((q) => inFlight.has(q.question));
-              });
-
-              // Parse drafts and questions from new message
-              const drafts = parseObjectiveDrafts(msg.content);
-              const questions = parseQuestions(msg.content);
-              if (drafts.length > 0) {
-                // Filter drafts against accepted drafts using ref for synchronous access
-                // Note: We don't filter against tasks here because task.created events
-                // will trigger debouncedLoadData() which handles task-based filtering
-                const currentAccepted = acceptedDraftsRef.current;
-                const newDrafts = drafts.filter((d) => !currentAccepted.has(d.draft_id));
-                setPendingDrafts(newDrafts.length > 0 ? draftsToMap(newDrafts) : new Map());
-              }
-              if (questions.length > 0) {
-                // Add message ID to questions for inline rendering
-                const questionsWithMessageId = questions.map(q => ({
-                  ...q,
-                  messageId: msg.id,
-                }));
-                setPendingQuestions(questionsWithMessageId);
+        case 'quest.objective_draft':
+          // Handle objective drafts from propose_objective tool
+          if (eventData.quest_id === id) {
+            const draft = eventData.draft as ObjectiveDraft | undefined;
+            if (draft && draft.draft_id && draft.title) {
+              // Add to pending drafts if not already accepted
+              const currentAccepted = acceptedDraftsRef.current;
+              if (!currentAccepted.has(draft.draft_id)) {
+                setPendingDrafts((prev) => {
+                  const next = new Map(prev);
+                  next.set(draft.draft_id, draft);
+                  return next;
+                });
               }
             }
           }
@@ -564,6 +532,34 @@ export function QuestDetail() {
               toolCleanupTimers.current.delete(callId);
             }, 3000);
             toolCleanupTimers.current.set(callId, timer);
+          }
+          break;
+
+        case 'quest.question':
+          // Blocking tool question from ask_question tool
+          if (eventData.quest_id === id) {
+            // Build PendingQuestion from event data
+            const question: PendingQuestion = {
+              call_id: isString(eventData.call_id) ? eventData.call_id : '',
+              question: isString(eventData.question) ? eventData.question : '',
+              header: isString(eventData.header) ? eventData.header : undefined,
+              options: Array.isArray(eventData.options) ? eventData.options.map((opt: unknown) => {
+                if (typeof opt === 'object' && opt !== null) {
+                  const o = opt as Record<string, unknown>;
+                  return {
+                    label: typeof o.label === 'string' ? o.label : '',
+                    description: typeof o.description === 'string' ? o.description : undefined,
+                  };
+                }
+                return { label: String(opt) };
+              }) : undefined,
+              allow_multiple: isBoolean(eventData.allow_multiple) ? eventData.allow_multiple : undefined,
+              allow_custom: isBoolean(eventData.allow_custom) ? eventData.allow_custom : undefined,
+              recommended_index: typeof eventData.recommended_index === 'number' ? eventData.recommended_index : undefined,
+            };
+            if (question.call_id && question.question) {
+              setBlockingQuestion(question);
+            }
           }
           break;
 
@@ -762,29 +758,26 @@ export function QuestDetail() {
     showToast('Objective restored', 'info');
   };
 
-  const handleAnswerQuestion = async (answer: string, optionId: string) => {
-    // Move question to answered list
-    if (pendingQuestions.length > 0) {
-      const pendingQuestion = pendingQuestions[0];
+  // Handle answering a blocking tool question (from ask_question tool)
+  const handleAnswerBlockingQuestion = useCallback(async (answer: string, selectedIndices: number[], isCustom: boolean) => {
+    if (!id || !blockingQuestion || answeringQuestion) return;
 
-      // Mark as in-flight to prevent clearing during WebSocket updates
-      inFlightAnswersRef.current.add(pendingQuestion.question);
-
-      try {
-        setAnsweredQuestions((prev) => [...prev, {
-          question: pendingQuestion,
-          answerId: optionId,
-          answer,
-          messageId: pendingQuestion.messageId,
-        }]);
-        setPendingQuestions((prev) => prev.slice(1));
-      } finally {
-        // Clear in-flight tracking
-        inFlightAnswersRef.current.delete(pendingQuestion.question);
-      }
+    setAnsweringQuestion(true);
+    try {
+      await answerQuestQuestion(id, {
+        answer,
+        selected_indices: selectedIndices.length > 0 ? selectedIndices : undefined,
+        is_custom: isCustom,
+      });
+      // Clear the blocking question after successful answer
+      setBlockingQuestion(null);
+    } catch (err) {
+      console.error('Failed to answer question:', err);
+      showToast('Failed to submit answer', 'error');
+    } finally {
+      setAnsweringQuestion(false);
     }
-    await handleSend(answer);
-  };
+  }, [id, blockingQuestion, answeringQuestion, showToast]);
 
   // Filter messages by search query
   const filteredMessages = useMemo(() => {
@@ -977,8 +970,6 @@ export function QuestDetail() {
           streamingContent={streamingContent}
           sending={sending}
           pendingDrafts={pendingDrafts}
-          pendingQuestions={pendingQuestions}
-          answeredQuestions={answeredQuestions}
           acceptedDrafts={acceptedDrafts}
           rejectedDrafts={rejectedDrafts}
           acceptingDrafts={acceptingDrafts}
@@ -988,10 +979,20 @@ export function QuestDetail() {
           onAcceptDraft={handleAcceptDraft}
           onRejectDraft={handleRejectDraft}
           onUndoReject={handleUndoReject}
-          onAnswerQuestion={handleAnswerQuestion}
           onAcceptAll={pendingDrafts.size > 1 ? handleAcceptAll : undefined}
           onRejectAll={pendingDrafts.size > 1 ? handleRejectAll : undefined}
         />
+
+        {/* Blocking tool question (from ask_question tool) */}
+        {blockingQuestion && (
+          <div className="app-quest-blocking-question">
+            <BlockingQuestion
+              question={blockingQuestion}
+              onAnswer={handleAnswerBlockingQuestion}
+              disabled={answeringQuestion}
+            />
+          </div>
+        )}
 
         {/* Input */}
         <ChatInput

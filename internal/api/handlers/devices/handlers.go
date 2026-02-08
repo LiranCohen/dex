@@ -17,10 +17,10 @@ import (
 
 // Handler handles device-related HTTP requests.
 type Handler struct {
-	deps       *core.Deps
-	namespace  string // From enrollment config
+	deps        *core.Deps
+	namespace   string // From enrollment config
 	tunnelToken string // For authenticating with Central
-	centralURL string
+	centralURL  string
 }
 
 // Config contains configuration for the devices handler.
@@ -46,6 +46,7 @@ func (h *Handler) RegisterRoutes(g *echo.Group) {
 	devices.POST("/enrollment-key", h.CreateEnrollmentKey)
 	devices.GET("", h.ListDevices)
 	devices.DELETE("/:hostname", h.RemoveDevice)
+	devices.PATCH("/:hostname/expiry", h.UpdateDeviceExpiry)
 }
 
 // CreateEnrollmentKeyRequest is the request body for creating a client enrollment key.
@@ -167,13 +168,28 @@ func (h *Handler) CreateEnrollmentKey(c echo.Context) error {
 
 // DeviceInfo represents a device connected to the mesh network.
 type DeviceInfo struct {
-	Hostname string   `json:"hostname"`
-	MeshIP   string   `json:"mesh_ip"`
-	Online   bool     `json:"online"`
-	Direct   bool     `json:"direct"`
-	LastSeen string   `json:"last_seen,omitempty"`
-	Tags     []string `json:"tags,omitempty"`
-	IsClient bool     `json:"is_client"` // True if this is a client device (tag:client)
+	ID        string   `json:"id,omitempty"` // Node ID from Central (for deletion)
+	Hostname  string   `json:"hostname"`
+	Type      string   `json:"type,omitempty"` // "hq", "outpost", or "client"
+	MeshIP    string   `json:"mesh_ip"`
+	Online    bool     `json:"online"`
+	Direct    bool     `json:"direct"`
+	LastSeen  string   `json:"last_seen,omitempty"`
+	ExpiresAt string   `json:"expires_at,omitempty"` // When the node expires (empty = permanent)
+	Tags      []string `json:"tags,omitempty"`
+	IsClient  bool     `json:"is_client"` // True if this is a client device (tag:client)
+}
+
+// CentralDeviceResponse is the response from Central's GET /api/v1/hq/devices
+type CentralDeviceResponse struct {
+	ID        string   `json:"id"`
+	Hostname  string   `json:"hostname"`
+	Type      string   `json:"type"`
+	Status    string   `json:"status"`
+	MeshIP    string   `json:"mesh_ip"`
+	LastSeen  *string  `json:"last_seen"`
+	ExpiresAt *string  `json:"expires_at"`
+	Tags      []string `json:"tags"`
 }
 
 // ListDevicesResponse is the response for listing devices.
@@ -184,7 +200,23 @@ type ListDevicesResponse struct {
 
 // ListDevices returns the list of client devices connected to the mesh.
 // GET /api/v1/devices
+// When Central is available, fetches devices from Central (includes IDs for deletion).
+// Falls back to local mesh peer status if Central is unavailable.
 func (h *Handler) ListDevices(c echo.Context) error {
+	// Try to get devices from Central first (includes IDs needed for deletion)
+	if h.centralURL != "" && h.tunnelToken != "" {
+		devices, err := h.listDevicesFromCentral()
+		if err == nil {
+			return c.JSON(http.StatusOK, ListDevicesResponse{
+				Devices: devices,
+				Count:   len(devices),
+			})
+		}
+		// Log error but fall back to mesh status
+		c.Logger().Warnf("Failed to get devices from Central, falling back to mesh: %v", err)
+	}
+
+	// Fallback: get devices from local mesh peer status
 	if h.deps.MeshClient == nil {
 		return c.JSON(http.StatusOK, ListDevicesResponse{
 			Devices: []DeviceInfo{},
@@ -204,15 +236,22 @@ func (h *Handler) ListDevices(c echo.Context) error {
 	for _, p := range peers {
 		// Check if this peer is a client (has tag:client)
 		isClient := false
+		deviceType := "outpost"
 		for _, tag := range p.Tags {
-			if tag == "tag:client" {
+			switch tag {
+			case "tag:client":
 				isClient = true
-				break
+				deviceType = "client"
+			case "tag:hq":
+				deviceType = "hq"
+			case "tag:outpost":
+				deviceType = "outpost"
 			}
 		}
 
 		devices = append(devices, DeviceInfo{
 			Hostname: p.Hostname,
+			Type:     deviceType,
 			MeshIP:   p.MeshIP,
 			Online:   p.Online,
 			Direct:   p.Direct,
@@ -226,6 +265,63 @@ func (h *Handler) ListDevices(c echo.Context) error {
 		Devices: devices,
 		Count:   len(devices),
 	})
+}
+
+// listDevicesFromCentral fetches devices from Central's HQ API.
+func (h *Handler) listDevicesFromCentral() ([]DeviceInfo, error) {
+	url := strings.TrimSuffix(h.centralURL, "/") + "/api/v1/hq/devices"
+	httpReq, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	httpReq.Header.Set("Authorization", "Bearer "+h.tunnelToken)
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to Central: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("Central returned %d: %s", resp.StatusCode, string(body))
+	}
+
+	var centralDevices []CentralDeviceResponse
+	if err := json.NewDecoder(resp.Body).Decode(&centralDevices); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	// Convert Central response to DeviceInfo
+	devices := make([]DeviceInfo, 0, len(centralDevices))
+	for _, cd := range centralDevices {
+		isClient := cd.Type == "client"
+		lastSeen := ""
+		if cd.LastSeen != nil {
+			lastSeen = *cd.LastSeen
+		}
+		expiresAt := ""
+		if cd.ExpiresAt != nil {
+			expiresAt = *cd.ExpiresAt
+		}
+
+		devices = append(devices, DeviceInfo{
+			ID:        cd.ID,
+			Hostname:  cd.Hostname,
+			Type:      cd.Type,
+			MeshIP:    cd.MeshIP,
+			Online:    cd.Status == "online",
+			Direct:    false, // Central doesn't track direct connections
+			LastSeen:  lastSeen,
+			ExpiresAt: expiresAt,
+			Tags:      cd.Tags,
+			IsClient:  isClient,
+		})
+	}
+
+	return devices, nil
 }
 
 // ListClientDevices returns only client devices (filtered by tag:client).
@@ -287,14 +383,154 @@ func (h *Handler) RemoveDevice(c echo.Context) error {
 		})
 	}
 
-	// TODO: Implement device removal via Central API
-	// This requires adding an endpoint to Central to remove nodes by hostname
-	// For now, return a not implemented error
+	// Call Central's HQ API to delete the device
+	url := strings.TrimSuffix(h.centralURL, "/") + "/api/v1/hq/devices/" + hostname
+	httpReq, err := http.NewRequest(http.MethodDelete, url, nil)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{
+			"error": "Failed to create request",
+		})
+	}
 
-	return c.JSON(http.StatusNotImplemented, map[string]string{
-		"error":   "Device removal not yet implemented",
-		"message": "Contact support to remove devices from your network",
-	})
+	httpReq.Header.Set("Authorization", "Bearer "+h.tunnelToken)
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		return c.JSON(http.StatusBadGateway, map[string]string{
+			"error": "Failed to connect to Central: " + err.Error(),
+		})
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	// Handle response based on status code
+	switch resp.StatusCode {
+	case http.StatusNoContent:
+		// Success - device was deleted
+		return c.JSON(http.StatusOK, map[string]string{
+			"message": "Device removed successfully",
+		})
+	case http.StatusNotFound:
+		return c.JSON(http.StatusNotFound, map[string]string{
+			"error": "Device not found",
+		})
+	case http.StatusForbidden:
+		return c.JSON(http.StatusForbidden, map[string]string{
+			"error": "Cannot remove this device (HQ nodes cannot be removed via this API)",
+		})
+	case http.StatusUnauthorized:
+		// Don't forward 401 as it triggers frontend logout - use 502 instead
+		return c.JSON(http.StatusBadGateway, map[string]string{
+			"error": "Central authentication failed",
+		})
+	default:
+		body, _ := io.ReadAll(resp.Body)
+		return c.JSON(http.StatusBadGateway, map[string]string{
+			"error": fmt.Sprintf("Central returned %d: %s", resp.StatusCode, string(body)),
+		})
+	}
+}
+
+// UpdateDeviceExpiryRequest is the request body for updating device expiry.
+type UpdateDeviceExpiryRequest struct {
+	// ExpiresAt is the new expiry time in RFC3339 format.
+	// If null/omitted/empty, the device becomes permanent (no expiry).
+	ExpiresAt *string `json:"expires_at"`
+}
+
+// UpdateDeviceExpiryResponse is the response for updating device expiry.
+type UpdateDeviceExpiryResponse struct {
+	Hostname  string `json:"hostname"`
+	ExpiresAt string `json:"expires_at,omitempty"` // empty means permanent
+}
+
+// UpdateDeviceExpiry updates the expiry time for a device.
+// PATCH /api/v1/devices/:hostname/expiry
+func (h *Handler) UpdateDeviceExpiry(c echo.Context) error {
+	hostname := c.Param("hostname")
+	if hostname == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"error": "Hostname is required",
+		})
+	}
+
+	if h.centralURL == "" || h.tunnelToken == "" {
+		return c.JSON(http.StatusServiceUnavailable, map[string]string{
+			"error": "Device expiry update not configured (missing Central connection)",
+		})
+	}
+
+	var req UpdateDeviceExpiryRequest
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"error": "Invalid request body",
+		})
+	}
+
+	// Build request body for Central
+	reqBody, err := json.Marshal(req)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{
+			"error": "Failed to create request",
+		})
+	}
+
+	// Call Central's HQ API to update device expiry
+	url := strings.TrimSuffix(h.centralURL, "/") + "/api/v1/hq/devices/" + hostname + "/expiry"
+	httpReq, err := http.NewRequest(http.MethodPatch, url, bytes.NewReader(reqBody))
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{
+			"error": "Failed to create request",
+		})
+	}
+
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Authorization", "Bearer "+h.tunnelToken)
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		return c.JSON(http.StatusBadGateway, map[string]string{
+			"error": "Failed to connect to Central: " + err.Error(),
+		})
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	// Handle response based on status code
+	switch resp.StatusCode {
+	case http.StatusOK:
+		// Success - parse and return the response
+		var centralResp UpdateDeviceExpiryResponse
+		if err := json.NewDecoder(resp.Body).Decode(&centralResp); err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]string{
+				"error": "Failed to parse response",
+			})
+		}
+		return c.JSON(http.StatusOK, centralResp)
+	case http.StatusNotFound:
+		return c.JSON(http.StatusNotFound, map[string]string{
+			"error": "Device not found",
+		})
+	case http.StatusForbidden:
+		return c.JSON(http.StatusForbidden, map[string]string{
+			"error": "Cannot modify HQ node expiry (always permanent)",
+		})
+	case http.StatusBadRequest:
+		body, _ := io.ReadAll(resp.Body)
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"error": string(body),
+		})
+	case http.StatusUnauthorized:
+		// Don't forward 401 as it triggers frontend logout - use 502 instead
+		return c.JSON(http.StatusBadGateway, map[string]string{
+			"error": "Central authentication failed",
+		})
+	default:
+		body, _ := io.ReadAll(resp.Body)
+		return c.JSON(http.StatusBadGateway, map[string]string{
+			"error": fmt.Sprintf("Central returned %d: %s", resp.StatusCode, string(body)),
+		})
+	}
 }
 
 // hasTag checks if a tag list contains a specific tag.

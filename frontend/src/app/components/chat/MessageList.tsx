@@ -3,12 +3,9 @@ import { Message, type MessageErrorInfo } from './Message';
 import { MarkdownContent } from './MarkdownContent';
 import { ToolActivity } from './ToolActivity';
 import { ProposedObjective } from './ProposedObjective';
-import { QuestionPrompt } from './QuestionPrompt';
 import { ScrollIndicator } from './ScrollIndicator';
 import { formatTime } from '../../utils/formatters';
-import { stripSignals } from '../../../components/QuestChat';
 import type { QuestMessage, ObjectiveDraft } from '../../../lib/types';
-import type { QuestQuestion } from '../../../components/QuestChat';
 
 export type { MessageErrorInfo } from './Message';
 
@@ -17,20 +14,9 @@ interface ActiveTool {
   status: 'running' | 'complete' | 'error';
 }
 
-export interface AnsweredQuestion {
-  question: QuestQuestion;
-  answerId: string;
-  answer: string;
-  messageId?: string; // ID of the message that triggered this question
-}
-
 export interface AcceptedDraft {
   draft: ObjectiveDraft;
   taskId?: string;
-}
-
-export interface PendingQuestionWithMessage extends QuestQuestion {
-  messageId?: string; // ID of the message that triggered this question
 }
 
 interface MessageListProps {
@@ -42,8 +28,6 @@ interface MessageListProps {
   streamingContent: string;
   sending: boolean;
   pendingDrafts: Map<string, ObjectiveDraft>;
-  pendingQuestions: PendingQuestionWithMessage[];
-  answeredQuestions: AnsweredQuestion[];
   acceptedDrafts: Map<string, AcceptedDraft>;
   rejectedDrafts?: Map<string, ObjectiveDraft>;
   acceptingDrafts?: Set<string>;
@@ -53,7 +37,6 @@ interface MessageListProps {
   onAcceptDraft: (key: string, draft: ObjectiveDraft, selectedOptionalIndices: number[]) => void;
   onRejectDraft: (key: string) => void;
   onUndoReject?: (key: string) => void;
-  onAnswerQuestion: (answer: string, optionId: string) => void;
   onAcceptAll?: () => void;
   onRejectAll?: () => void;
 }
@@ -70,17 +53,6 @@ function highlightMatches(text: string, query: string): React.ReactNode {
       part
     )
   );
-}
-
-// Check if streaming content contains objective or question signals
-function hasStreamingSignal(content: string): 'objective' | 'question' | null {
-  if (content.includes('<objective_draft>') || content.includes('title":')) {
-    return 'objective';
-  }
-  if (content.includes('<question>') || content.includes('"question":')) {
-    return 'question';
-  }
-  return null;
 }
 
 // Helper to compare Sets by content
@@ -109,14 +81,11 @@ function arePropsEqual(prevProps: MessageListProps, nextProps: MessageListProps)
     prevProps.searchQuery !== nextProps.searchQuery ||
     prevProps.streamingContent !== nextProps.streamingContent ||
     prevProps.sending !== nextProps.sending ||
-    prevProps.pendingQuestions !== nextProps.pendingQuestions ||
-    prevProps.answeredQuestions !== nextProps.answeredQuestions ||
     prevProps.acceptingAll !== nextProps.acceptingAll ||
     prevProps.onRetry !== nextProps.onRetry ||
     prevProps.onCopy !== nextProps.onCopy ||
     prevProps.onAcceptDraft !== nextProps.onAcceptDraft ||
     prevProps.onRejectDraft !== nextProps.onRejectDraft ||
-    prevProps.onAnswerQuestion !== nextProps.onAnswerQuestion ||
     prevProps.onAcceptAll !== nextProps.onAcceptAll ||
     prevProps.onRejectAll !== nextProps.onRejectAll
   ) {
@@ -154,8 +123,6 @@ export const MessageList = memo(function MessageList({
   streamingContent,
   sending,
   pendingDrafts,
-  pendingQuestions,
-  answeredQuestions,
   acceptedDrafts,
   rejectedDrafts = new Map(),
   acceptingDrafts = new Set(),
@@ -165,7 +132,6 @@ export const MessageList = memo(function MessageList({
   onAcceptDraft,
   onRejectDraft,
   onUndoReject,
-  onAnswerQuestion,
   onAcceptAll,
   onRejectAll,
 }: MessageListProps) {
@@ -246,77 +212,25 @@ export const MessageList = memo(function MessageList({
       className="app-quest-messages"
     >
       <div className="app-quest-messages__list">
-        {messages.map((msg, msgIndex) => {
+        {messages.map((msg) => {
           const isFailed = failedMessages.has(msg.id);
-          // Strip signals from content before rendering
-          const displayContent = stripSignals(msg.content);
-
-          // Find answered questions associated with this message
-          const questionsForThisMessage = answeredQuestions.filter(aq => aq.messageId === msg.id);
-
-          // For the last assistant message, also show pending questions
-          const isLastAssistantMessage = msg.role === 'assistant' &&
-            (msgIndex === messages.length - 1 ||
-            !messages.slice(msgIndex + 1).some(m => m.role === 'assistant'));
-          const pendingQuestionsForMessage = isLastAssistantMessage
-            ? pendingQuestions.filter(q => !q.messageId || q.messageId === msg.id)
-            : [];
 
           return (
-            <div key={msg.id}>
-              <Message
-                sender={msg.role === 'user' ? 'user' : 'assistant'}
-                timestamp={formatTime(msg.created_at)}
-                status={isFailed ? 'error' : undefined}
-                errorInfo={isFailed ? messageErrors.get(msg.id) : undefined}
-                onRetry={isFailed ? () => onRetry(msg) : undefined}
-                onCopy={msg.role === 'assistant' ? () => onCopy(displayContent) : undefined}
-              >
-                {msg.role === 'user' ? (
-                  <p style={{ whiteSpace: 'pre-wrap' }}>{highlightMatches(displayContent, searchQuery)}</p>
-                ) : (
-                  <MarkdownContent content={displayContent} searchQuery={searchQuery} />
-                )}
-              </Message>
-
-              {/* Answered questions from this message */}
-              {questionsForThisMessage.map((aq, i) => (
-                <QuestionPrompt
-                  key={`answered-${msg.id}-${i}`}
-                  question={aq.question.question}
-                  options={(aq.question.options || []).map((opt, j) => ({
-                    id: `${j}`,
-                    title: opt,
-                    description: '',
-                  }))}
-                  onSelect={() => {}}
-                  disabled={true}
-                  answeredId={aq.answerId}
-                  customAnswer={aq.answer}
-                />
-              ))}
-
-              {/* Pending questions for this message */}
-              {pendingQuestionsForMessage.map((q, i) => (
-                <QuestionPrompt
-                  key={`pending-${msg.id}-${i}`}
-                  question={q.question}
-                  options={(q.options || []).map((opt, j) => ({
-                    id: `${j}`,
-                    title: opt,
-                    description: '',
-                  }))}
-                  onSelect={(optId) => {
-                    const answer = q.options?.[parseInt(optId)] || '';
-                    onAnswerQuestion(answer, optId);
-                  }}
-                  onCustomAnswer={(answer) => {
-                    onAnswerQuestion(answer, 'custom');
-                  }}
-                  disabled={sending}
-                />
-              ))}
-            </div>
+            <Message
+              key={msg.id}
+              sender={msg.role === 'user' ? 'user' : 'assistant'}
+              timestamp={formatTime(msg.created_at)}
+              status={isFailed ? 'error' : undefined}
+              errorInfo={isFailed ? messageErrors.get(msg.id) : undefined}
+              onRetry={isFailed ? () => onRetry(msg) : undefined}
+              onCopy={msg.role === 'assistant' ? () => onCopy(msg.content) : undefined}
+            >
+              {msg.role === 'user' ? (
+                <p style={{ whiteSpace: 'pre-wrap' }}>{highlightMatches(msg.content, searchQuery)}</p>
+              ) : (
+                <MarkdownContent content={msg.content} searchQuery={searchQuery} />
+              )}
+            </Message>
           );
         })}
 
@@ -335,54 +249,11 @@ export const MessageList = memo(function MessageList({
         )}
 
         {/* Streaming response */}
-        {sending && streamingContent && (() => {
-          const signalType = hasStreamingSignal(streamingContent);
-          const strippedContent = stripSignals(streamingContent);
-
-          // Show placeholder for objectives/questions being streamed
-          if (signalType === 'objective') {
-            return (
-              <div className="app-streaming-placeholder">
-                <div className="app-streaming-placeholder__icon">[+]</div>
-                <div className="app-streaming-placeholder__text">
-                  <span className="app-label app-label--warm">Preparing objective...</span>
-                  <div className="app-thinking__dots">
-                    <span className="app-thinking__dot" style={{ animationDelay: '0ms' }} />
-                    <span className="app-thinking__dot" style={{ animationDelay: '150ms' }} />
-                    <span className="app-thinking__dot" style={{ animationDelay: '300ms' }} />
-                  </div>
-                </div>
-              </div>
-            );
-          }
-
-          if (signalType === 'question') {
-            return (
-              <div className="app-streaming-placeholder">
-                <div className="app-streaming-placeholder__icon">[?]</div>
-                <div className="app-streaming-placeholder__text">
-                  <span className="app-label app-label--accent">Preparing question...</span>
-                  <div className="app-thinking__dots">
-                    <span className="app-thinking__dot" style={{ animationDelay: '0ms' }} />
-                    <span className="app-thinking__dot" style={{ animationDelay: '150ms' }} />
-                    <span className="app-thinking__dot" style={{ animationDelay: '300ms' }} />
-                  </div>
-                </div>
-              </div>
-            );
-          }
-
-          // Regular streaming content
-          if (strippedContent.trim()) {
-            return (
-              <Message sender="assistant" isStreaming>
-                <MarkdownContent content={strippedContent} isStreaming />
-              </Message>
-            );
-          }
-
-          return null;
-        })()}
+        {sending && streamingContent && streamingContent.trim() && (
+          <Message sender="assistant" isStreaming>
+            <MarkdownContent content={streamingContent} isStreaming />
+          </Message>
+        )}
 
         {/* Accepted drafts - show as confirmed */}
         {acceptedDrafts.size > 0 && Array.from(acceptedDrafts.entries()).map(([key, { draft, taskId }]) => (
@@ -482,23 +353,6 @@ export const MessageList = memo(function MessageList({
             })}
           </>
         )}
-
-        {/* Questions without a message ID (fallback for legacy questions) */}
-        {answeredQuestions.filter(aq => !aq.messageId).map((aq, i) => (
-          <QuestionPrompt
-            key={`answered-orphan-${i}`}
-            question={aq.question.question}
-            options={(aq.question.options || []).map((opt, j) => ({
-              id: `${j}`,
-              title: opt,
-              description: '',
-            }))}
-            onSelect={() => {}}
-            disabled={true}
-            answeredId={aq.answerId}
-            customAnswer={aq.answer}
-          />
-        ))}
 
         {/* Thinking indicator - shown when waiting for response (not yet streaming) */}
         {sending && !streamingContent && activeTools.size === 0 && (

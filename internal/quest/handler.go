@@ -4,16 +4,13 @@ package quest
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/lirancohen/dex/internal/db"
 	"github.com/lirancohen/dex/internal/pathutil"
 	"github.com/lirancohen/dex/internal/realtime"
@@ -37,7 +34,7 @@ type ObjectiveDraft struct {
 	Checklist           Checklist `json:"checklist"`
 	BlockedBy           []string  `json:"blocked_by,omitempty"`
 	AutoStart           bool      `json:"auto_start"`
-	Complexity          string    `json:"complexity,omitempty"`          // "simple" or "complex" - determines AI model
+	Complexity          string    `json:"complexity,omitempty"` // "simple" or "complex" - determines AI model
 	EstimatedIterations int       `json:"estimated_iterations,omitempty"`
 	EstimatedBudget     float64   `json:"estimated_budget,omitempty"` // estimated cost in dollars
 	// Repository targeting - used for creating proper projects
@@ -55,13 +52,6 @@ type Checklist struct {
 	Optional []string `json:"optional,omitempty"`
 }
 
-// Question represents a clarifying question from Dex
-type Question struct {
-	DraftID  string   `json:"draft_id,omitempty"`
-	Question string   `json:"question"`
-	Options  []string `json:"options,omitempty"`
-}
-
 // PreflightCheck represents the result of pre-flight checks before starting a task
 type PreflightCheck struct {
 	OK       bool     `json:"ok"`
@@ -75,14 +65,15 @@ type GitHubClientFetcher func(ctx context.Context, login string) (*toolbelt.GitH
 type Handler struct {
 	db             *db.DB
 	client         *toolbelt.AnthropicClient
-	github         *toolbelt.GitHubClient      // Static client (PAT-based)
-	githubFetcher  GitHubClientFetcher         // Dynamic client fetcher (GitHub App)
-	broadcaster    *realtime.Broadcaster       // Realtime event broadcaster
+	github         *toolbelt.GitHubClient // Static client (PAT-based)
+	githubFetcher  GitHubClientFetcher    // Dynamic client fetcher (GitHub App)
+	broadcaster    *realtime.Broadcaster  // Realtime event broadcaster
 	promptLoader   *session.PromptLoader
-	githubUsername string                      // cached GitHub username
-	toolSet        *tools.Set                  // Read-only tools for Quest exploration
+	githubUsername string     // cached GitHub username
+	toolSet        *tools.Set // Read-only tools for Quest exploration
 	readOnlyTools  []toolbelt.AnthropicTool
-	baseDir        string                      // Base Dex directory (e.g., /opt/dex) for computing repo paths
+	baseDir        string                // Base Dex directory (e.g., /opt/dex) for computing repo paths
+	sessions       *QuestSessionRegistry // Quest session registry for blocking tools
 }
 
 // NewHandler creates a new Quest handler
@@ -106,6 +97,7 @@ func NewHandler(database *db.DB, client *toolbelt.AnthropicClient, broadcaster *
 		broadcaster:   broadcaster,
 		toolSet:       toolSet,
 		readOnlyTools: readOnlyTools,
+		sessions:      NewQuestSessionRegistry(),
 	}
 }
 
@@ -351,19 +343,14 @@ func (h *Handler) ProcessMessage(ctx context.Context, questID, content string) (
 		}
 
 		// No tool use - this is the final response
-		// Assign unique IDs to any objective drafts before storing
-		assistantContent := assignUniqueDraftIDs(response.Text())
-		assistantMsg, err := h.db.CreateQuestMessageWithToolCalls(questID, "assistant", assistantContent, allToolCalls)
+		assistantMsg, err := h.db.CreateQuestMessageWithToolCalls(questID, "assistant", response.Text(), allToolCalls)
 		if err != nil {
 			return nil, fmt.Errorf("failed to store assistant response: %w", err)
 		}
 
-		// Parse signals from the response
-		drafts := h.parseObjectiveDrafts(assistantContent)
-		questions := h.parseQuestions(assistantContent)
-		questReady := h.parseQuestReady(assistantContent)
-
 		// Broadcast the assistant message
+		// Note: Questions and drafts are now handled via tools (ask_question, propose_objective)
+		// which broadcast their own events during execution
 		if h.broadcaster != nil {
 			h.broadcaster.PublishQuestEvent(realtime.EventQuestMessage, questID, map[string]any{
 				"message": map[string]any{
@@ -375,28 +362,6 @@ func (h *Handler) ProcessMessage(ctx context.Context, questID, content string) (
 					"created_at": assistantMsg.CreatedAt,
 				},
 			})
-
-			// Broadcast any draft objectives
-			for _, draft := range drafts {
-				h.broadcaster.PublishQuestEvent(realtime.EventQuestObjectiveDraft, questID, map[string]any{
-					"draft": draft,
-				})
-			}
-
-			// Broadcast any questions
-			for _, q := range questions {
-				h.broadcaster.PublishQuestEvent(realtime.EventQuestQuestion, questID, map[string]any{
-					"question": q,
-				})
-			}
-
-			// Broadcast quest ready signal
-			if questReady != nil {
-				h.broadcaster.PublishQuestEvent(realtime.EventQuestReady, questID, map[string]any{
-					"drafts":  questReady["drafts"],
-					"summary": questReady["summary"],
-				})
-			}
 		}
 
 		// Auto-generate title from first user message if not set
@@ -419,276 +384,6 @@ func truncateForBroadcast(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen] + "..."
-}
-
-// parseObjectiveDrafts extracts OBJECTIVE_DRAFT signals from a response
-func (h *Handler) parseObjectiveDrafts(content string) []ObjectiveDraft {
-	var drafts []ObjectiveDraft
-
-	// Find all OBJECTIVE_DRAFT signals
-	marker := "OBJECTIVE_DRAFT:"
-	remaining := content
-
-	for {
-		idx := strings.Index(remaining, marker)
-		if idx == -1 {
-			break
-		}
-
-		// Extract JSON portion using balanced brace matching
-		jsonStart := idx + len(marker)
-		jsonStr, endIdx := extractJSONObject(remaining[jsonStart:])
-		if jsonStr == "" {
-			remaining = remaining[jsonStart:]
-			continue
-		}
-
-		var draft ObjectiveDraft
-		if err := json.Unmarshal([]byte(jsonStr), &draft); err != nil {
-			// Try to fix common JSON issues
-			fixed := h.fixJSON(jsonStr)
-			if err := json.Unmarshal([]byte(fixed), &draft); err != nil {
-				fmt.Printf("warning: failed to parse OBJECTIVE_DRAFT JSON: %v\n", err)
-				remaining = remaining[jsonStart+endIdx:]
-				continue
-			}
-		}
-
-		if draft.Title != "" {
-			drafts = append(drafts, draft)
-		}
-
-		remaining = remaining[jsonStart+endIdx:]
-	}
-
-	return drafts
-}
-
-// extractJSONObject extracts a JSON object from a string using balanced brace matching
-// Returns the JSON string and the end index
-func extractJSONObject(s string) (string, int) {
-	// Skip whitespace
-	start := 0
-	for start < len(s) && (s[start] == ' ' || s[start] == '\t' || s[start] == '\n' || s[start] == '\r') {
-		start++
-	}
-
-	if start >= len(s) || s[start] != '{' {
-		return "", 0
-	}
-
-	depth := 0
-	inString := false
-	escaped := false
-
-	for i := start; i < len(s); i++ {
-		c := s[i]
-
-		if escaped {
-			escaped = false
-			continue
-		}
-
-		if c == '\\' && inString {
-			escaped = true
-			continue
-		}
-
-		if c == '"' {
-			inString = !inString
-			continue
-		}
-
-		if inString {
-			continue
-		}
-
-		if c == '{' {
-			depth++
-		} else if c == '}' {
-			depth--
-			if depth == 0 {
-				return s[start : i+1], i + 1
-			}
-		}
-	}
-
-	// Unbalanced braces
-	return "", 0
-}
-
-// assignUniqueDraftIDs replaces draft_id values in OBJECTIVE_DRAFT signals with UUIDs.
-// This ensures each draft has a globally unique ID that persists across conversations.
-// It also updates blocked_by references to use the new UUIDs.
-func assignUniqueDraftIDs(content string) string {
-	marker := "OBJECTIVE_DRAFT:"
-
-	// First pass: collect all drafts and build old_id -> new_id mapping
-	type draftInfo struct {
-		startIdx int    // position in content where OBJECTIVE_DRAFT: starts
-		endIdx   int    // position after the JSON ends
-		jsonStr  string // original JSON string
-		draft    map[string]interface{}
-	}
-	var drafts []draftInfo
-	idMapping := make(map[string]string) // old draft_id -> new UUID
-
-	remaining := content
-	offset := 0
-	for {
-		idx := strings.Index(remaining, marker)
-		if idx == -1 {
-			break
-		}
-
-		jsonStart := idx + len(marker)
-		jsonStr, jsonLen := extractJSONObject(remaining[jsonStart:])
-		if jsonStr == "" {
-			remaining = remaining[jsonStart:]
-			offset += jsonStart
-			continue
-		}
-
-		var draft map[string]interface{}
-		if err := json.Unmarshal([]byte(jsonStr), &draft); err != nil {
-			remaining = remaining[jsonStart+jsonLen:]
-			offset += jsonStart + jsonLen
-			continue
-		}
-
-		// Generate new UUID and build mapping
-		oldID, _ := draft["draft_id"].(string)
-		newID := uuid.New().String()
-		if oldID != "" {
-			idMapping[oldID] = newID
-		}
-
-		drafts = append(drafts, draftInfo{
-			startIdx: offset + idx,
-			endIdx:   offset + jsonStart + jsonLen,
-			jsonStr:  jsonStr,
-			draft:    draft,
-		})
-
-		remaining = remaining[jsonStart+jsonLen:]
-		offset += jsonStart + jsonLen
-	}
-
-	// If no drafts found, return original content
-	if len(drafts) == 0 {
-		return content
-	}
-
-	// Second pass: update draft_id and blocked_by references, then rebuild content
-	result := strings.Builder{}
-	lastEnd := 0
-
-	for _, d := range drafts {
-		// Add content before this draft
-		result.WriteString(content[lastEnd:d.startIdx])
-
-		// Update draft_id with new UUID
-		if oldID, ok := d.draft["draft_id"].(string); ok {
-			if newID, exists := idMapping[oldID]; exists {
-				d.draft["draft_id"] = newID
-			}
-		}
-
-		// Update blocked_by references
-		if blockedBy, ok := d.draft["blocked_by"].([]interface{}); ok {
-			newBlockedBy := make([]interface{}, len(blockedBy))
-			for i, ref := range blockedBy {
-				if refStr, ok := ref.(string); ok {
-					if newID, exists := idMapping[refStr]; exists {
-						newBlockedBy[i] = newID
-					} else {
-						newBlockedBy[i] = refStr
-					}
-				} else {
-					newBlockedBy[i] = ref
-				}
-			}
-			d.draft["blocked_by"] = newBlockedBy
-		}
-
-		// Marshal back to JSON
-		newJSON, err := json.Marshal(d.draft)
-		if err != nil {
-			// Failed to marshal, keep original
-			result.WriteString(marker)
-			result.WriteString(d.jsonStr)
-		} else {
-			result.WriteString(marker)
-			result.WriteString(string(newJSON))
-		}
-
-		lastEnd = d.endIdx
-	}
-
-	// Add remaining content after last draft
-	result.WriteString(content[lastEnd:])
-
-	return result.String()
-}
-
-// parseQuestions extracts QUESTION signals from a response
-func (h *Handler) parseQuestions(content string) []Question {
-	var questions []Question
-
-	// Match QUESTION:{...} patterns
-	re := regexp.MustCompile(`QUESTION:\s*(\{[^}]+\})`)
-	matches := re.FindAllStringSubmatch(content, -1)
-
-	for _, match := range matches {
-		if len(match) < 2 {
-			continue
-		}
-
-		var q Question
-		if err := json.Unmarshal([]byte(match[1]), &q); err != nil {
-			fixed := h.fixJSON(match[1])
-			if err := json.Unmarshal([]byte(fixed), &q); err != nil {
-				continue
-			}
-		}
-
-		if q.Question != "" {
-			questions = append(questions, q)
-		}
-	}
-
-	return questions
-}
-
-// parseQuestReady extracts QUEST_READY signal from a response
-func (h *Handler) parseQuestReady(content string) map[string]any {
-	// Match QUEST_READY:{...} pattern
-	re := regexp.MustCompile(`QUEST_READY:\s*(\{[^}]+\})`)
-	match := re.FindStringSubmatch(content)
-
-	if len(match) < 2 {
-		return nil
-	}
-
-	var result map[string]any
-	if err := json.Unmarshal([]byte(match[1]), &result); err != nil {
-		fixed := h.fixJSON(match[1])
-		if err := json.Unmarshal([]byte(fixed), &result); err != nil {
-			return nil
-		}
-	}
-
-	return result
-}
-
-// fixJSON attempts to fix common JSON formatting issues
-func (h *Handler) fixJSON(s string) string {
-	// Replace single quotes with double quotes
-	s = strings.ReplaceAll(s, "'", "\"")
-	// Fix trailing commas
-	re := regexp.MustCompile(`,\s*([}\]])`)
-	s = re.ReplaceAllString(s, "$1")
-	return s
 }
 
 // generateTitle creates a short title from the first user message
@@ -1076,9 +771,71 @@ func (h *Handler) buildCrossQuestContext(projectID, currentQuestID string) strin
 	return context.String()
 }
 
+// BroadcastPendingQuestion broadcasts a pending question to the frontend
+// This implements the QuestionBroadcaster interface
+func (h *Handler) BroadcastPendingQuestion(questID string, callID string, question tools.QuestionOptions) {
+	if h.broadcaster == nil {
+		return
+	}
+
+	// Convert QuestionOptions to a map for broadcasting
+	optionsData := make([]map[string]any, len(question.Options))
+	for i, opt := range question.Options {
+		optionsData[i] = map[string]any{
+			"label":       opt.Label,
+			"description": opt.Description,
+		}
+	}
+
+	h.broadcaster.PublishQuestEvent(realtime.EventQuestQuestion, questID, map[string]any{
+		"call_id":           callID,
+		"question":          question.Question,
+		"header":            question.Header,
+		"options":           optionsData,
+		"allow_multiple":    question.AllowMultiple,
+		"allow_custom":      question.AllowCustom,
+		"recommended_index": question.RecommendedIndex,
+	})
+}
+
 // executeQuestTool executes quest-specific tools that need database access
 func (h *Handler) executeQuestTool(ctx context.Context, questID, toolName string, input map[string]any) tools.Result {
 	switch toolName {
+	// Conversation tools
+	case "ask_question":
+		session := h.sessions.GetOrCreate(questID)
+		result, err := executeAskQuestion(ctx, session, input, h)
+		if err != nil {
+			return tools.Result{Output: fmt.Sprintf("ask_question failed: %v", err), IsError: true}
+		}
+		return result
+	case "propose_objective":
+		session := h.sessions.GetOrCreate(questID)
+		result := executeProposeObjective(session, input)
+		// Broadcast the draft if successful
+		if !result.IsError {
+			draft := session.GetAllPendingDrafts()
+			if len(draft) > 0 {
+				latestDraft := draft[len(draft)-1]
+				if h.broadcaster != nil {
+					h.broadcaster.PublishQuestEvent(realtime.EventQuestObjectiveDraft, questID, map[string]any{
+						"draft": latestDraft.Draft,
+					})
+				}
+			}
+		}
+		return result
+	case "complete_quest":
+		session := h.sessions.GetOrCreate(questID)
+		result := executeCompleteQuest(session, input)
+		// Broadcast quest ready if successful
+		if !result.IsError && h.broadcaster != nil {
+			h.broadcaster.PublishQuestEvent(realtime.EventQuestReady, questID, map[string]any{
+				"summary": session.Summary,
+			})
+		}
+		return result
+	// Objective management tools
 	case "list_objectives":
 		return h.executeListObjectives(questID)
 	case "get_objective_details":
@@ -1091,6 +848,21 @@ func (h *Handler) executeQuestTool(ctx context.Context, questID, toolName string
 	default:
 		return tools.Result{Output: fmt.Sprintf("Unknown quest tool: %s", toolName), IsError: true}
 	}
+}
+
+// GetSession returns the quest session for a given quest ID
+func (h *Handler) GetSession(questID string) *QuestSession {
+	return h.sessions.Get(questID)
+}
+
+// DeliverAnswer delivers a user's answer to a pending question
+func (h *Handler) DeliverAnswer(questID string, answer tools.BlockingToolAnswer) error {
+	return h.sessions.DeliverAnswer(questID, answer)
+}
+
+// CancelSession cancels a quest session
+func (h *Handler) CancelSession(questID string) {
+	h.sessions.Remove(questID)
 }
 
 // executeListObjectives lists all objectives for a quest

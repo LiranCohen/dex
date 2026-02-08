@@ -3,10 +3,49 @@ package quest
 
 import (
 	"github.com/lirancohen/dex/internal/toolbelt"
+	"github.com/lirancohen/dex/internal/tools"
 )
 
 // Quest-specific tools that need database access
 // These are handled directly in the quest handler, not through the generic executor
+
+// =============================================================================
+// Conversation Tools (blocking/interactive)
+// =============================================================================
+
+// AskQuestionToolDef returns the Anthropic tool definition for ask_question
+func AskQuestionToolDef() toolbelt.AnthropicTool {
+	t := tools.AskQuestionTool()
+	return toolbelt.AnthropicTool{
+		Name:        t.Name,
+		Description: t.Description,
+		InputSchema: t.InputSchema,
+	}
+}
+
+// ProposeObjectiveToolDef returns the Anthropic tool definition for propose_objective
+func ProposeObjectiveToolDef() toolbelt.AnthropicTool {
+	t := tools.ProposeObjectiveTool()
+	return toolbelt.AnthropicTool{
+		Name:        t.Name,
+		Description: t.Description,
+		InputSchema: t.InputSchema,
+	}
+}
+
+// CompleteQuestToolDef returns the Anthropic tool definition for complete_quest
+func CompleteQuestToolDef() toolbelt.AnthropicTool {
+	t := tools.CompleteQuestTool()
+	return toolbelt.AnthropicTool{
+		Name:        t.Name,
+		Description: t.Description,
+		InputSchema: t.InputSchema,
+	}
+}
+
+// =============================================================================
+// Objective Management Tools (database access)
+// =============================================================================
 
 // ListObjectivesTool returns a tool definition for listing quest objectives
 func ListObjectivesTool() toolbelt.AnthropicTool {
@@ -64,6 +103,11 @@ func CancelObjectiveTool() toolbelt.AnthropicTool {
 // QuestTools returns all quest-specific tools
 func QuestTools() []toolbelt.AnthropicTool {
 	return []toolbelt.AnthropicTool{
+		// Conversation tools
+		AskQuestionToolDef(),
+		ProposeObjectiveToolDef(),
+		CompleteQuestToolDef(),
+		// Objective management tools
 		ListObjectivesTool(),
 		GetObjectiveDetailsTool(),
 		CancelObjectiveTool(),
@@ -73,9 +117,15 @@ func QuestTools() []toolbelt.AnthropicTool {
 // IsQuestTool returns true if the tool name is a quest-specific tool
 func IsQuestTool(name string) bool {
 	switch name {
-	case "list_objectives", "get_objective_details", "cancel_objective":
+	case "ask_question", "propose_objective", "complete_quest",
+		"list_objectives", "get_objective_details", "cancel_objective":
 		return true
 	default:
 		return false
 	}
+}
+
+// IsBlockingQuestTool returns true if the tool blocks for user input
+func IsBlockingQuestTool(name string) bool {
+	return name == "ask_question"
 }

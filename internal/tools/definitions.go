@@ -476,3 +476,380 @@ func TaskCompleteTool() Tool {
 		ReadOnly: false,
 	}
 }
+
+// =============================================================================
+// Quest Tools - for Quest conversation phase
+// =============================================================================
+
+// AskQuestionTool returns the tool definition for asking clarifying questions
+func AskQuestionTool() Tool {
+	return Tool{
+		Name: "ask_question",
+		Description: `Ask the user a clarifying question. Execution pauses until the user responds.
+
+Usage notes:
+- When options are provided, user can select one (or multiple if allow_multiple=true)
+- If allow_custom=true (default), an "Other" option lets users type a custom answer
+- Put the recommended option first and set recommended_index=0
+- Returns: {"answer": "selected label or custom text", "selected_indices": [0], "is_custom": false}`,
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"question": map[string]any{
+					"type":        "string",
+					"description": "The question to ask the user",
+				},
+				"header": map[string]any{
+					"type":        "string",
+					"description": "Short label for the question (max 30 chars)",
+				},
+				"options": map[string]any{
+					"type": "array",
+					"items": map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"label": map[string]any{
+								"type":        "string",
+								"description": "Display text (1-5 words, concise)",
+							},
+							"description": map[string]any{
+								"type":        "string",
+								"description": "Explanation of choice",
+							},
+						},
+						"required": []string{"label"},
+					},
+					"description": "Optional list of choices for the user",
+				},
+				"allow_multiple": map[string]any{
+					"type":        "boolean",
+					"description": "Allow selecting multiple options (default: false)",
+				},
+				"allow_custom": map[string]any{
+					"type":        "boolean",
+					"description": "Show 'Other' option for custom answer (default: true)",
+				},
+				"recommended_index": map[string]any{
+					"type":        "integer",
+					"description": "Index of recommended option (0-based), adds '(Recommended)' label",
+				},
+			},
+			"required": []string{"question"},
+		},
+		ReadOnly: true, // No filesystem changes
+	}
+}
+
+// ProposeObjectiveTool returns the tool definition for proposing objectives
+func ProposeObjectiveTool() Tool {
+	return Tool{
+		Name: "propose_objective",
+		Description: `Propose a task/objective for user approval. Non-blocking - creates a pending draft.
+
+Returns: {"draft_id": "uuid", "status": "pending"}
+The user accepts/rejects via UI, which triggers objective creation.`,
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"title": map[string]any{
+					"type":        "string",
+					"description": "Action-oriented title (e.g., 'Add user authentication')",
+				},
+				"description": map[string]any{
+					"type":        "string",
+					"description": "Detailed description of what this objective accomplishes",
+				},
+				"hat": map[string]any{
+					"type":        "string",
+					"enum":        []string{"explorer", "planner", "designer", "creator"},
+					"description": "Starting hat for this objective",
+				},
+				"checklist_must_have": map[string]any{
+					"type":        "array",
+					"items":       map[string]any{"type": "string"},
+					"description": "Required checklist items (3-5 items, outcome-focused)",
+				},
+				"checklist_optional": map[string]any{
+					"type":        "array",
+					"items":       map[string]any{"type": "string"},
+					"description": "Optional nice-to-have items",
+				},
+				"blocked_by": map[string]any{
+					"type":        "array",
+					"items":       map[string]any{"type": "string"},
+					"description": "Draft IDs this objective depends on",
+				},
+				"auto_start": map[string]any{
+					"type":        "boolean",
+					"description": "Start immediately when accepted (default: true)",
+				},
+				"complexity": map[string]any{
+					"type":        "string",
+					"enum":        []string{"simple", "complex"},
+					"description": "simple=Sonnet model, complex=Opus model",
+				},
+				"estimated_iterations": map[string]any{
+					"type":        "integer",
+					"description": "Estimated number of iterations needed",
+				},
+				"estimated_budget": map[string]any{
+					"type":        "number",
+					"description": "Estimated cost in USD",
+				},
+				"git_provider": map[string]any{
+					"type":        "string",
+					"enum":        []string{"github", "forgejo"},
+					"description": "Git provider (default: github)",
+				},
+				"git_owner": map[string]any{
+					"type":        "string",
+					"description": "Owner/org for the repository",
+				},
+				"git_repo": map[string]any{
+					"type":        "string",
+					"description": "Repository name",
+				},
+				"clone_url": map[string]any{
+					"type":        "string",
+					"description": "Upstream URL to fork from (null for new repos)",
+				},
+			},
+			"required": []string{"title", "hat", "checklist_must_have"},
+		},
+		ReadOnly: true,
+	}
+}
+
+// CompleteQuestTool returns the tool definition for completing a quest
+func CompleteQuestTool() Tool {
+	return Tool{
+		Name:        "complete_quest",
+		Description: "Signal that all objectives have been proposed and quest planning is complete.",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"summary": map[string]any{
+					"type":        "string",
+					"description": "Brief summary of what the proposed objectives will accomplish",
+				},
+			},
+			"required": []string{"summary"},
+		},
+		ReadOnly: true,
+	}
+}
+
+// =============================================================================
+// Workflow Tools - for task execution phase (shared between HQ and workers)
+// =============================================================================
+
+// MarkChecklistItemTool returns the tool definition for marking checklist items
+func MarkChecklistItemTool() Tool {
+	return Tool{
+		Name: "mark_checklist_item",
+		Description: `Update the status of a checklist item. Call IMMEDIATELY after completing each item's work.
+
+Correct pattern (interleaved):
+  [do work for item 1]
+  mark_checklist_item(item_id="citm-123", status="done")
+  [do work for item 2]
+  mark_checklist_item(item_id="citm-456", status="done")
+
+Wrong pattern (batched at end):
+  [do all work]
+  mark_checklist_item(...)  // defeats real-time progress tracking`,
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"item_id": map[string]any{
+					"type":        "string",
+					"description": "The checklist item ID (e.g., 'citm-abc123')",
+				},
+				"status": map[string]any{
+					"type":        "string",
+					"enum":        []string{"done", "failed", "skipped"},
+					"description": "New status for the item",
+				},
+				"reason": map[string]any{
+					"type":        "string",
+					"description": "Reason for failure or skip (required if status is 'failed' or 'skipped')",
+				},
+			},
+			"required": []string{"item_id", "status"},
+		},
+		ReadOnly: false,
+	}
+}
+
+// SignalEventTool returns the tool definition for signaling workflow events
+func SignalEventTool() Tool {
+	return Tool{
+		Name: "signal_event",
+		Description: `Signal a workflow state transition. This triggers hat changes and workflow progression.
+
+Event routing:
+- plan.complete → designer
+- design.complete → creator
+- implementation.done → critic
+- review.approved → editor
+- review.rejected → creator
+- task.blocked → resolver
+- resolved → creator
+- task.complete → (terminal)`,
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"event": map[string]any{
+					"type": "string",
+					"enum": []string{
+						"plan.complete",
+						"design.complete",
+						"implementation.done",
+						"review.approved",
+						"review.rejected",
+						"task.blocked",
+						"resolved",
+						"task.complete",
+					},
+					"description": "The event to signal",
+				},
+				"payload": map[string]any{
+					"type":        "object",
+					"description": "Optional event payload (e.g., {\"reason\": \"...\"} for task.blocked)",
+				},
+				"acknowledge_failures": map[string]any{
+					"type":        "boolean",
+					"description": "For task.complete: acknowledge known checklist failures",
+				},
+			},
+			"required": []string{"event"},
+		},
+		ReadOnly: false,
+	}
+}
+
+// UpdateScratchpadTool returns the tool definition for updating the scratchpad
+func UpdateScratchpadTool() Tool {
+	return Tool{
+		Name: "update_scratchpad",
+		Description: `Update your working notes. Persists across iterations and context compaction.
+
+Call after:
+- Completing a significant step
+- Making an important decision
+- Encountering a blocker
+- Natural stopping points`,
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"understanding": map[string]any{
+					"type":        "string",
+					"description": "Current understanding of task and codebase",
+				},
+				"plan": map[string]any{
+					"type":        "string",
+					"description": "Current plan/checklist (mark completed with [x])",
+				},
+				"decisions": map[string]any{
+					"type":        "string",
+					"description": "Key decisions made and rationale",
+				},
+				"blockers": map[string]any{
+					"type":        "string",
+					"description": "Any issues preventing progress",
+				},
+				"last_action": map[string]any{
+					"type":        "string",
+					"description": "What you just did and what's next",
+				},
+			},
+			"required": []string{"understanding", "plan", "last_action"},
+		},
+		ReadOnly: false,
+	}
+}
+
+// StoreMemoryTool returns the tool definition for storing project memories
+func StoreMemoryTool() Tool {
+	return Tool{
+		Name:        "store_memory",
+		Description: "Record a learning about this project for future tasks. Keep memories concise (1-2 sentences) and actionable.",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"category": map[string]any{
+					"type": "string",
+					"enum": []string{
+						"architecture",
+						"pattern",
+						"pitfall",
+						"decision",
+						"fix",
+						"convention",
+						"dependency",
+						"constraint",
+					},
+					"description": "Type of memory",
+				},
+				"content": map[string]any{
+					"type":        "string",
+					"description": "The learning (1-2 sentences, actionable)",
+				},
+				"source": map[string]any{
+					"type":        "string",
+					"description": "Where this was discovered (file path, tool output, etc.)",
+				},
+			},
+			"required": []string{"category", "content"},
+		},
+		ReadOnly: false,
+	}
+}
+
+// =============================================================================
+// Planning Tools - for planning phase
+// =============================================================================
+
+// ConfirmPlanTool returns the tool definition for confirming a plan
+func ConfirmPlanTool() Tool {
+	return Tool{
+		Name:        "confirm_plan",
+		Description: "Confirm the plan and provide the refined prompt for task execution.",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"refined_prompt": map[string]any{
+					"type":        "string",
+					"description": "The refined, clarified prompt for task execution",
+				},
+			},
+			"required": []string{"refined_prompt"},
+		},
+		ReadOnly: true,
+	}
+}
+
+// ProposeChecklistTool returns the tool definition for proposing a checklist
+func ProposeChecklistTool() Tool {
+	return Tool{
+		Name:        "propose_checklist",
+		Description: "Propose a checklist for the task with required and optional items.",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"must_have": map[string]any{
+					"type":        "array",
+					"items":       map[string]any{"type": "string"},
+					"description": "Required checklist items",
+				},
+				"optional": map[string]any{
+					"type":        "array",
+					"items":       map[string]any{"type": "string"},
+					"description": "Optional nice-to-have items",
+				},
+			},
+			"required": []string{"must_have"},
+		},
+		ReadOnly: true,
+	}
+}

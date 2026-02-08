@@ -400,6 +400,23 @@ export interface QuestTemplate {
   created_at: string;
 }
 
+// Pending question option from ask_question tool
+export interface PendingQuestionOption {
+  label: string;
+  description?: string;
+}
+
+// Pending question from ask_question blocking tool
+export interface PendingQuestion {
+  call_id: string;
+  question: string;
+  header?: string;
+  options?: PendingQuestionOption[];
+  allow_multiple?: boolean;
+  allow_custom?: boolean;
+  recommended_index?: number;
+}
+
 // Quest WebSocket events
 export interface QuestEvent extends WebSocketEvent {
   type: 'quest.created' | 'quest.message' | 'quest.completed' | 'quest.reopened' | 'quest.deleted' | 'quest.objective_draft' | 'quest.question' | 'quest.ready' | 'quest.tool_call' | 'quest.tool_result' | 'quest.content_delta';
@@ -413,6 +430,7 @@ export interface QuestEvent extends WebSocketEvent {
     summary?: string;
     // Tool call events
     tool_name?: string;
+    call_id?: string;
     status?: 'running';
     output?: string;
     is_error?: boolean;
@@ -420,5 +438,12 @@ export interface QuestEvent extends WebSocketEvent {
     // Streaming content events
     delta?: string;
     content?: string;
+    // Pending question from ask_question tool
+    pending_question?: PendingQuestion;
+    // Fields for quest.question event (blocking tool)
+    header?: string;
+    allow_multiple?: boolean;
+    allow_custom?: boolean;
+    recommended_index?: number;
   };
 }

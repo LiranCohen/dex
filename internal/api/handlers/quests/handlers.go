@@ -12,6 +12,7 @@ import (
 	"github.com/lirancohen/dex/internal/db"
 	"github.com/lirancohen/dex/internal/realtime"
 	"github.com/lirancohen/dex/internal/toolbelt"
+	"github.com/lirancohen/dex/internal/tools"
 )
 
 // Handler handles quest-related HTTP requests.
@@ -19,9 +20,9 @@ type Handler struct {
 	deps *core.Deps
 
 	// Issue sync callbacks (injected to avoid circular deps)
-	SyncQuestToIssue  func(questID string)
-	CloseQuestIssue   func(questID string, summary *db.QuestSummary)
-	ReopenQuestIssue  func(questID string)
+	SyncQuestToIssue func(questID string)
+	CloseQuestIssue  func(questID string, summary *db.QuestSummary)
+	ReopenQuestIssue func(questID string)
 }
 
 // New creates a new quests handler.
@@ -36,6 +37,8 @@ func New(deps *core.Deps) *Handler {
 //   - GET /quests/:id
 //   - DELETE /quests/:id
 //   - POST /quests/:id/messages
+//   - POST /quests/:id/answer
+//   - POST /quests/:id/cancel
 //   - POST /quests/:id/complete
 //   - POST /quests/:id/reopen
 //   - PUT /quests/:id/model
@@ -47,6 +50,8 @@ func (h *Handler) RegisterRoutes(g *echo.Group) {
 	g.GET("/quests/:id", h.HandleGet)
 	g.DELETE("/quests/:id", h.HandleDelete)
 	g.POST("/quests/:id/messages", h.HandleSendMessage)
+	g.POST("/quests/:id/answer", h.HandleAnswerQuestion)
+	g.POST("/quests/:id/cancel", h.HandleCancelSession)
 	g.POST("/quests/:id/complete", h.HandleComplete)
 	g.POST("/quests/:id/reopen", h.HandleReopen)
 	g.PUT("/quests/:id/model", h.HandleUpdateModel)
@@ -457,4 +462,87 @@ func (h *Handler) HandleGetPreflight(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, check)
+}
+
+// AnswerQuestionRequest represents the request body for answering a question
+type AnswerQuestionRequest struct {
+	Answer          string `json:"answer"`
+	SelectedIndices []int  `json:"selected_indices,omitempty"`
+	IsCustom        bool   `json:"is_custom"`
+}
+
+// HandleAnswerQuestion delivers a user's answer to a pending question
+// POST /api/v1/quests/:id/answer
+func (h *Handler) HandleAnswerQuestion(c echo.Context) error {
+	questID := c.Param("id")
+
+	if h.deps.QuestHandler == nil {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "quest handler not configured")
+	}
+
+	// Verify the quest exists
+	quest, err := h.deps.DB.GetQuestByID(questID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	if quest == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "quest not found")
+	}
+
+	// Check if there's an active session waiting for an answer
+	session := h.deps.QuestHandler.GetSession(questID)
+	if session == nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "no active session for this quest")
+	}
+
+	if !session.BlockingContext.HasPending() {
+		return echo.NewHTTPError(http.StatusBadRequest, "no pending question for this quest")
+	}
+
+	// Parse the request
+	var req AnswerQuestionRequest
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+
+	// Deliver the answer
+	answer := tools.BlockingToolAnswer{
+		Answer:          req.Answer,
+		SelectedIndices: req.SelectedIndices,
+		IsCustom:        req.IsCustom,
+	}
+
+	if err := h.deps.QuestHandler.DeliverAnswer(questID, answer); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("failed to deliver answer: %v", err))
+	}
+
+	return c.JSON(http.StatusOK, map[string]string{
+		"status": "delivered",
+	})
+}
+
+// HandleCancelSession cancels an active quest session
+// POST /api/v1/quests/:id/cancel
+func (h *Handler) HandleCancelSession(c echo.Context) error {
+	questID := c.Param("id")
+
+	if h.deps.QuestHandler == nil {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "quest handler not configured")
+	}
+
+	// Verify the quest exists
+	quest, err := h.deps.DB.GetQuestByID(questID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	if quest == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "quest not found")
+	}
+
+	// Cancel the session
+	h.deps.QuestHandler.CancelSession(questID)
+
+	return c.JSON(http.StatusOK, map[string]string{
+		"status": "cancelled",
+	})
 }
