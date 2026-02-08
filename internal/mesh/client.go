@@ -112,6 +112,12 @@ func (c *Client) startTunnel(ctx context.Context) error {
 		acmeSettings = &c.config.Tunnel.ACME
 	}
 
+	// Use PublicDomain from config, with fallback for backwards compatibility
+	publicDomain := c.config.PublicDomain
+	if publicDomain == "" {
+		publicDomain = "enbox.id"
+	}
+
 	c.mu.Lock()
 	c.tunnel = NewTunnelClient(TunnelConfig{
 		IngressAddr: c.config.Tunnel.IngressAddr,
@@ -122,7 +128,7 @@ func (c *Client) startTunnel(ctx context.Context) error {
 		CoordURL:    c.config.ControlURL,
 		APIToken:    c.config.Tunnel.Token, // Use tunnel token for DNS API auth
 		StateDir:    c.config.StateDir,
-		BaseDomain:  "enbox.id", // TODO: make configurable
+		BaseDomain:  publicDomain,
 	})
 	c.mu.Unlock()
 

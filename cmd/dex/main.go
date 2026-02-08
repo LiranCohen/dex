@@ -320,13 +320,20 @@ func main() {
 		// The machine key is already saved in the state directory during enrollment
 		authKey := *meshAuthKey
 
+		// Get public domain from enrollment config, with fallback
+		publicDomain := "enbox.id"
+		if enrollConfig != nil && enrollConfig.Domains.Public != "" {
+			publicDomain = enrollConfig.Domains.Public
+		}
+
 		meshConfig = &mesh.Config{
-			Enabled:    true,
-			Hostname:   hostname,
-			StateDir:   meshState,
-			ControlURL: controlURL,
-			AuthKey:    authKey, // Only used if explicitly provided via CLI
-			IsHQ:       true,    // dex server is always the HQ
+			Enabled:      true,
+			Hostname:     hostname,
+			StateDir:     meshState,
+			ControlURL:   controlURL,
+			AuthKey:      authKey, // Only used if explicitly provided via CLI
+			IsHQ:         true,    // dex server is always the HQ
+			PublicDomain: publicDomain,
 		}
 		fmt.Printf("Mesh networking enabled: hostname=%s, control=%s\n", hostname, controlURL)
 
@@ -367,12 +374,17 @@ func main() {
 		}
 
 		// Determine git hostname: explicit flag > namespace from enrollment > none
-		// Pattern: git.{username}.enbox.id (e.g., git.poo.enbox.id)
+		// Pattern: git.{namespace}.{public_domain} (e.g., git.alice.enbox.id)
 		var gitHostname string
 		if *forgejoURL != "" {
 			cfg.RootURL = *forgejoURL
 		} else if enrollConfig != nil && enrollConfig.Namespace != "" {
-			gitHostname = fmt.Sprintf("git.%s.enbox.id", enrollConfig.Namespace)
+			// Use domain from config, with fallback for backwards compatibility
+			publicDomain := enrollConfig.Domains.Public
+			if publicDomain == "" {
+				publicDomain = "enbox.id"
+			}
+			gitHostname = fmt.Sprintf("git.%s.%s", enrollConfig.Namespace, publicDomain)
 			cfg.RootURL = "https://" + gitHostname
 		}
 

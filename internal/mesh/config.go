@@ -25,6 +25,10 @@ type Config struct {
 	// There should be exactly one HQ per user.
 	IsHQ bool `yaml:"is_hq"`
 
+	// PublicDomain is the base domain for public URLs (e.g., "enbox.id").
+	// Used for ACME certificates and public hostname construction.
+	PublicDomain string `yaml:"public_domain"`
+
 	// Tunnel holds configuration for the HQ-initiated tunnel to Ingress.
 	Tunnel TunnelSettings `yaml:"tunnel"`
 }
@@ -77,10 +81,11 @@ type EndpointMapping struct {
 // DefaultConfig returns a Config with sensible defaults.
 func DefaultConfig() Config {
 	return Config{
-		Enabled:    false,
-		StateDir:   "/var/lib/dex/mesh",
-		ControlURL: "https://central.enbox.id",
-		IsHQ:       true, // dex server instances are typically HQ
+		Enabled:      false,
+		StateDir:     "/var/lib/dex/mesh",
+		ControlURL:   "https://central.enbox.id",
+		IsHQ:         true, // dex server instances are typically HQ
+		PublicDomain: "enbox.id",
 		Tunnel: TunnelSettings{
 			Enabled:     false,
 			IngressAddr: "ingress.enbox.id:9443",

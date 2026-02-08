@@ -58,9 +58,15 @@ func runClientTray(args []string) error {
 		return fmt.Errorf("no client configuration found. Run 'dex client enroll' first: %w", err)
 	}
 
+	// Use domain from config, with fallback for backwards compatibility
+	publicDomain := config.Domains.Public
+	if publicDomain == "" {
+		publicDomain = "enbox.id"
+	}
+
 	tray := &clientTray{
 		state:   trayStateDisconnected,
-		hqURL:   fmt.Sprintf("https://hq.%s.enbox.id", config.Namespace),
+		hqURL:   fmt.Sprintf("https://hq.%s.%s", config.Namespace, publicDomain),
 		dataDir: dataDir,
 	}
 
@@ -143,12 +149,19 @@ func (t *clientTray) connect() {
 		return
 	}
 
+	// Get public domain from config, with fallback
+	publicDomain := config.Domains.Public
+	if publicDomain == "" {
+		publicDomain = "enbox.id"
+	}
+
 	meshConfig := mesh.Config{
-		Enabled:    true,
-		Hostname:   config.Hostname,
-		StateDir:   filepath.Join(t.dataDir, "mesh"),
-		ControlURL: config.Mesh.ControlURL,
-		IsHQ:       false, // Client is not HQ
+		Enabled:      true,
+		Hostname:     config.Hostname,
+		StateDir:     filepath.Join(t.dataDir, "mesh"),
+		ControlURL:   config.Mesh.ControlURL,
+		IsHQ:         false, // Client is not HQ
+		PublicDomain: publicDomain,
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())

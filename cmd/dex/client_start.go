@@ -54,13 +54,20 @@ func runClientStart(args []string) error {
 	fmt.Printf("  Control:   %s\n", config.Mesh.ControlURL)
 	fmt.Println()
 
+	// Get public domain from config, with fallback
+	publicDomain := config.Domains.Public
+	if publicDomain == "" {
+		publicDomain = "enbox.id"
+	}
+
 	// Create mesh client with minimal configuration (no tunnel)
 	meshConfig := mesh.Config{
-		Enabled:    true,
-		Hostname:   config.Hostname,
-		StateDir:   filepath.Join(dataDir, "mesh"),
-		ControlURL: config.Mesh.ControlURL,
-		IsHQ:       false, // Client is not an HQ
+		Enabled:      true,
+		Hostname:     config.Hostname,
+		StateDir:     filepath.Join(dataDir, "mesh"),
+		ControlURL:   config.Mesh.ControlURL,
+		IsHQ:         false, // Client is not an HQ
+		PublicDomain: publicDomain,
 	}
 
 	meshClient := mesh.NewClient(meshConfig)

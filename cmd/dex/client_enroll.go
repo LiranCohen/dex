@@ -30,6 +30,12 @@ type ClientEnrollmentResponse struct {
 	Namespace string `json:"namespace"`
 	Hostname  string `json:"hostname"`
 
+	// Domain configuration - use these instead of hardcoding
+	Domains struct {
+		Public string `json:"public"` // Base domain for public URLs (e.g., "enbox.id")
+		Mesh   string `json:"mesh"`   // Base domain for MagicDNS mesh hostnames (e.g., "dex")
+	} `json:"domains"`
+
 	// Mesh configuration for dexnet
 	Mesh struct {
 		ControlURL string `json:"control_url"`
@@ -137,9 +143,23 @@ func runClientEnroll(args []string) error {
 	}
 
 	// 8. Build and save configuration
+	// Use domains from response, with fallbacks for backwards compatibility
+	publicDomain := resp.Domains.Public
+	if publicDomain == "" {
+		publicDomain = "enbox.id"
+	}
+	meshDomain := resp.Domains.Mesh
+	if meshDomain == "" {
+		meshDomain = "dex"
+	}
+
 	config := &ClientConfig{
 		Namespace: resp.Namespace,
 		Hostname:  resp.Hostname,
+		Domains: ClientDomainConfig{
+			Public: publicDomain,
+			Mesh:   meshDomain,
+		},
 		Mesh: ClientMeshConfig{
 			ControlURL: resp.Mesh.ControlURL,
 		},

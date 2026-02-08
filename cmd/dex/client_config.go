@@ -9,9 +9,17 @@ import (
 // ClientConfig represents the client configuration saved by 'dex client enroll'.
 // This is a simplified version of Config - clients don't need tunnel/ACME/owner info.
 type ClientConfig struct {
-	Namespace string           `json:"namespace"`
-	Hostname  string           `json:"hostname"`
-	Mesh      ClientMeshConfig `json:"mesh"`
+	Namespace string             `json:"namespace"`
+	Hostname  string             `json:"hostname"`
+	Domains   ClientDomainConfig `json:"domains"` // Domain configuration from Central
+	Mesh      ClientMeshConfig   `json:"mesh"`
+}
+
+// ClientDomainConfig contains domain configuration from Central.
+// These should be used instead of hardcoding domain names.
+type ClientDomainConfig struct {
+	Public string `json:"public"` // Base domain for public URLs (e.g., "enbox.id")
+	Mesh   string `json:"mesh"`   // Base domain for MagicDNS mesh hostnames (e.g., "dex")
 }
 
 // ClientMeshConfig contains mesh networking configuration for clients.

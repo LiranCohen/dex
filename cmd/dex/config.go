@@ -7,15 +7,23 @@ import (
 
 // Config represents the HQ configuration saved by 'dex enroll'
 type Config struct {
-	Namespace string `json:"namespace"`
-	PublicURL string `json:"public_url"`
-	Hostname  string `json:"hostname,omitempty"`
-	IsPublic  bool   `json:"is_public"` // Explicit flag for public accessibility
+	Namespace string       `json:"namespace"`
+	PublicURL string       `json:"public_url"`
+	Hostname  string       `json:"hostname,omitempty"`
+	IsPublic  bool         `json:"is_public"` // Explicit flag for public accessibility
+	Domains   DomainConfig `json:"domains"`   // Domain configuration from Central
 
 	Mesh   MeshConfig   `json:"mesh"`
 	Tunnel TunnelConfig `json:"tunnel"`
 	ACME   ACMEConfig   `json:"acme"`
 	Owner  OwnerConfig  `json:"owner"`
+}
+
+// DomainConfig contains domain configuration from Central.
+// These should be used instead of hardcoding domain names.
+type DomainConfig struct {
+	Public string `json:"public"` // Base domain for public URLs (e.g., "enbox.id")
+	Mesh   string `json:"mesh"`   // Base domain for MagicDNS mesh hostnames (e.g., "dex")
 }
 
 // OwnerConfig contains the HQ owner's identity and authentication credentials

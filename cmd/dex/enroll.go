@@ -30,6 +30,12 @@ type EnrollmentResponse struct {
 	Hostname  string `json:"hostname"`   // Server hostname (e.g., "hq")
 	PublicURL string `json:"public_url"` // e.g., "https://hq.alice.enbox.id"
 
+	// Domain configuration - use these instead of hardcoding
+	Domains struct {
+		Public string `json:"public"` // Base domain for public URLs (e.g., "enbox.id")
+		Mesh   string `json:"mesh"`   // Base domain for MagicDNS mesh hostnames (e.g., "dex")
+	} `json:"domains"`
+
 	// Mesh configuration for dexnet (always present)
 	Mesh struct {
 		ControlURL string `json:"control_url"` // Central coordination service URL
@@ -269,6 +275,16 @@ func buildConfigFromResponse(resp *EnrollmentResponse) *Config {
 		hostname = "hq"
 	}
 
+	// Use domains from response, with fallbacks for backwards compatibility
+	publicDomain := resp.Domains.Public
+	if publicDomain == "" {
+		publicDomain = "enbox.id"
+	}
+	meshDomain := resp.Domains.Mesh
+	if meshDomain == "" {
+		meshDomain = "dex"
+	}
+
 	// Determine if this is a public node (has tunnel config)
 	isPublic := resp.Tunnel != nil && resp.Tunnel.IngressAddr != ""
 
@@ -277,6 +293,10 @@ func buildConfigFromResponse(resp *EnrollmentResponse) *Config {
 		PublicURL: resp.PublicURL,
 		Hostname:  hostname, // Set hostname for mesh registration (used by main.go)
 		IsPublic:  isPublic, // Explicit flag for public accessibility
+		Domains: DomainConfig{
+			Public: publicDomain,
+			Mesh:   meshDomain,
+		},
 		Mesh: MeshConfig{
 			Enabled:    true,
 			ControlURL: resp.Mesh.ControlURL,
@@ -300,7 +320,7 @@ func buildConfigFromResponse(resp *EnrollmentResponse) *Config {
 			Token:       resp.Tunnel.Token,
 			Endpoints: []EndpointConfig{
 				{
-					Hostname:  hostname + "." + resp.Namespace + ".enbox.id",
+					Hostname:  hostname + "." + resp.Namespace + "." + publicDomain,
 					LocalPort: 8080,
 				},
 			},
