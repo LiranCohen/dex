@@ -199,6 +199,46 @@ func (m *Manager) CreateRepo(ctx context.Context, org, name string) error {
 	return m.apiCreateOrgRepo(ctx, botToken, org, name)
 }
 
+// EnsureRepo ensures a repository exists in Forgejo, creating it if necessary.
+// Returns nil if the repo already exists or was successfully created.
+func (m *Manager) EnsureRepo(ctx context.Context, org, name string) error {
+	botToken, err := m.BotToken()
+	if err != nil {
+		return err
+	}
+
+	// Check if repo already exists
+	_, err = m.apiRequest(ctx, botToken, "GET", fmt.Sprintf("/api/v1/repos/%s/%s", org, name), nil)
+	if err == nil {
+		return nil // Repo exists
+	}
+
+	// If not found, create it
+	if strings.Contains(err.Error(), "404") {
+		return m.apiCreateOrgRepo(ctx, botToken, org, name)
+	}
+
+	return err
+}
+
+// EnsureWorkspaceRepo ensures the dex-workspace repo exists in Forgejo.
+// This is called after Forgejo starts to sync local repos.
+func (m *Manager) EnsureWorkspaceRepo(ctx context.Context) error {
+	orgName := m.config.GetDefaultOrgName()
+	repoName := "dex-workspace"
+
+	if err := m.EnsureRepo(ctx, orgName, repoName); err != nil {
+		// Check if it's just "already exists" which is fine
+		if strings.Contains(err.Error(), "409") || strings.Contains(err.Error(), "already exists") {
+			return nil
+		}
+		return fmt.Errorf("failed to ensure workspace repo: %w", err)
+	}
+
+	fmt.Printf("Ensured %s/%s repo exists in Forgejo\n", orgName, repoName)
+	return nil
+}
+
 // AddBotToOrg adds the bot user as an owner of the given organization.
 func (m *Manager) AddBotToOrg(ctx context.Context, org string) error {
 	adminToken, err := m.AdminToken()

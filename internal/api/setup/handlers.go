@@ -15,17 +15,24 @@ import (
 	"github.com/lirancohen/dex/internal/toolbelt"
 )
 
+// ForgejoService is the interface for Forgejo operations needed by setup
+type ForgejoService interface {
+	CreateRepo(ctx context.Context, org, name string) error
+}
+
 // Handler handles all setup-related HTTP requests
 type Handler struct {
-	db                  *db.DB
-	getDataDir          func() string
-	getToolbelt         func() *toolbelt.Toolbelt
-	reloadToolbelt      func() error
-	getGitHubClient     func(ctx context.Context, login string) (*toolbelt.GitHubClient, error)
-	hasGitHubApp        func() bool
-	initGitHubApp       func() error
-	getGitService       func() GitService
+	db                   *db.DB
+	getDataDir           func() string
+	getToolbelt          func() *toolbelt.Toolbelt
+	reloadToolbelt       func() error
+	getGitHubClient      func(ctx context.Context, login string) (*toolbelt.GitHubClient, error)
+	hasGitHubApp         func() bool
+	initGitHubApp        func() error
+	getGitService        func() GitService
 	updateDefaultProject func(workspacePath string) error
+	forgejoService       ForgejoService
+	forgejoOrg           string
 }
 
 // GitService is the interface for git operations needed by setup
@@ -44,6 +51,8 @@ type HandlerConfig struct {
 	InitGitHubApp        func() error
 	GetGitService        func() GitService
 	UpdateDefaultProject func(workspacePath string) error
+	ForgejoService       ForgejoService
+	ForgejoOrg           string
 }
 
 // NewHandler creates a new setup handler
@@ -58,6 +67,8 @@ func NewHandler(cfg HandlerConfig) *Handler {
 		initGitHubApp:        cfg.InitGitHubApp,
 		getGitService:        cfg.GetGitService,
 		updateDefaultProject: cfg.UpdateDefaultProject,
+		forgejoService:       cfg.ForgejoService,
+		forgejoOrg:           cfg.ForgejoOrg,
 	}
 }
 
@@ -359,7 +370,7 @@ func (h *Handler) HandleComplete(c echo.Context) error {
 	}
 
 	// Create workspace repo if it doesn't exist
-	_, workspacePath := h.getWorkspaceInfo()
+	repoName, workspacePath := h.getWorkspaceInfo()
 	gitService := h.getGitService()
 	if gitService != nil && !gitService.RepoExists(workspacePath) {
 		// Ensure parent directory exists
@@ -370,6 +381,16 @@ func (h *Handler) HandleComplete(c echo.Context) error {
 
 		if err := initWorkspaceRepo(workspacePath); err != nil {
 			return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("failed to create workspace: %v", err))
+		}
+
+		// Also create the repo in Forgejo if available
+		if h.forgejoService != nil && h.forgejoOrg != "" {
+			if err := h.forgejoService.CreateRepo(c.Request().Context(), h.forgejoOrg, repoName); err != nil {
+				// Log but don't fail - local repo is more important
+				fmt.Printf("Warning: failed to create workspace repo in Forgejo: %v\n", err)
+			} else {
+				fmt.Printf("Created %s repo in Forgejo org %s\n", repoName, h.forgejoOrg)
+			}
 		}
 	}
 

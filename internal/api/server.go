@@ -249,6 +249,13 @@ func NewServer(database *db.DB, cfg Config) *Server {
 			}
 			return nil
 		},
+		ForgejoService: forgejoMgr,
+		ForgejoOrg: func() string {
+			if cfg.Forgejo != nil {
+				return cfg.Forgejo.GetDefaultOrgName()
+			}
+			return ""
+		}(),
 	})
 
 	// Create the Deps struct for dependency injection
@@ -603,6 +610,11 @@ func (s *Server) Start() error {
 			} else {
 				fmt.Printf("Warning: Forgejo started but bot token unavailable: %v\n", err)
 			}
+		}
+
+		// Ensure dex-workspace repo exists in Forgejo (for existing installations)
+		if err := s.forgejoManager.EnsureWorkspaceRepo(ctx); err != nil {
+			fmt.Printf("Warning: failed to ensure workspace repo in Forgejo: %v\n", err)
 		}
 
 		// Register Forgejo as OIDC client if both OIDC and OAuth are configured
