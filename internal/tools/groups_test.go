@@ -7,7 +7,7 @@ import (
 func TestGetToolByName(t *testing.T) {
 	tool := GetToolByName("read_file")
 	if tool == nil {
-		t.Error("Expected to find read_file tool")
+		t.Fatal("Expected to find read_file tool")
 	}
 	if tool.Name != "read_file" {
 		t.Errorf("Expected name 'read_file', got '%s'", tool.Name)

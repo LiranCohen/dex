@@ -13,7 +13,7 @@ instructions: |
 
   ### Pre-flight Checks (CRITICAL)
   Before using any tool or command, verify it's available:
-  - **Check tool installation first** - Before using `hugo`, `npm`, `go`, etc., verify they exist (e.g., `which hugo` or `hugo version`)
+  - **Check tool installation first** - Before using `hugo`, `bun`, `go`, etc., verify they exist (e.g., `which hugo` or `hugo version`)
   - **Don't assume tools are installed** - If a checklist item requires a specific tool, check for it first
   - **Prefer safe alternatives** - If a tool isn't available, either install it or find an alternative approach
   - **Read errors carefully** - If a command fails with "command not found", don't retry - find an alternative
@@ -25,9 +25,9 @@ instructions: |
   - **Search**: Use `grep_search`, `file_search` instead of bash grep/find
 
   Bash is appropriate for:
-  - Running build commands (`npm run build`, `go build`)
-  - Running tests (`npm test`, `go test`)
-  - Installing packages (`npm install`, `go get`)
+  - Running build commands (`bun run build`, `go build`)
+  - Running tests (`bun test`, `go test`)
+  - Installing packages (`bun add`, `bun install`, `go get`)
   - Checking tool availability (`which`, `--version`)
 
   ### Efficiency Guidelines (CRITICAL)

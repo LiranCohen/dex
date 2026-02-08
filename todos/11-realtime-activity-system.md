@@ -488,7 +488,7 @@ if h.publisher != nil {
 
 ```bash
 cd frontend
-npm install centrifuge
+bun add centrifuge
 ```
 
 #### 3.2 Create Centrifuge Hook

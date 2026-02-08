@@ -15,9 +15,9 @@ func generateTestKeyPair() (ed25519.PublicKey, ed25519.PrivateKey) {
 func TestGenerateToken(t *testing.T) {
 	pub, priv := generateTestKeyPair()
 	config := &TokenConfig{
-		Issuer:      "test-issuer",
-		ExpiryHours: 24,
-		SigningKey:  priv,
+		Issuer:       "test-issuer",
+		ExpiryHours:  24,
+		SigningKey:   priv,
 		VerifyingKey: pub,
 	}
 
@@ -139,10 +139,10 @@ func TestTokenClaims(t *testing.T) {
 
 		// Should expire in ~48 hours
 		expectedExpiry := time.Now().Add(48 * time.Hour)
-		if claims.ExpiresAt.Time.Before(expectedExpiry.Add(-time.Minute)) {
+		if claims.ExpiresAt.Before(expectedExpiry.Add(-time.Minute)) {
 			t.Error("expiration time is too early")
 		}
-		if claims.ExpiresAt.Time.After(expectedExpiry.Add(time.Minute)) {
+		if claims.ExpiresAt.After(expectedExpiry.Add(time.Minute)) {
 			t.Error("expiration time is too late")
 		}
 	})

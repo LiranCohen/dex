@@ -56,7 +56,7 @@ func BuildSteps(progress *db.OnboardingProgress) []Step {
 
 	currentFound := false
 	for i, def := range definitions {
-		status := "pending"
+		var status string
 
 		// Determine step status based on completion timestamps
 		if isStepComplete(progress, def.ID) {

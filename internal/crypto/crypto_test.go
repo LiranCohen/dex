@@ -458,7 +458,7 @@ func TestEnsureWorkerIdentity_LoadsExisting(t *testing.T) {
 
 	// Create first
 	first, _ := NewWorkerIdentity("original")
-	first.Save(identityPath)
+	_ = first.Save(identityPath)
 
 	// Ensure should load existing
 	loaded, err := EnsureWorkerIdentity(identityPath, "different-id")
@@ -486,7 +486,7 @@ func TestLoadWorkerIdentity_InvalidJSON(t *testing.T) {
 	tmpDir := t.TempDir()
 	path := filepath.Join(tmpDir, "invalid.json")
 
-	os.WriteFile(path, []byte("not json"), 0600)
+	_ = os.WriteFile(path, []byte("not json"), 0600)
 
 	_, err := LoadWorkerIdentity(path)
 	if err == nil {

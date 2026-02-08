@@ -352,11 +352,11 @@ func (c *AnthropicClient) Complete(ctx context.Context, prompt string, maxTokens
 
 // StreamEvent represents an event from the streaming API
 type StreamEvent struct {
-	Type       string // "content_delta", "tool_use", "message_stop", "error"
-	Delta      string // Text delta for content_delta events
-	Error      error  // Error for error events
+	Type       string                 // "content_delta", "tool_use", "message_stop", "error"
+	Delta      string                 // Text delta for content_delta events
+	Error      error                  // Error for error events
 	ToolUse    *AnthropicContentBlock // For tool_use events
-	StopReason string // For message_stop events
+	StopReason string                 // For message_stop events
 }
 
 // StreamCallback is called for each text delta during streaming
@@ -532,7 +532,7 @@ func (c *AnthropicClient) readSSEAndBuildResponse(ctx context.Context, body io.R
 	var currentBlocks []AnthropicContentBlock
 	var textBuilder strings.Builder
 	var currentToolInput strings.Builder
-	currentBlockIndex := -1
+	var currentBlockIndex int
 
 	for {
 		select {

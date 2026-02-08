@@ -88,7 +88,7 @@ func (m *Manager) Start(ctx context.Context) error {
 
 	// Wait for health
 	if err := m.waitForHealthy(ctx, 60*time.Second); err != nil {
-		m.Stop()
+		_ = m.Stop()
 		return fmt.Errorf("forgejo failed to become healthy: %w", err)
 	}
 
@@ -98,7 +98,7 @@ func (m *Manager) Start(ctx context.Context) error {
 	if needsBootstrap {
 		fmt.Println("First run detected — bootstrapping Forgejo...")
 		if err := m.bootstrap(ctx); err != nil {
-			m.Stop()
+			_ = m.Stop()
 			return fmt.Errorf("forgejo bootstrap failed: %w", err)
 		}
 		fmt.Println("Forgejo bootstrap complete")

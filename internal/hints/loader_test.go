@@ -10,7 +10,7 @@ import (
 func TestNewLoader(t *testing.T) {
 	loader := NewLoader("/some/path")
 	if loader == nil {
-		t.Error("Expected non-nil loader")
+		t.Fatal("Expected non-nil loader")
 	}
 	if loader.workDir != "/some/path" {
 		t.Errorf("Expected workDir to be /some/path, got %s", loader.workDir)

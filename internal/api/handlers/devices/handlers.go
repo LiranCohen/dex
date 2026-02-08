@@ -12,7 +12,6 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/lirancohen/dex/internal/api/core"
-	"github.com/lirancohen/dex/internal/mesh"
 )
 
 // Handler handles device-related HTTP requests.
@@ -286,7 +285,7 @@ func (h *Handler) listDevicesFromCentral() ([]DeviceInfo, error) {
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("Central returned %d: %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("central returned %d: %s", resp.StatusCode, string(body))
 	}
 
 	var centralDevices []CentralDeviceResponse
@@ -541,15 +540,4 @@ func hasTag(tags []string, tag string) bool {
 		}
 	}
 	return false
-}
-
-// Helper to filter peers to only clients
-func filterClientPeers(peers []mesh.Peer) []mesh.Peer {
-	var clients []mesh.Peer
-	for _, p := range peers {
-		if hasTag(p.Tags, "tag:client") {
-			clients = append(clients, p)
-		}
-	}
-	return clients
 }

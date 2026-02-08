@@ -1,36 +1,9 @@
 package hosts
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
-
-// createTestHostsFile creates a temporary hosts file for testing.
-func createTestHostsFile(t *testing.T, content string) string {
-	t.Helper()
-
-	dir := t.TempDir()
-	path := filepath.Join(dir, "hosts")
-
-	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
-		t.Fatalf("failed to create test hosts file: %v", err)
-	}
-
-	return path
-}
-
-// testManager creates a manager that uses a test hosts file.
-func testManager(t *testing.T, hostsPath string) *Manager {
-	t.Helper()
-
-	// We can't easily override the hostsFile constant, so we'll test
-	// the core logic differently. For now, test with disabled mode
-	// and verify the file operations work correctly in integration tests.
-	m := NewManager()
-	return m
-}
 
 func TestManagerDisabled(t *testing.T) {
 	m := NewManager()
@@ -81,8 +54,8 @@ func TestParseHostsContent(t *testing.T) {
 		wantRest []string
 	}{
 		{
-			name: "empty file",
-			content: ``,
+			name:     "empty file",
+			content:  ``,
 			wantOurs: nil,
 			wantRest: nil,
 		},

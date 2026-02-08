@@ -102,8 +102,8 @@ func loadMasterKeyFromFile(path string) (*MasterKey, error) {
 	}
 
 	// Temporarily set env var to use existing parsing logic
-	os.Setenv(MasterKeyEnvVar, keyStr)
-	defer os.Unsetenv(MasterKeyEnvVar)
+	_ = os.Setenv(MasterKeyEnvVar, keyStr)
+	defer func() { _ = os.Unsetenv(MasterKeyEnvVar) }()
 
 	return NewMasterKeyFromEnv()
 }

@@ -34,7 +34,7 @@ The thin client uses WebAssembly (WASM) for mesh networking instead of native VP
 
 ## Prerequisites
 
-1. Node.js 18+ and pnpm
+1. Bun 1.0+
 2. Rust 1.87+
 3. Go 1.24+ (for building WASM)
 4. Xcode (macOS only)
@@ -44,7 +44,7 @@ The thin client uses WebAssembly (WASM) for mesh networking instead of native VP
 
 1. Install dependencies:
    ```bash
-   pnpm install
+   bun install
    ```
 
 2. Build the WASM mesh client (from dexnet repo):
@@ -62,22 +62,22 @@ The thin client uses WebAssembly (WASM) for mesh networking instead of native VP
 
 ```bash
 # Start development server
-pnpm tauri dev
+bun tauri dev
 
 # Build for production
-pnpm tauri build
+bun tauri build
 ```
 
 ## Mobile Development (Future)
 
 ```bash
 # iOS
-pnpm tauri ios init
-pnpm tauri ios dev
+bun tauri ios init
+bun tauri ios dev
 
 # Android
-pnpm tauri android init
-pnpm tauri android dev
+bun tauri android init
+bun tauri android dev
 ```
 
 ## Project Structure

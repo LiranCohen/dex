@@ -150,7 +150,7 @@ func (s *EncryptedGitHubStore) MigrateToEncrypted() error {
 
 	// Check if already encrypted
 	var encrypted bool
-	s.db.QueryRow(`SELECT COALESCE(encrypted, 0) FROM github_app_config WHERE id = 1`).Scan(&encrypted)
+	_ = s.db.QueryRow(`SELECT COALESCE(encrypted, 0) FROM github_app_config WHERE id = 1`).Scan(&encrypted)
 	if encrypted {
 		return nil // Already encrypted
 	}

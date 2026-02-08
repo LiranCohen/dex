@@ -17,7 +17,7 @@ func TestServiceProxy_ReverseProxy(t *testing.T) {
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Backend", "test")
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprint(w, "hello from backend")
+		_, _ = fmt.Fprint(w, "hello from backend")
 	}))
 	defer backend.Close()
 

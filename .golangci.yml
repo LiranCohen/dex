@@ -1,0 +1,21 @@
+version: "2"
+
+linters:
+  default: standard
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+
+  settings:
+    staticcheck:
+      checks:
+        - "all"
+        - "-QF*"    # Disable quick fix suggestions (style-only, not errors)
+        - "-ST*"    # Disable style checks (documentation format, etc.)
+        - "-S1016"  # Disable "should convert X to Y instead of struct literal"
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

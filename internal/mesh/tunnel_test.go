@@ -144,7 +144,7 @@ func simulateIngress(t *testing.T, acceptHandshake bool, token string) (net.List
 						return
 					}
 					if frame.Type == MsgKeepalive {
-						// Optionally respond
+						continue // Acknowledge keepalive, no response needed
 					}
 				}
 			}(conn)
@@ -351,7 +351,7 @@ func buildTestClientHello(hostname string) []byte {
 		0x00, 0x00, // Extension type: SNI
 		byte((hostnameLen + 5) >> 8), byte((hostnameLen + 5) & 0xff), // Extension length
 		byte((hostnameLen + 3) >> 8), byte((hostnameLen + 3) & 0xff), // SNI list length
-		0x00,                                    // Name type: host_name
+		0x00,                                             // Name type: host_name
 		byte(hostnameLen >> 8), byte(hostnameLen & 0xff), // Name length
 	}
 	sniExtension = append(sniExtension, hostnameBytes...)
@@ -380,15 +380,15 @@ func buildTestClientHello(hostname string) []byte {
 
 	// Handshake header
 	handshakeHeader := []byte{
-		0x01, // ClientHello
+		0x01,                                                             // ClientHello
 		0x00, byte(len(clientHello) >> 8), byte(len(clientHello) & 0xff), // Length (3 bytes)
 	}
 	handshake := append(handshakeHeader, clientHello...)
 
 	// TLS record header
 	recordHeader := []byte{
-		0x16,                                       // Content type: Handshake
-		0x03, 0x01,                                 // Version: TLS 1.0 (for compatibility)
+		0x16,       // Content type: Handshake
+		0x03, 0x01, // Version: TLS 1.0 (for compatibility)
 		byte(len(handshake) >> 8), byte(len(handshake) & 0xff), // Length
 	}
 

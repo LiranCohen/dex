@@ -59,7 +59,7 @@ func TestConn_SendReceive(t *testing.T) {
 			Version:   "1.0.0",
 			PublicKey: "base64key",
 		})
-		writer.Close()
+		_ = writer.Close()
 	}()
 
 	// Receive
@@ -222,14 +222,14 @@ func TestConn_SendCancel(t *testing.T) {
 	}
 
 	var msg Message
-	json.Unmarshal(buf.Bytes(), &msg)
+	_ = json.Unmarshal(buf.Bytes(), &msg)
 
 	if msg.Type != MsgTypeCancel {
 		t.Errorf("Type should be cancel")
 	}
 
 	var cancel CancelPayload
-	json.Unmarshal(msg.Payload, &cancel)
+	_ = json.Unmarshal(msg.Payload, &cancel)
 
 	if cancel.ObjectiveID != "obj-123" {
 		t.Error("ObjectiveID mismatch")
@@ -248,7 +248,7 @@ func TestConn_SendReady(t *testing.T) {
 	}
 
 	var msg Message
-	json.Unmarshal(buf.Bytes(), &msg)
+	_ = json.Unmarshal(buf.Bytes(), &msg)
 
 	if msg.Type != MsgTypeReady {
 		t.Errorf("Type should be ready")
@@ -275,7 +275,7 @@ func TestConn_SendAccepted(t *testing.T) {
 	}
 
 	var msg Message
-	json.Unmarshal(buf.Bytes(), &msg)
+	_ = json.Unmarshal(buf.Bytes(), &msg)
 
 	if msg.Type != MsgTypeAccepted {
 		t.Errorf("Type should be accepted")
@@ -309,7 +309,7 @@ func TestConn_SendProgress(t *testing.T) {
 	}
 
 	var msg Message
-	json.Unmarshal(buf.Bytes(), &msg)
+	_ = json.Unmarshal(buf.Bytes(), &msg)
 
 	if msg.Type != MsgTypeProgress {
 		t.Errorf("Type should be progress")
@@ -335,7 +335,7 @@ func TestConn_SendActivity(t *testing.T) {
 	}
 
 	var msg Message
-	json.Unmarshal(buf.Bytes(), &msg)
+	_ = json.Unmarshal(buf.Bytes(), &msg)
 
 	if msg.Type != MsgTypeActivity {
 		t.Errorf("Type should be activity")
@@ -364,7 +364,7 @@ func TestConn_SendCompleted(t *testing.T) {
 	}
 
 	var msg Message
-	json.Unmarshal(buf.Bytes(), &msg)
+	_ = json.Unmarshal(buf.Bytes(), &msg)
 
 	if msg.Type != MsgTypeCompleted {
 		t.Errorf("Type should be completed")
@@ -385,7 +385,7 @@ func TestConn_SendFailed(t *testing.T) {
 	}
 
 	var msg Message
-	json.Unmarshal(buf.Bytes(), &msg)
+	_ = json.Unmarshal(buf.Bytes(), &msg)
 
 	if msg.Type != MsgTypeFailed {
 		t.Errorf("Type should be failed")
@@ -417,7 +417,7 @@ func TestConn_SendPong(t *testing.T) {
 	}
 
 	var msg Message
-	json.Unmarshal(buf.Bytes(), &msg)
+	_ = json.Unmarshal(buf.Bytes(), &msg)
 
 	if msg.Type != MsgTypePong {
 		t.Errorf("Type should be pong")
@@ -441,7 +441,7 @@ func TestConn_SendError(t *testing.T) {
 	}
 
 	var msg Message
-	json.Unmarshal(buf.Bytes(), &msg)
+	_ = json.Unmarshal(buf.Bytes(), &msg)
 
 	if msg.Type != MsgTypeError {
 		t.Errorf("Type should be error")
@@ -465,7 +465,7 @@ func TestConn_SendShutdown(t *testing.T) {
 	}
 
 	var msg Message
-	json.Unmarshal(buf.Bytes(), &msg)
+	_ = json.Unmarshal(buf.Bytes(), &msg)
 
 	if msg.Type != MsgTypeShutdown {
 		t.Errorf("Type should be shutdown, got %q", msg.Type)
@@ -481,7 +481,7 @@ func TestConn_SendPing(t *testing.T) {
 	}
 
 	var msg Message
-	json.Unmarshal(buf.Bytes(), &msg)
+	_ = json.Unmarshal(buf.Bytes(), &msg)
 
 	if msg.Type != MsgTypePing {
 		t.Errorf("Type should be ping, got %q", msg.Type)
@@ -496,7 +496,7 @@ func TestConn_ConcurrentWrites(t *testing.T) {
 	done := make(chan bool, 10)
 	for i := 0; i < 10; i++ {
 		go func(id int) {
-			conn.Send(MsgTypePing, nil)
+			_ = conn.Send(MsgTypePing, nil)
 			done <- true
 		}(i)
 	}

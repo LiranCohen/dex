@@ -156,7 +156,7 @@ useEffect(() => {
 go test ./internal/realtime/...
 
 # Run frontend tests
-cd frontend && npm test -- useWebSocket
+cd frontend && bun test -- useWebSocket
 ```
 
 ## Connection Status

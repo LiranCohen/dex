@@ -67,7 +67,6 @@ type Server struct {
 	forgejoManager   *forgejo.Manager               // Embedded Forgejo instance manager
 	oidcHandler      *authhandlers.OIDCHandler      // OIDC provider for SSO
 	oidcLoginHandler *authhandlers.OIDCLoginHandler // Passkey login for OIDC
-	devicesHandler   *deviceshandlers.Handler       // Device management handler
 	deps             *core.Deps
 	encryption       *crypto.EncryptionConfig // Encryption for secrets and worker payloads
 	addr             string
