@@ -41,7 +41,7 @@ func (c *Client) SetLogf(logf func(format string, args ...any)) {
 }
 
 // Start initializes and starts the mesh client.
-// It connects to Central and joins the Campus network.
+// It connects to Central and joins the mesh network (dexnet).
 func (c *Client) Start(ctx context.Context) error {
 	// Clean up any stale hosts file entries from previous crash
 	if c.hostsManager != nil {
@@ -271,7 +271,7 @@ func (c *Client) Status() *Status {
 	return status
 }
 
-// Peers returns the list of peers on the Campus network.
+// Peers returns the list of peers on the mesh network (other Outposts).
 func (c *Client) Peers() []Peer {
 	c.mu.RLock()
 	defer c.mu.RUnlock()

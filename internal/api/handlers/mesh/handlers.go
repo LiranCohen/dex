@@ -39,7 +39,7 @@ func (h *Handler) GetStatus(c echo.Context) error {
 	return c.JSON(http.StatusOK, status)
 }
 
-// GetPeers returns the list of peers on the Campus network.
+// GetPeers returns the list of peers on the mesh network (other Outposts).
 // GET /api/v1/mesh/peers
 func (h *Handler) GetPeers(c echo.Context) error {
 	if h.deps.MeshClient == nil {

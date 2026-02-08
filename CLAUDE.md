@@ -2,11 +2,19 @@
 
 ## Overview
 
-Dex is a single-user AI orchestration platform that manages concurrent Claude Code sessions. It includes:
-- **HQ**: Main server with API, frontend, session management
-- **Forgejo**: Embedded git server for code hosting
-- **Mesh**: Tailscale-based networking via dex-saas Central
-- **Tunnel**: Public ingress via Edge server
+**Poindexter** (nicknamed "Dex") is your smart and organized AI orchestration assistant.
+
+This repository contains the **Dex Client** - the main application binary used for both HQ (headquarters) and Outpost nodes.
+
+### Architecture
+
+For complete architecture details, see **[dex-saas/docs/ARCHITECTURE.md](~/src/dex-saas/docs/ARCHITECTURE.md)**
+
+Quick summary:
+- **HQ**: Your main Poindexter node (exactly 1 per user, runs API/frontend/sessions)
+- **Outposts**: Additional nodes for services/workers (optional, can be public or mesh-only)
+- **Central**: SaaS coordination service in ~/src/dex-saas (account management, mesh networking)
+- **Edge**: Public ingress servers for public Outposts (part of dex-saas)
 
 ## Project Structure
 
@@ -91,6 +99,6 @@ Ensure `public_url` is set in config.json. The SSO setup requires the OIDC disco
 
 ## Related Projects
 
-- **dex-saas** (`~/src/dex-saas`): Central coordination server and Edge ingress
-  - Central: User accounts, enrollment, mesh coordination
-  - Edge: SNI router, tunnels to HQs
+- **dex-saas** (`~/src/dex-saas`): SaaS service containing:
+  - **Central**: User account management, enrollment, mesh coordination
+  - **Edge**: Public ingress servers (SNI router, tunnels to public Outposts)

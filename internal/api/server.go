@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v4"
-	"github.com/lirancohen/dex/frontend"
 	echomw "github.com/labstack/echo/v4/middleware"
+	"github.com/lirancohen/dex/frontend"
 	"github.com/lirancohen/dex/internal/api/core"
 	"github.com/lirancohen/dex/internal/api/handlers/approvals"
 	authhandlers "github.com/lirancohen/dex/internal/api/handlers/auth"
@@ -49,38 +49,38 @@ import (
 
 // Server represents the API server
 type Server struct {
-	echo            *echo.Echo
-	db              *db.DB
-	toolbelt        *toolbelt.Toolbelt
-	taskService     *task.Service
-	gitService      *git.Service
-	sessionManager  *session.Manager
-	planner         *planning.Planner
-	questHandler    *quest.Handler
-	handlersSyncSvc *issuesync.SyncService // Handler-level sync service wrapper
-	setupHandler    *setup.Handler
-	realtime        *realtime.Node // Centrifuge-based realtime messaging
-	broadcaster     *realtime.Broadcaster
-	meshClient      *mesh.Client       // Campus mesh network client
-	workerManager   *worker.Manager    // Worker pool manager for distributed execution
-	meshProxy       *mesh.ServiceProxy // Reverse proxy for mesh-exposed services
-	forgejoManager  *forgejo.Manager   // Embedded Forgejo instance manager
-	oidcHandler       *authhandlers.OIDCHandler      // OIDC provider for SSO
-	oidcLoginHandler  *authhandlers.OIDCLoginHandler // Passkey login for OIDC
-	devicesHandler    *deviceshandlers.Handler       // Device management handler
-	deps              *core.Deps
-	encryption        *crypto.EncryptionConfig // Encryption for secrets and worker payloads
-	addr              string
-	certFile          string
-	keyFile           string
-	tokenConfig       *auth.TokenConfig
-	staticDir         string
-	baseDir     string       // Base Dex directory (e.g., /opt/dex)
-	publicURL   string       // Public URL for OIDC issuer (e.g., https://hq.alice.enbox.id)
-	namespace   string       // Account namespace (from enrollment)
-	tunnelToken string       // Token for Central API
-	centralURL  string       // Central server URL
-	toolbeltMu  sync.RWMutex // Protects toolbelt updates
+	echo             *echo.Echo
+	db               *db.DB
+	toolbelt         *toolbelt.Toolbelt
+	taskService      *task.Service
+	gitService       *git.Service
+	sessionManager   *session.Manager
+	planner          *planning.Planner
+	questHandler     *quest.Handler
+	handlersSyncSvc  *issuesync.SyncService // Handler-level sync service wrapper
+	setupHandler     *setup.Handler
+	realtime         *realtime.Node // Centrifuge-based realtime messaging
+	broadcaster      *realtime.Broadcaster
+	meshClient       *mesh.Client                   // Mesh network client (dexnet)
+	workerManager    *worker.Manager                // Worker pool manager for distributed execution
+	meshProxy        *mesh.ServiceProxy             // Reverse proxy for mesh-exposed services
+	forgejoManager   *forgejo.Manager               // Embedded Forgejo instance manager
+	oidcHandler      *authhandlers.OIDCHandler      // OIDC provider for SSO
+	oidcLoginHandler *authhandlers.OIDCLoginHandler // Passkey login for OIDC
+	devicesHandler   *deviceshandlers.Handler       // Device management handler
+	deps             *core.Deps
+	encryption       *crypto.EncryptionConfig // Encryption for secrets and worker payloads
+	addr             string
+	certFile         string
+	keyFile          string
+	tokenConfig      *auth.TokenConfig
+	staticDir        string
+	baseDir          string       // Base Dex directory (e.g., /opt/dex)
+	publicURL        string       // Public URL for OIDC issuer (e.g., https://hq.alice.enbox.id)
+	namespace        string       // Account namespace (from enrollment)
+	tunnelToken      string       // Token for Central API
+	centralURL       string       // Central server URL
+	toolbeltMu       sync.RWMutex // Protects toolbelt updates
 }
 
 // Config holds server configuration
@@ -285,8 +285,8 @@ func NewServer(database *db.DB, cfg Config) *Server {
 		MeshClient:     meshClient,
 		WorkerManager:  workerMgr,
 		SecretsStore:   secretsStore,
-		TokenConfig: cfg.TokenConfig,
-		BaseDir:     cfg.BaseDir,
+		TokenConfig:    cfg.TokenConfig,
+		BaseDir:        cfg.BaseDir,
 		GetToolbelt: func() *toolbelt.Toolbelt {
 			s.toolbeltMu.RLock()
 			defer s.toolbeltMu.RUnlock()

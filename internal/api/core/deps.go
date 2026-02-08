@@ -38,7 +38,7 @@ type Deps struct {
 	QuestHandler   *quest.Handler
 	Realtime       *realtime.Node            // Centrifuge realtime node
 	Broadcaster    *realtime.Broadcaster     // Publishes to both legacy and new systems
-	MeshClient     *mesh.Client              // Campus mesh network client
+	MeshClient     *mesh.Client              // Mesh network client (dexnet)
 	WorkerManager  *worker.Manager           // Worker pool manager for distributed execution
 	SecretsStore   *db.EncryptedSecretsStore // Encrypted secrets storage
 	TokenConfig    *auth.TokenConfig

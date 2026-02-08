@@ -22,7 +22,7 @@ type Config struct {
 	AuthKey string `yaml:"auth_key"`
 
 	// IsHQ marks this node as the HQ (headquarters) node.
-	// There should be exactly one HQ per Campus network.
+	// There should be exactly one HQ per user.
 	IsHQ bool `yaml:"is_hq"`
 
 	// Tunnel holds configuration for the HQ-initiated tunnel to Ingress.

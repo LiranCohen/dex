@@ -142,7 +142,7 @@ type EnrollmentResponse struct {
     // Mesh configuration
     Mesh struct {
         ControlURL string `json:"control_url"` // https://central.enbox.id
-        AuthKey    string `json:"auth_key"`    // Headscale pre-auth key
+        AuthKey    string `json:"auth_key"`    // Central pre-auth key
     } `json:"mesh"`
 
     // Tunnel configuration
@@ -463,11 +463,10 @@ func LoadConfig(path string) (*Config, error) {
 **Depends on**: HQ-MVP-01, HQ-MVP-02
 **Status**: COMPLETE
 
-Replace the current install script that installs Cloudflared/Tailscale with a simplified version.
+Replace the current install script with a simplified version.
 
 #### Current Script Issues
-- Installs Cloudflared (not needed)
-- Installs Tailscale (not needed - we use dexnet)
+- Installs Cloudflared (optional, only for Cloudflare tunnel access method)
 - Builds from source (slow)
 - Complex setup wizard
 

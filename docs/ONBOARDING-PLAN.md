@@ -5,7 +5,7 @@
 This document outlines a redesigned onboarding flow where Poindexter has its own dedicated accounts and credentials, rather than using the user's personal accounts. The goal is to give Poindexter a distinct identity while maintaining user oversight and access.
 
 **Proposed Flow:**
-1. Establish Tailscale connection/account
+1. Establish dexnet mesh connection
 2. Provision Anthropic API key
 3. Create/provision Gmail account for Poindexter (user has access)
 4. Create/provision GitHub identity for Poindexter (user has access)
@@ -18,7 +18,7 @@ This document outlines a redesigned onboarding flow where Poindexter has its own
 
 | Component | Current Implementation |
 |-----------|------------------------|
-| **Tailscale** | Fully integrated. User creates Tailscale account, device joins tailnet via `tailscale up`. |
+| **dexnet** | Fully integrated. User enrolls HQ with Central, device joins mesh network. |
 | **Anthropic API** | User manually provides their personal API key during onboarding. |
 | **GitHub** | User manually creates PAT from their personal account. |
 | **Email/Gmail** | No integration. Resend exists for outbound transactional email only. |
@@ -30,8 +30,8 @@ This document outlines a redesigned onboarding flow where Poindexter has its own
 Phase 1 (Installation):
 1. Run installer on VPS
 2. Temporary Cloudflare tunnel with PIN
-3. User chooses Tailscale (recommended) or Cloudflare
-4. Device joins tailnet or permanent tunnel created
+3. User chooses dexnet (recommended) or Cloudflare
+4. Device joins mesh network or permanent tunnel created
 
 Phase 2 (Web UI Setup):
 1. Passkey registration (Face ID, Touch ID, etc.)
@@ -51,9 +51,9 @@ Phase 2 (Web UI Setup):
 │                         USER (Operator)                              │
 │                                                                      │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐               │
-│  │  Tailscale   │  │   Gmail      │  │   GitHub     │               │
+│  │   dexnet     │  │   Gmail      │  │   GitHub     │               │
 │  │   Account    │  │   Account    │  │   Account    │               │
-│  │  (Personal)  │  │ (Dedicated)  │  │  (App/Bot)   │               │
+│  │  (Central)   │  │ (Dedicated)  │  │  (App/Bot)   │               │
 │  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘               │
 │         │                 │                 │                        │
 │         │   ┌─────────────┴─────────────────┘                        │

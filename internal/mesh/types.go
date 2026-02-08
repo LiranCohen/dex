@@ -34,7 +34,7 @@ type Status struct {
 	TunnelEndpoints int `json:"tunnel_endpoints,omitempty"`
 }
 
-// Peer represents another node on the Campus mesh.
+// Peer represents another Outpost node on the mesh network.
 type Peer struct {
 	// Hostname is the peer's hostname.
 	Hostname string `json:"hostname"`

@@ -2,7 +2,16 @@
 
 > **Disk is state. Git is memory. Fresh context each iteration.**
 
-Poindexter is a single-user AI orchestration platform that manages up to 25 concurrent Claude Code sessions on your local machine. It decomposes complex tasks, assigns specialized "hats" to AI sessions, manages isolated git worktrees, and orchestrates deployments across multiple cloud services.
+**Poindexter** (nicknamed "Dex") is your smart and organized AI orchestration assistant.
+
+This repository contains the **Dex Client** - the application binary used for both HQ (headquarters) and Outpost nodes. Poindexter manages up to 25 concurrent Claude Code sessions, decomposes complex tasks, assigns specialized "hats" to AI sessions, manages isolated git worktrees, and orchestrates deployments across multiple cloud services.
+
+> **Architecture**: See [dex-saas/docs/ARCHITECTURE.md](https://github.com/lirancohen/dex-saas/blob/master/docs/ARCHITECTURE.md) for complete system architecture.
+
+**Quick summary:**
+- **HQ**: Main node (1 per user) - runs API, frontend, AI sessions
+- **Outposts**: Optional worker nodes - can be public or mesh-only
+- **Central**: Coordination service ([dex-saas](https://github.com/lirancohen/dex-saas)) - account/mesh management
 
 ## Installation
 
@@ -15,12 +24,11 @@ curl -fsSL https://raw.githubusercontent.com/lirancohen/dex/master/scripts/insta
 ```
 
 This will:
-1. Install Go, cloudflared, and Tailscale
+1. Install Go and required dependencies
 2. Build dex from source
-3. Create a temporary Cloudflare tunnel for setup
-4. Guide you through access method selection (Tailscale or Cloudflare)
-5. Set up passkey authentication and API keys
-6. Configure systemd service
+3. Enroll with Central and connect to mesh (dexnet)
+4. Set up passkey authentication and API keys
+5. Configure systemd service
 
 ### Upgrade Existing Installation
 
@@ -146,11 +154,11 @@ When installed via the install script:
 │   └── dex-workspace/  # Default workspace (created on setup)
 ├── worktrees/       # Git worktrees for active tasks
 ├── setup-complete   # Marker file (created after setup)
-├── permanent-url    # Your dex URL
-└── access-method    # "tailscale" or "cloudflare"
+├── config.json      # Enrollment config (namespace, mesh settings)
+└── mesh/            # Mesh state directory
 ```
 
-## Architecture
+## HQ Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -161,6 +169,8 @@ When installed via the install script:
 │                                 Orchestrator (Ralph Loop)   │
 │                                        ↓                    │
 │                          Toolbelt (11 Cloud Services)       │
+│                                        ↓                    │
+│                    Mesh (dexnet) ← Outposts                  │
 └─────────────────────────────────────────────────────────────┘
 ```
 

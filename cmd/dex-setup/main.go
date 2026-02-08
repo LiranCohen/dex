@@ -1,5 +1,5 @@
 // dex-setup is the setup wizard for Poindexter.
-// It helps users configure mesh networking to connect HQ to the Campus network.
+// It helps users configure mesh networking to connect HQ and Outposts to Central.
 package main
 
 import (
@@ -21,10 +21,10 @@ import (
 var staticFiles embed.FS
 
 var (
-	addr       = flag.String("addr", "127.0.0.1:8081", "Address to listen on")
-	pinFile    = flag.String("pin-file", "", "File containing the setup PIN")
-	dataDir    = flag.String("data-dir", "/opt/dex", "Data directory for storing configuration")
-	dexPort    = flag.Int("dex-port", 8080, "Port where dex will run")
+	addr    = flag.String("addr", "127.0.0.1:8081", "Address to listen on")
+	pinFile = flag.String("pin-file", "", "File containing the setup PIN")
+	dataDir = flag.String("data-dir", "/opt/dex", "Data directory for storing configuration")
+	dexPort = flag.Int("dex-port", 8080, "Port where dex will run")
 )
 
 // SetupPhase represents the current phase of setup
@@ -175,7 +175,7 @@ func (s *SetupServer) handleVerifyPIN(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		remaining := s.pinVerifier.AttemptsRemaining()
 		sendJSON(w, http.StatusUnauthorized, map[string]any{
-			"error":             err.Error(),
+			"error":              err.Error(),
 			"attempts_remaining": remaining,
 		})
 		return
@@ -337,9 +337,9 @@ func (s *SetupServer) handleComplete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sendJSON(w, http.StatusOK, map[string]any{
-		"success":      true,
-		"hostname":     state.MeshHostname,
-		"control_url":  state.MeshControlURL,
+		"success":       true,
+		"hostname":      state.MeshHostname,
+		"control_url":   state.MeshControlURL,
 		"access_method": "mesh",
 	})
 

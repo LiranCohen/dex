@@ -1,9 +1,12 @@
 # Proposal: Mesh-Native Git Hosting with Forgejo on HQ
 
-**Status:** Draft (Revised)
+**Status:** ✅ IMPLEMENTED
 **Author:** Dex
 **Created:** 2026-02-03
 **Revised:** 2026-02-05
+**Completed:** 2026-02-08
+
+> **Implementation**: See `internal/forgejo/` for embedded Forgejo manager.
 
 ---
 
@@ -18,10 +21,9 @@ Replace the GitHub integration with a Forgejo instance running directly on the H
 The current architecture has three external dependencies that compromise self-sovereignty:
 
 1. **GitHub** — All code hosting, issues, PRs, and sync depend on github.com
-2. **Tailscale** — Network access currently routes through Tailscale's coordination servers
-3. **Cloudflare Tunnels** — Alternative access path depends on Cloudflare infrastructure
+2. **Cloudflare Tunnels** — Alternative access path depends on Cloudflare infrastructure (optional)
 
-The mesh networking system (dexnet/Central) is already replacing Tailscale. This proposal completes the picture by replacing GitHub. The result: a fully self-contained development platform where the HQ node is the authoritative source for everything.
+The mesh networking system (dexnet/Central) provides self-contained networking. This proposal completes the picture by replacing GitHub with embedded Forgejo. The result: a fully self-contained development platform where the HQ node is the authoritative source for everything.
 
 ### Why Not Just Use Bare Git?
 
@@ -796,4 +798,4 @@ The phases are ordered by dependency and value:
 - [Forgejo API Reference](https://forgejo.org/docs/latest/user/api-usage/)
 - [Gitea Go SDK](https://code.gitea.io/sdk/gitea)
 - [Forgejo Binary Releases](https://codeberg.org/forgejo/forgejo/releases)
-- [tsnet Documentation](https://pkg.go.dev/tailscale.com/tsnet) (dexnet fork)
+- [dexnet Documentation](https://pkg.go.dev/github.com/WebP2P/dexnet) (Tailscale fork for mesh networking)
