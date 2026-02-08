@@ -166,7 +166,7 @@ ROOT            = %s
 
 [log]
 MODE  = console
-LEVEL = debug
+LEVEL = warn
 
 [actions]
 ENABLED = false

@@ -298,7 +298,9 @@ func (m *Manager) waitForHealthy(ctx context.Context, timeout time.Duration) err
 		resp, err := client.Get(healthURL)
 		if err == nil {
 			_ = resp.Body.Close()
-			if resp.StatusCode == http.StatusOK {
+			// Accept 200 OK or 403 Forbidden as healthy.
+			// 403 means Forgejo is running but requires auth (REQUIRE_SIGNIN_VIEW=true).
+			if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusForbidden {
 				return nil
 			}
 		}
