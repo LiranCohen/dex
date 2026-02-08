@@ -6,8 +6,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"os/exec"
+	"os/user"
+	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -151,7 +155,48 @@ func (m *Manager) runCLI(ctx context.Context, args ...string) (string, error) {
 	}, args...)
 
 	cmd := exec.CommandContext(ctx, binaryPath, fullArgs...)
-	cmd.Env = append(cmd.Environ(), m.config.EnvVars()...)
+
+	// Build clean environment with our vars taking precedence
+	forgejoEnv := m.config.EnvVars()
+	forgejoKeys := make(map[string]bool)
+	for _, e := range forgejoEnv {
+		if idx := strings.Index(e, "="); idx > 0 {
+			forgejoKeys[e[:idx]] = true
+		}
+	}
+
+	// Filter out keys we're setting, then append ours
+	for _, e := range os.Environ() {
+		if idx := strings.Index(e, "="); idx > 0 {
+			if !forgejoKeys[e[:idx]] {
+				cmd.Env = append(cmd.Env, e)
+			}
+		}
+	}
+	cmd.Env = append(cmd.Env, forgejoEnv...)
+
+	// If running as root, run CLI as the same user that owns the database
+	if os.Getuid() == 0 {
+		runUser := m.config.RunUser
+		if runUser == "" {
+			runUser = "nobody"
+		}
+
+		u, err := user.Lookup(runUser)
+		if err != nil {
+			return "", fmt.Errorf("failed to lookup user %s: %w", runUser, err)
+		}
+
+		uid, _ := strconv.ParseUint(u.Uid, 10, 32)
+		gid, _ := strconv.ParseUint(u.Gid, 10, 32)
+
+		cmd.SysProcAttr = &syscall.SysProcAttr{
+			Credential: &syscall.Credential{
+				Uid: uint32(uid),
+				Gid: uint32(gid),
+			},
+		}
+	}
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
