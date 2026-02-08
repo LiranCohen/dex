@@ -85,12 +85,11 @@ func (m *Manager) bootstrap(ctx context.Context) error {
 	}
 
 	// 7. Generate OAuth secret for SSO (but don't configure provider yet)
+	// Always generate the secret so it's available if OIDC is enabled on the server.
 	// The OAuth provider setup requires HQ's HTTP server to be reachable,
 	// so we defer that to SetupSSOProvider() which is called after HTTP starts.
-	if m.config.OIDCIssuer != "" {
-		if err := m.generateOAuthSecret(); err != nil {
-			return fmt.Errorf("failed to generate OAuth secret: %w", err)
-		}
+	if err := m.generateOAuthSecret(); err != nil {
+		return fmt.Errorf("failed to generate OAuth secret: %w", err)
 	}
 
 	return nil
