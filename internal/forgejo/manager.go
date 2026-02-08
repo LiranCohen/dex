@@ -284,9 +284,16 @@ func (m *Manager) startProcess(ctx context.Context) error {
 
 func (m *Manager) waitForHealthy(ctx context.Context, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
-	healthURL := m.BaseURL() + "/api/v1/version"
+	// Use root path - we just need to verify Forgejo responds to HTTP
+	healthURL := m.BaseURL() + "/"
 
-	client := &http.Client{Timeout: 2 * time.Second}
+	client := &http.Client{
+		Timeout: 2 * time.Second,
+		// Don't follow redirects - we just want to know if Forgejo responds
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
 
 	for time.Now().Before(deadline) {
 		select {
@@ -298,11 +305,9 @@ func (m *Manager) waitForHealthy(ctx context.Context, timeout time.Duration) err
 		resp, err := client.Get(healthURL)
 		if err == nil {
 			_ = resp.Body.Close()
-			// Accept 200 OK or 403 Forbidden as healthy.
-			// 403 means Forgejo is running but requires auth (REQUIRE_SIGNIN_VIEW=true).
-			if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusForbidden {
-				return nil
-			}
+			// Any HTTP response means Forgejo is running.
+			// Could be 200, 302 redirect, 403 forbidden - all indicate healthy.
+			return nil
 		}
 
 		time.Sleep(500 * time.Millisecond)
