@@ -84,6 +84,47 @@ func (m *Manager) bootstrap(ctx context.Context) error {
 		return fmt.Errorf("failed to add bot to org: %w", err)
 	}
 
+	// 7. Configure OAuth2 SSO if OIDC issuer is set
+	if m.config.OIDCIssuer != "" {
+		if err := m.setupOAuth2SSO(ctx); err != nil {
+			return fmt.Errorf("failed to setup OAuth2 SSO: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// setupOAuth2SSO configures Forgejo to use HQ as its OAuth2/OIDC provider.
+func (m *Manager) setupOAuth2SSO(ctx context.Context) error {
+	// Generate OAuth client secret
+	oauthSecret, err := generateSecret(32)
+	if err != nil {
+		return fmt.Errorf("failed to generate OAuth secret: %w", err)
+	}
+
+	// Store the secret for later use when registering with OIDC provider
+	if err := m.db.SetSecret(SecretKeyOAuthSecret, oauthSecret); err != nil {
+		return fmt.Errorf("failed to store OAuth secret: %w", err)
+	}
+
+	// Build the auto-discovery URL
+	autoDiscoverURL := m.config.OIDCIssuer + "/.well-known/openid-configuration"
+
+	// Add OAuth2 authentication source via Forgejo CLI
+	_, err = m.runCLI(ctx,
+		"admin", "auth", "add-oauth",
+		"--name", "hq",
+		"--provider", "openidConnect",
+		"--key", OAuthClientID,
+		"--secret", oauthSecret,
+		"--auto-discover-url", autoDiscoverURL,
+		"--scopes", "openid email profile",
+	)
+	if err != nil {
+		return fmt.Errorf("failed to add OAuth2 source: %w", err)
+	}
+
+	fmt.Println("OAuth2 SSO configured with HQ as identity provider")
 	return nil
 }
 
