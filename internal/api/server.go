@@ -663,6 +663,14 @@ func (s *Server) Start() error {
 		fmt.Println("Mesh networking started")
 	}
 
+	// Setup Forgejo SSO provider AFTER HTTP is ready (needs OIDC discovery to be reachable)
+	if s.forgejoManager != nil && s.forgejoManager.IsRunning() {
+		ctx := context.Background()
+		if err := s.forgejoManager.SetupSSOProvider(ctx); err != nil {
+			fmt.Printf("Warning: failed to setup Forgejo SSO: %v\n", err)
+		}
+	}
+
 	// Expose services on mesh network if both mesh and services are available
 	if s.meshClient != nil && s.meshClient.IsRunning() {
 		sp := mesh.NewServiceProxy(s.meshClient)

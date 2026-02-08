@@ -84,42 +84,60 @@ func (m *Manager) bootstrap(ctx context.Context) error {
 		return fmt.Errorf("failed to add bot to org: %w", err)
 	}
 
-	// 7. Configure OAuth2 SSO if OIDC issuer is set
+	// 7. Generate OAuth secret for SSO (but don't configure provider yet)
+	// The OAuth provider setup requires HQ's HTTP server to be reachable,
+	// so we defer that to SetupSSOProvider() which is called after HTTP starts.
 	if m.config.OIDCIssuer != "" {
-		if err := m.setupOAuth2SSO(ctx); err != nil {
-			return fmt.Errorf("failed to setup OAuth2 SSO: %w", err)
+		if err := m.generateOAuthSecret(); err != nil {
+			return fmt.Errorf("failed to generate OAuth secret: %w", err)
 		}
 	}
 
 	return nil
 }
 
-// setupOAuth2SSO configures Forgejo to use HQ as its OAuth2/OIDC provider.
-func (m *Manager) setupOAuth2SSO(ctx context.Context) error {
-	// Generate OAuth client secret
+// generateOAuthSecret generates and stores the OAuth secret used for SSO.
+// This is called during bootstrap so the secret is available for HQ to
+// register Forgejo as an OIDC client.
+func (m *Manager) generateOAuthSecret() error {
+	// Check if already generated
+	if _, err := m.db.GetSecret(SecretKeyOAuthSecret); err == nil {
+		return nil // Already exists
+	}
+
 	oauthSecret, err := generateSecret(32)
 	if err != nil {
 		return fmt.Errorf("failed to generate OAuth secret: %w", err)
 	}
 
-	// Store the secret for later use when registering with OIDC provider
 	if err := m.db.SetSecret(SecretKeyOAuthSecret, oauthSecret); err != nil {
 		return fmt.Errorf("failed to store OAuth secret: %w", err)
 	}
 
+	fmt.Println("Generated OAuth secret for SSO")
+	return nil
+}
+
+// SetupSSOProvider configures Forgejo to use HQ as its OAuth2/OIDC provider.
+// This must be called AFTER the HQ HTTP server is running and reachable,
+// because Forgejo validates the OIDC discovery URL.
+func (m *Manager) SetupSSOProvider(ctx context.Context) error {
+	if m.config.OIDCIssuer == "" {
+		return nil // SSO not configured
+	}
+
+	// Check if already configured by looking for the auth source
+	// If we can get the OAuth secret, we generated it but may not have added the provider yet
+	oauthSecret, err := m.OAuthSecret()
+	if err != nil {
+		return fmt.Errorf("OAuth secret not available: %w", err)
+	}
+
 	// Configure OIDC endpoints
-	// Forgejo requires --auto-discover-url even with custom URLs for OpenID Connect.
-	// We provide both the discovery URL and explicit endpoints.
-	// The discovery URL might not be reachable during bootstrap, but Forgejo
-	// will use the custom URLs we provide instead.
 	issuer := m.config.OIDCIssuer
 	discoveryURL := issuer + "/.well-known/openid-configuration"
-	authURL := issuer + "/oidc/authorize"
-	tokenURL := issuer + "/oidc/token"
-	profileURL := issuer + "/oidc/userinfo"
 
 	// Add OAuth2 authentication source via Forgejo CLI
-	// Provide both auto-discover-url (required) and custom URLs (used instead)
 	_, err = m.runCLI(ctx,
 		"admin", "auth", "add-oauth",
 		"--name", "hq",
@@ -127,13 +145,14 @@ func (m *Manager) setupOAuth2SSO(ctx context.Context) error {
 		"--key", OAuthClientID,
 		"--secret", oauthSecret,
 		"--auto-discover-url", discoveryURL,
-		"--use-custom-urls",
-		"--custom-auth-url", authURL,
-		"--custom-token-url", tokenURL,
-		"--custom-profile-url", profileURL,
 		"--scopes", "openid email profile",
 	)
 	if err != nil {
+		// Check if already exists (re-running after restart)
+		if strings.Contains(err.Error(), "already exists") {
+			fmt.Println("Forgejo SSO provider already configured")
+			return nil
+		}
 		return fmt.Errorf("failed to add OAuth2 source: %w", err)
 	}
 
