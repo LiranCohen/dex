@@ -135,6 +135,10 @@ func (h *OIDCHandler) handleAuthorize(c echo.Context) error {
 	}
 
 	// Validate redirect URI
+	// Per RFC 6749, if redirect_uri is omitted and client has exactly one registered, use it
+	if redirectURI == "" {
+		redirectURI = client.GetDefaultRedirectURI()
+	}
 	if !client.ValidateRedirectURI(redirectURI) {
 		return c.JSON(http.StatusBadRequest, oidc.ErrorResponse{
 			Error:            oidc.ErrInvalidRequest,
@@ -217,12 +221,18 @@ func (h *OIDCHandler) handleToken(c echo.Context) error {
 	}
 
 	// Validate client
-	_, err = h.provider.ValidateClient(clientID, clientSecret)
+	client, err := h.provider.ValidateClient(clientID, clientSecret)
 	if err != nil {
 		return c.JSON(http.StatusUnauthorized, oidc.ErrorResponse{
 			Error:            oidc.ErrInvalidClient,
 			ErrorDescription: "invalid client credentials",
 		})
+	}
+
+	// Per RFC 6749, if redirect_uri was omitted in authorization request
+	// (and client has only one registered), it can be omitted in token request too
+	if redirectURI == "" {
+		redirectURI = client.GetDefaultRedirectURI()
 	}
 
 	// Exchange code for tokens

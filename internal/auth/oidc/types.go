@@ -22,6 +22,15 @@ func (c *Client) ValidateRedirectURI(uri string) bool {
 	return false
 }
 
+// GetDefaultRedirectURI returns the default redirect URI if the client has exactly one registered.
+// Per RFC 6749, if a client has only one redirect_uri, the parameter can be omitted.
+func (c *Client) GetDefaultRedirectURI() string {
+	if len(c.RedirectURIs) == 1 {
+		return c.RedirectURIs[0]
+	}
+	return ""
+}
+
 // AuthorizationCode represents an issued authorization code.
 type AuthorizationCode struct {
 	Code        string    `json:"code"`

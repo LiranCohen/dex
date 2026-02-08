@@ -124,22 +124,47 @@ func (m *Manager) SetupSSOProvider(ctx context.Context, issuerURL string) error 
 	discoveryURL := issuer + "/.well-known/openid-configuration"
 
 	// Add OAuth2 authentication source via Forgejo CLI
-	_, err = m.runCLI(ctx,
-		"admin", "auth", "add-oauth",
-		"--name", "hq",
-		"--provider", "openidConnect",
-		"--key", OAuthClientID,
-		"--secret", oauthSecret,
-		"--auto-discover-url", discoveryURL,
-		"--scopes", "openid email profile",
-	)
-	if err != nil {
+	// Retry with backoff since the tunnel might not be fully ready yet
+	var lastErr error
+	for attempt := 0; attempt < 5; attempt++ {
+		if attempt > 0 {
+			delay := time.Duration(attempt*2) * time.Second
+			fmt.Printf("Retrying SSO setup in %v (attempt %d/5)...\n", delay, attempt+1)
+			time.Sleep(delay)
+		}
+
+		_, err = m.runCLI(ctx,
+			"admin", "auth", "add-oauth",
+			"--name", "hq",
+			"--provider", "openidConnect",
+			"--key", OAuthClientID,
+			"--secret", oauthSecret,
+			"--auto-discover-url", discoveryURL,
+			"--scopes", "openid email profile",
+		)
+		if err == nil {
+			break // Success
+		}
+
 		// Check if already exists (re-running after restart)
 		if strings.Contains(err.Error(), "already exists") {
 			fmt.Println("Forgejo SSO provider already configured")
 			return nil
 		}
+
+		// Check if it's a network error worth retrying
+		if strings.Contains(err.Error(), "timeout") ||
+			strings.Contains(err.Error(), "connection refused") ||
+			strings.Contains(err.Error(), "no such host") {
+			lastErr = err
+			continue // Retry
+		}
+
+		// Non-retryable error
 		return fmt.Errorf("failed to add OAuth2 source: %w", err)
+	}
+	if lastErr != nil {
+		return fmt.Errorf("failed to add OAuth2 source after retries: %w", lastErr)
 	}
 
 	// Delete the default "Local" authentication source (ID 1) to hide username/password form

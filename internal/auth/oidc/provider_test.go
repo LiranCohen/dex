@@ -158,6 +158,40 @@ func TestClientValidateRedirectURI(t *testing.T) {
 	})
 }
 
+func TestClientGetDefaultRedirectURI(t *testing.T) {
+	t.Run("single redirect URI returns it as default", func(t *testing.T) {
+		client := &Client{
+			ID:           "test",
+			Secret:       "secret",
+			RedirectURIs: []string{"https://app.test/callback"},
+		}
+		if got := client.GetDefaultRedirectURI(); got != "https://app.test/callback" {
+			t.Errorf("GetDefaultRedirectURI() = %q, want %q", got, "https://app.test/callback")
+		}
+	})
+
+	t.Run("multiple redirect URIs returns empty", func(t *testing.T) {
+		client := &Client{
+			ID:           "test",
+			Secret:       "secret",
+			RedirectURIs: []string{"https://app.test/callback", "https://app.test/oauth"},
+		}
+		if got := client.GetDefaultRedirectURI(); got != "" {
+			t.Errorf("GetDefaultRedirectURI() = %q, want empty string", got)
+		}
+	})
+
+	t.Run("no redirect URIs returns empty", func(t *testing.T) {
+		client := &Client{
+			ID:     "test",
+			Secret: "secret",
+		}
+		if got := client.GetDefaultRedirectURI(); got != "" {
+			t.Errorf("GetDefaultRedirectURI() = %q, want empty string", got)
+		}
+	})
+}
+
 func TestAuthorizationCodeFlow(t *testing.T) {
 	provider := setupTestProvider(t)
 
