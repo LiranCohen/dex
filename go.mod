@@ -7,6 +7,7 @@ require golang.org/x/crypto v0.47.0
 require filippo.io/age v1.2.1
 
 require (
+	fyne.io/systray v1.12.0
 	github.com/WebP2P/dexnet v0.0.0-20260206143204-9653b71a537f
 	github.com/bmatcuk/doublestar/v4 v4.10.0
 	github.com/centrifugal/centrifuge v0.38.0
@@ -21,6 +22,7 @@ require (
 	github.com/stretchr/testify v1.11.1
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.44.3
+	tailscale.com v1.81.0-pre.0.20250303195457-5449aba94c51
 )
 
 require (

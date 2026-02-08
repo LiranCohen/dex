@@ -16,6 +16,7 @@ import (
 	"github.com/lirancohen/dex/internal/api/core"
 	"github.com/lirancohen/dex/internal/api/handlers/approvals"
 	authhandlers "github.com/lirancohen/dex/internal/api/handlers/auth"
+	deviceshandlers "github.com/lirancohen/dex/internal/api/handlers/devices"
 	forgejohandlers "github.com/lirancohen/dex/internal/api/handlers/forgejo"
 	"github.com/lirancohen/dex/internal/api/handlers/issuesync"
 	"github.com/lirancohen/dex/internal/api/handlers/memory"
@@ -66,6 +67,7 @@ type Server struct {
 	forgejoManager  *forgejo.Manager   // Embedded Forgejo instance manager
 	oidcHandler       *authhandlers.OIDCHandler      // OIDC provider for SSO
 	oidcLoginHandler  *authhandlers.OIDCLoginHandler // Passkey login for OIDC
+	devicesHandler    *deviceshandlers.Handler       // Device management handler
 	deps              *core.Deps
 	encryption        *crypto.EncryptionConfig // Encryption for secrets and worker payloads
 	addr              string
@@ -73,9 +75,12 @@ type Server struct {
 	keyFile           string
 	tokenConfig       *auth.TokenConfig
 	staticDir         string
-	baseDir    string       // Base Dex directory (e.g., /opt/dex)
-	publicURL  string       // Public URL for OIDC issuer (e.g., https://hq.alice.enbox.id)
-	toolbeltMu sync.RWMutex // Protects toolbelt updates
+	baseDir     string       // Base Dex directory (e.g., /opt/dex)
+	publicURL   string       // Public URL for OIDC issuer (e.g., https://hq.alice.enbox.id)
+	namespace   string       // Account namespace (from enrollment)
+	tunnelToken string       // Token for Central API
+	centralURL  string       // Central server URL
+	toolbeltMu  sync.RWMutex // Protects toolbelt updates
 }
 
 // Config holds server configuration
@@ -92,6 +97,11 @@ type Config struct {
 	Worker      *worker.ManagerConfig    // Worker pool configuration (optional)
 	Forgejo     *forgejo.Config          // Embedded Forgejo configuration (optional)
 	PublicURL   string                   // Public URL for OIDC issuer (e.g., https://hq.alice.enbox.id)
+
+	// Enrollment configuration (from config.json, for device management)
+	Namespace   string // Account namespace (e.g., "alice")
+	TunnelToken string // Token for authenticating with Central
+	CentralURL  string // Central server URL (e.g., "https://central.enbox.id")
 }
 
 // NewServer creates a new API server
@@ -166,10 +176,13 @@ func NewServer(database *db.DB, cfg Config) *Server {
 		addr:           cfg.Addr,
 		certFile:       cfg.CertFile,
 		keyFile:        cfg.KeyFile,
-		tokenConfig: cfg.TokenConfig,
-		staticDir:   cfg.StaticDir,
-		baseDir:     cfg.BaseDir,
-		publicURL:   cfg.PublicURL,
+		tokenConfig:    cfg.TokenConfig,
+		staticDir:      cfg.StaticDir,
+		baseDir:        cfg.BaseDir,
+		publicURL:      cfg.PublicURL,
+		namespace:      cfg.Namespace,
+		tunnelToken:    cfg.TunnelToken,
+		centralURL:     cfg.CentralURL,
 	}
 
 	// Setup git service with derived paths from base directory
@@ -444,6 +457,11 @@ func (s *Server) registerRoutes() {
 	meshHandler := meshhandlers.New(s.deps)
 	workersHandler := workershandlers.New(s.deps)
 	forgejoHandler := forgejohandlers.New(s.deps)
+	devicesHandler := deviceshandlers.New(s.deps, deviceshandlers.Config{
+		Namespace:   s.namespace,
+		TunnelToken: s.tunnelToken,
+		CentralURL:  s.centralURL,
+	})
 
 	// Wire up callbacks for issue sync (Forgejo)
 	questsHandler.SyncQuestToIssue = s.handlersSyncSvc.SyncQuestToIssue
@@ -496,6 +514,7 @@ func (s *Server) registerRoutes() {
 	meshHandler.RegisterRoutes(protected)
 	workersHandler.RegisterRoutes(protected)
 	forgejoHandler.RegisterRoutes(protected)
+	devicesHandler.RegisterRoutes(protected)
 
 	// Centrifuge WebSocket endpoint for real-time updates
 	// Auth is handled via Centrifuge protocol in Node.OnConnecting, not HTTP middleware

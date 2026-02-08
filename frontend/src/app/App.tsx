@@ -9,6 +9,7 @@ const QuestDetail = lazy(() => import('./pages/QuestDetail').then(m => ({ defaul
 const ObjectiveDetail = lazy(() => import('./pages/ObjectiveDetail').then(m => ({ default: m.ObjectiveDetail })));
 const Inbox = lazy(() => import('./pages/Inbox').then(m => ({ default: m.Inbox })));
 const AllObjectives = lazy(() => import('./pages/AllObjectives').then(m => ({ default: m.AllObjectives })));
+const Settings = lazy(() => import('./pages/Settings').then(m => ({ default: m.Settings })));
 const NotFound = lazy(() => import('./pages/NotFound').then(m => ({ default: m.NotFound })));
 
 function PageLoader() {
@@ -32,6 +33,7 @@ export function DexApp() {
             <Route path="/objectives/:id" element={<ObjectiveDetail />} />
             <Route path="/inbox" element={<Inbox />} />
             <Route path="/objectives" element={<AllObjectives />} />
+            <Route path="/settings" element={<Settings />} />
             {/* 404 catch-all */}
             <Route path="*" element={<NotFound />} />
           </Routes>

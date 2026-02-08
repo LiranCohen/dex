@@ -69,6 +69,9 @@ export function Header({ backLink, inboxCount = 0 }: HeaderProps) {
         <Link to="/objectives" className="app-header__nav-link">
           All Objectives
         </Link>
+        <Link to="/settings" className="app-header__nav-link">
+          Settings
+        </Link>
       </nav>
 
       {/* Mobile hamburger button */}
@@ -127,6 +130,13 @@ export function Header({ backLink, inboxCount = 0 }: HeaderProps) {
           onClick={() => setMenuOpen(false)}
         >
           All Objectives
+        </Link>
+        <Link
+          to="/settings"
+          className="app-header__mobile-link"
+          onClick={() => setMenuOpen(false)}
+        >
+          Settings
         </Link>
       </nav>
     </header>

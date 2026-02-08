@@ -361,3 +361,43 @@ export async function cleanupMergedWorktrees(): Promise<CleanupMergedResponse> {
 export async function deleteWorktree(taskId: string, cleanupBranch = true): Promise<void> {
   return api.delete(`/worktrees/${taskId}?cleanup_branch=${cleanupBranch}`);
 }
+
+// Device management API functions
+
+export interface Device {
+  hostname: string;
+  mesh_ip: string;
+  online: boolean;
+  direct: boolean;
+  last_seen?: string;
+  tags?: string[];
+  is_client: boolean;
+}
+
+export interface DevicesResponse {
+  devices: Device[];
+  count: number;
+}
+
+export interface CreateEnrollmentKeyRequest {
+  hostname?: string;
+}
+
+export interface EnrollmentKeyResponse {
+  key: string;
+  hostname: string;
+  expires_at: string;
+  install_command: string;
+}
+
+export async function fetchDevices(): Promise<DevicesResponse> {
+  return api.get('/devices');
+}
+
+export async function createDeviceEnrollmentKey(hostname?: string): Promise<EnrollmentKeyResponse> {
+  return api.post('/devices/enrollment-key', hostname ? { hostname } : undefined);
+}
+
+export async function removeDevice(hostname: string): Promise<void> {
+  return api.delete(`/devices/${hostname}`);
+}

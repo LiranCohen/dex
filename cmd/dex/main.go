@@ -29,6 +29,7 @@ func printUsage() {
 	fmt.Fprintf(os.Stderr, "Commands:\n")
 	fmt.Fprintf(os.Stderr, "  start     Start the Dex server (default if no command given)\n")
 	fmt.Fprintf(os.Stderr, "  enroll    Enroll this HQ with Central using an enrollment key\n")
+	fmt.Fprintf(os.Stderr, "  client    Client commands for local device mesh access\n")
 	fmt.Fprintf(os.Stderr, "  version   Show version information\n")
 	fmt.Fprintf(os.Stderr, "  help      Show this help message\n")
 	fmt.Fprintf(os.Stderr, "\nRun 'dex <command> --help' for more information on a command.\n")
@@ -40,6 +41,12 @@ func main() {
 		switch os.Args[1] {
 		case "enroll":
 			if err := runEnroll(os.Args[2:]); err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				os.Exit(1)
+			}
+			return
+		case "client":
+			if err := runClient(os.Args[2:]); err != nil {
 				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 				os.Exit(1)
 			}
@@ -408,6 +415,14 @@ func main() {
 		publicURL = enrollConfig.PublicURL
 	}
 
+	// Extract enrollment config values for device management API
+	var namespace, tunnelToken, centralURL string
+	if enrollConfig != nil {
+		namespace = enrollConfig.Namespace
+		tunnelToken = enrollConfig.Tunnel.Token
+		centralURL = enrollConfig.Mesh.ControlURL
+	}
+
 	// Create API server
 	server := api.NewServer(database, api.Config{
 		Addr:        *addr,
@@ -421,6 +436,9 @@ func main() {
 		Encryption:  encConfig,
 		Forgejo:     forgejoConfig,
 		PublicURL:   publicURL,
+		Namespace:   namespace,
+		TunnelToken: tunnelToken,
+		CentralURL:  centralURL,
 	})
 
 	// Start server in goroutine

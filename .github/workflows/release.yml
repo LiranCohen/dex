@@ -38,15 +38,15 @@ jobs:
           - os: linux
             arch: amd64
             runner: ubuntu-latest
+            cgo: 0
           - os: linux
             arch: arm64
             runner: ubuntu-latest
-          - os: darwin
-            arch: amd64
-            runner: macos-latest
+            cgo: 0
           - os: darwin
             arch: arm64
-            runner: macos-latest
+            runner: macos-14
+            cgo: 1
 
     runs-on: ${{ matrix.runner }}
 
@@ -67,18 +67,39 @@ jobs:
         env:
           GOOS: ${{ matrix.os }}
           GOARCH: ${{ matrix.arch }}
-          CGO_ENABLED: 0
+          CGO_ENABLED: ${{ matrix.cgo }}
         run: |
           VERSION="${{ github.ref_name }}"
+          BUILD_TAGS=""
+          # Use notray tag for Linux (requires libdbus-dev for systray)
+          if [ "${{ matrix.os }}" = "linux" ]; then
+            BUILD_TAGS="-tags=notray"
+          fi
           go build -ldflags="-s -w -X main.version=${VERSION#v}" \
-            -o dex ./cmd/dex
+            $BUILD_TAGS -o dex ./cmd/dex
           tar -czvf dex-${{ matrix.os }}-${{ matrix.arch }}.tar.gz dex
+
+      - name: Build macOS app bundle
+        if: matrix.os == 'darwin'
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          chmod +x scripts/build-macos-app.sh
+          ./scripts/build-macos-app.sh dist
+          cd dist && zip -r ../DexClient-${{ matrix.arch }}.app.zip DexClient.app
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: dex-${{ matrix.os }}-${{ matrix.arch }}
           path: dex-*.tar.gz
+
+      - name: Upload macOS app
+        if: matrix.os == 'darwin'
+        uses: actions/upload-artifact@v4
+        with:
+          name: DexClient-${{ matrix.arch }}-app
+          path: DexClient-*.app.zip
 
   release:
     needs: build
@@ -89,7 +110,6 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: artifacts
-          pattern: dex-*
           merge-multiple: true
 
       - name: List artifacts
@@ -98,7 +118,9 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/*.tar.gz
+          files: |
+            artifacts/*.tar.gz
+            artifacts/*.app.zip
           generate_release_notes: true
           draft: false
           prerelease: ${{ contains(github.ref_name, '-') }}
