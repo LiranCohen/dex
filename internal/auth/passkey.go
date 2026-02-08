@@ -9,6 +9,7 @@ import (
 
 	"github.com/go-webauthn/webauthn/protocol"
 	"github.com/go-webauthn/webauthn/webauthn"
+	"github.com/google/uuid"
 )
 
 // PasskeyConfig holds WebAuthn configuration
@@ -43,10 +44,22 @@ type WebAuthnUser struct {
 	credentials []webauthn.Credential
 }
 
-// NewWebAuthnUser creates a new WebAuthn user
+// NewWebAuthnUser creates a new WebAuthn user.
+// The id should be a UUID string - it will be parsed and stored as raw bytes
+// to match how Central stores user handles in passkey credentials.
 func NewWebAuthnUser(id string, name string, credentials []webauthn.Credential) *WebAuthnUser {
+	// Parse UUID and use raw bytes to match Central's format
+	// Central uses account.ID[:] which is 16 raw UUID bytes
+	var idBytes []byte
+	if parsed, err := uuid.Parse(id); err == nil {
+		idBytes = parsed[:]
+	} else {
+		// Fallback to string bytes if not a valid UUID
+		idBytes = []byte(id)
+	}
+
 	return &WebAuthnUser{
-		id:          []byte(id),
+		id:          idBytes,
 		name:        name,
 		displayName: name,
 		credentials: credentials,

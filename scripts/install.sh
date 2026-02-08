@@ -19,7 +19,7 @@
 set -e
 
 # Installer version - update this when making changes to the installer
-INSTALLER_VERSION="0.1.24"
+INSTALLER_VERSION="0.1.25"
 
 # =============================================================================
 # Configuration
