@@ -186,6 +186,28 @@ func (m *Manager) AdminToken() (string, error) {
 	return token, nil
 }
 
+// EnsureOAuthSecret generates the OAuth secret if it doesn't exist.
+// This is safe to call multiple times - it only generates if missing.
+func (m *Manager) EnsureOAuthSecret() error {
+	// Check if already exists
+	if secret, _ := m.db.GetSecret(SecretKeyOAuthSecret); secret != "" {
+		return nil
+	}
+
+	// Generate new secret
+	oauthSecret, err := generateSecret(32)
+	if err != nil {
+		return fmt.Errorf("failed to generate OAuth secret: %w", err)
+	}
+
+	if err := m.db.SetSecret(SecretKeyOAuthSecret, oauthSecret); err != nil {
+		return fmt.Errorf("failed to store OAuth secret: %w", err)
+	}
+
+	fmt.Println("Generated OAuth secret for SSO")
+	return nil
+}
+
 // OAuthSecret returns the OAuth client secret for OIDC integration.
 func (m *Manager) OAuthSecret() (string, error) {
 	secret, err := m.db.GetSecret(SecretKeyOAuthSecret)

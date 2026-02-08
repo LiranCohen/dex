@@ -747,7 +747,11 @@ func (s *Server) Shutdown(ctx context.Context) error {
 // registerForgejoOIDCClient registers Forgejo as an OIDC client with HQ's OIDC provider.
 // This allows Forgejo to authenticate users via HQ's passkey-based login.
 func (s *Server) registerForgejoOIDCClient() error {
-	// Get the OAuth secret that was generated during Forgejo bootstrap
+	// Ensure OAuth secret exists (generate if needed for existing installations)
+	if err := s.forgejoManager.EnsureOAuthSecret(); err != nil {
+		return fmt.Errorf("failed to ensure OAuth secret: %w", err)
+	}
+
 	oauthSecret, err := s.forgejoManager.OAuthSecret()
 	if err != nil {
 		return fmt.Errorf("OAuth secret not available: %w", err)

@@ -88,32 +88,10 @@ func (m *Manager) bootstrap(ctx context.Context) error {
 	// Always generate the secret so it's available if OIDC is enabled on the server.
 	// The OAuth provider setup requires HQ's HTTP server to be reachable,
 	// so we defer that to SetupSSOProvider() which is called after HTTP starts.
-	if err := m.generateOAuthSecret(); err != nil {
+	if err := m.EnsureOAuthSecret(); err != nil {
 		return fmt.Errorf("failed to generate OAuth secret: %w", err)
 	}
 
-	return nil
-}
-
-// generateOAuthSecret generates and stores the OAuth secret used for SSO.
-// This is called during bootstrap so the secret is available for HQ to
-// register Forgejo as an OIDC client.
-func (m *Manager) generateOAuthSecret() error {
-	// Check if already generated
-	if _, err := m.db.GetSecret(SecretKeyOAuthSecret); err == nil {
-		return nil // Already exists
-	}
-
-	oauthSecret, err := generateSecret(32)
-	if err != nil {
-		return fmt.Errorf("failed to generate OAuth secret: %w", err)
-	}
-
-	if err := m.db.SetSecret(SecretKeyOAuthSecret, oauthSecret); err != nil {
-		return fmt.Errorf("failed to store OAuth secret: %w", err)
-	}
-
-	fmt.Println("Generated OAuth secret for SSO")
 	return nil
 }
 
@@ -133,7 +111,7 @@ func (m *Manager) SetupSSOProvider(ctx context.Context, issuerURL string) error 
 	}
 
 	// Ensure OAuth secret exists (generate if needed for existing installations)
-	if err := m.generateOAuthSecret(); err != nil {
+	if err := m.EnsureOAuthSecret(); err != nil {
 		return fmt.Errorf("failed to ensure OAuth secret: %w", err)
 	}
 
