@@ -14,7 +14,6 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"syscall"
 	"time"
 
@@ -347,35 +346,4 @@ func WaitForSocket(socketPath string, timeout time.Duration) error {
 // SocketDir returns the directory portion of the socket path.
 func SocketDir() string {
 	return filepath.Dir(SocketPath)
-}
-
-// Ensure socket directory exists with proper permissions.
-func ensureSocketDir() error {
-	dir := SocketDir()
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return fmt.Errorf("creating socket dir %s: %w", dir, err)
-	}
-	return nil
-}
-
-// cleanupSocket removes a stale socket file if it exists.
-func cleanupSocket(path string) {
-	if _, err := os.Stat(path); err == nil {
-		// Check if something is actually listening
-		if !IsRunningAt(path) {
-			_ = os.Remove(path)
-		}
-	}
-}
-
-// tunNameFromArgs extracts a usable TUN name from a potentially
-// comma-separated fallback list (e.g. "dex0,userspace-networking").
-func tunNameFromArgs(names string) string {
-	for _, name := range strings.Split(names, ",") {
-		name = strings.TrimSpace(name)
-		if name != "" {
-			return name
-		}
-	}
-	return "utun"
 }
