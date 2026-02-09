@@ -35,6 +35,10 @@ import (
 	"github.com/WebP2P/dexnet/wgengine"
 	"github.com/WebP2P/dexnet/wgengine/netstack"
 	"github.com/WebP2P/dexnet/wgengine/router"
+
+	// Register OS-specific router implementations (e.g., userspaceBSDRouter
+	// on macOS/FreeBSD) so that router.New() works with real TUN devices.
+	_ "github.com/WebP2P/dexnet/wgengine/router/osrouter"
 )
 
 const (
