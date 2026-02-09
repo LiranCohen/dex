@@ -74,12 +74,23 @@ func runMeshdRun(args []string) error {
 	cfg.Verbose = *verbose
 
 	// Auto-detect state paths and control URL from enrollment config.
-	// HQ mode: /opt/dex/config.json -> /opt/dex/mesh/
-	// Client mode: ~/.dex/config.json -> ~/.dex/mesh/
+	// Check client config first (~/.dex/) since HQ manages its own mesh
+	// connection via 'dex start'. Then fall back to HQ config (/opt/dex/).
 	if *stateDir == "" && *statePath == "" {
-		// Try HQ config first
+		// Try client config first. When running as root (via sudo or
+		// LaunchDaemon), resolve the original user's home directory
+		// since enrollment state lives in the user's ~/.dex/.
+		clientDataDir := sudoAwareClientDataDir()
+		clientConfigPath := filepath.Join(clientDataDir, "config.json")
 		hqConfigPath := "/opt/dex/config.json"
-		if hqCfg, err := LoadConfig(hqConfigPath); err == nil {
+
+		if clientCfg, err := LoadClientConfig(clientConfigPath); err == nil {
+			cfg.StateDir = filepath.Join(clientDataDir, "mesh")
+			cfg.StatePath = filepath.Join(cfg.StateDir, "tailscaled.state")
+			cfg.ControlURL = clientCfg.Mesh.ControlURL
+			cfg.Hostname = clientCfg.Hostname
+			fmt.Fprintf(os.Stderr, "dex-meshd: using client enrollment (control=%s, hostname=%s)\n", cfg.ControlURL, cfg.Hostname)
+		} else if hqCfg, err := LoadConfig(hqConfigPath); err == nil {
 			cfg.StateDir = "/opt/dex/mesh"
 			cfg.StatePath = filepath.Join(cfg.StateDir, "tailscaled.state")
 			cfg.ControlURL = hqCfg.Mesh.ControlURL
@@ -89,20 +100,7 @@ func runMeshdRun(args []string) error {
 			}
 			fmt.Fprintf(os.Stderr, "dex-meshd: using HQ enrollment (control=%s, hostname=%s)\n", cfg.ControlURL, cfg.Hostname)
 		} else {
-			// Try client config. When running as root (via sudo), resolve
-			// the original user's home directory since enrollment state lives
-			// in the user's ~/.dex/, not root's.
-			clientDataDir := sudoAwareClientDataDir()
-			clientConfigPath := filepath.Join(clientDataDir, "config.json")
-			if clientCfg, err := LoadClientConfig(clientConfigPath); err == nil {
-				cfg.StateDir = filepath.Join(clientDataDir, "mesh")
-				cfg.StatePath = filepath.Join(cfg.StateDir, "tailscaled.state")
-				cfg.ControlURL = clientCfg.Mesh.ControlURL
-				cfg.Hostname = clientCfg.Hostname
-				fmt.Fprintf(os.Stderr, "dex-meshd: using client enrollment (control=%s, hostname=%s)\n", cfg.ControlURL, cfg.Hostname)
-			} else {
-				return fmt.Errorf("no enrollment found. Run 'dex enroll' or 'dex client enroll' first.\nLooked in: %s, %s", hqConfigPath, clientConfigPath)
-			}
+			return fmt.Errorf("no enrollment found. Run 'dex enroll' or 'dex client enroll' first.\nLooked in: %s, %s", clientConfigPath, hqConfigPath)
 		}
 	} else {
 		if *stateDir != "" {

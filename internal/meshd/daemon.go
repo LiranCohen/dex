@@ -109,19 +109,21 @@ func Run(ctx context.Context, cfg Config) error {
 		return fmt.Errorf("creating state dir: %w", err)
 	}
 
-	// Clean up stale DNS/route config from previous crashes
-	nMon, err := netmon.New(nil, logf)
+	// Set up the system first — this creates the event bus that
+	// netmon and other subsystems need.
+	sys := tsd.NewSystem()
+	sys.SocketPath = cfg.SocketPath
+
+	// Create network monitor with the bus from the system
+	nMon, err := netmon.New(sys.Bus.Get(), logf)
 	if err != nil {
 		return fmt.Errorf("netmon.New: %w", err)
 	}
-
-	dns.CleanUp(logf, nMon, nil, nil, cfg.TunName)
-	router.CleanUp(logf, nMon, cfg.TunName)
-
-	// Set up the system
-	sys := tsd.NewSystem()
-	sys.SocketPath = cfg.SocketPath
 	sys.Set(nMon)
+
+	// Clean up stale DNS/route config from previous crashes
+	dns.CleanUp(logf, nMon, sys.Bus.Get(), sys.HealthTracker.Get(), cfg.TunName)
+	router.CleanUp(logf, nMon, cfg.TunName)
 
 	// Listen on the LocalAPI socket
 	ln, err := safesocket.Listen(cfg.SocketPath)

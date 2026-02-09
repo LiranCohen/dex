@@ -19,7 +19,9 @@ import (
 
 	"fyne.io/systray"
 
+	"github.com/WebP2P/dexnet/client/local"
 	"github.com/lirancohen/dex/internal/mesh"
+	"github.com/lirancohen/dex/internal/meshd"
 )
 
 type trayState int
@@ -138,6 +140,60 @@ func (t *clientTray) connect() {
 
 	t.updateUI()
 
+	// Check if the mesh daemon is running — if so, use it
+	if meshd.IsRunning() {
+		t.connectViaDaemon()
+		return
+	}
+
+	// Fall back to userspace tsnet
+	t.connectViaTsnet()
+}
+
+// connectViaDaemon connects to the running mesh daemon via LocalAPI.
+func (t *clientTray) connectViaDaemon() {
+	lc := local.Client{
+		Socket:        meshd.SocketPath,
+		UseSocketOnly: true,
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.mu.Lock()
+	t.cancel = cancel
+	t.mu.Unlock()
+
+	// Poll for daemon status
+	var meshIP string
+	for i := 0; i < 30; i++ {
+		status, err := lc.StatusWithoutPeers(ctx)
+		if err != nil {
+			log.Printf("Lost connection to daemon: %v", err)
+			break
+		}
+		if status.BackendState == "Running" && len(status.TailscaleIPs) > 0 {
+			meshIP = status.TailscaleIPs[0].String()
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(time.Second):
+		}
+	}
+
+	t.mu.Lock()
+	t.state = trayStateConnected
+	t.meshIP = meshIP
+	t.mu.Unlock()
+
+	t.updateUI()
+
+	// Wait for context cancellation
+	<-ctx.Done()
+}
+
+// connectViaTsnet connects using an in-process tsnet server (userspace mode).
+func (t *clientTray) connectViaTsnet() {
 	configPath := filepath.Join(t.dataDir, "config.json")
 	config, err := LoadClientConfig(configPath)
 	if err != nil {
