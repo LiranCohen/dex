@@ -30,6 +30,7 @@ func printUsage() {
 	fmt.Fprintf(os.Stderr, "  start     Start the Dex server (default if no command given)\n")
 	fmt.Fprintf(os.Stderr, "  enroll    Enroll this HQ with Central using an enrollment key\n")
 	fmt.Fprintf(os.Stderr, "  client    Client commands for local device mesh access\n")
+	fmt.Fprintf(os.Stderr, "  meshd     Mesh daemon with TUN device for OS-level connectivity\n")
 	fmt.Fprintf(os.Stderr, "  version   Show version information\n")
 	fmt.Fprintf(os.Stderr, "  help      Show this help message\n")
 	fmt.Fprintf(os.Stderr, "\nRun 'dex <command> --help' for more information on a command.\n")
@@ -47,6 +48,12 @@ func main() {
 			return
 		case "client":
 			if err := runClient(os.Args[2:]); err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				os.Exit(1)
+			}
+			return
+		case "meshd":
+			if err := runMeshd(os.Args[2:]); err != nil {
 				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 				os.Exit(1)
 			}
