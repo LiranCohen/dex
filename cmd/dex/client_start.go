@@ -10,8 +10,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/WebP2P/dexnet/client/local"
 	"github.com/lirancohen/dex/internal/daemon"
 	"github.com/lirancohen/dex/internal/mesh"
+	"github.com/lirancohen/dex/internal/meshd"
 )
 
 func runClientStart(args []string) error {
@@ -49,6 +51,16 @@ func runClientStart(args []string) error {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 
+	// Check if the mesh daemon is running — if so, use it instead of tsnet
+	if meshd.IsRunning() {
+		return runClientViaDaemon(config)
+	}
+
+	// No daemon running — fall back to userspace tsnet
+	fmt.Println("Tip: Install the mesh daemon for full OS-level connectivity:")
+	fmt.Println("  sudo dex meshd install")
+	fmt.Println()
+
 	// Handle background mode
 	pidFile := daemon.NewPIDFile(dataDir, "dex-client")
 	if !*foregroundFlag {
@@ -75,7 +87,7 @@ func runClientStart(args []string) error {
 	}
 	defer func() { _ = pidFile.Remove() }()
 
-	fmt.Println("Dex Client - Connecting to mesh network")
+	fmt.Println("Dex Client - Connecting to mesh network (userspace mode)")
 	fmt.Printf("  Namespace: %s\n", config.Namespace)
 	fmt.Printf("  Hostname:  %s\n", config.Hostname)
 	fmt.Printf("  Control:   %s\n", config.Mesh.ControlURL)
@@ -142,5 +154,71 @@ func runClientStart(args []string) error {
 	}
 
 	fmt.Println("Disconnected from mesh network")
+	return nil
+}
+
+// runClientViaDaemon connects to the running mesh daemon via its LocalAPI
+// socket and monitors the mesh state. The daemon handles TUN device, OS routes,
+// and DNS — so all we need to do here is report status and wait.
+func runClientViaDaemon(config *ClientConfig) error {
+	fmt.Println("Dex Client - Using mesh daemon for OS-level connectivity")
+	fmt.Printf("  Namespace: %s\n", config.Namespace)
+	fmt.Printf("  Hostname:  %s\n", config.Hostname)
+	fmt.Printf("  Daemon:    %s\n", meshd.SocketPath)
+	fmt.Println()
+
+	lc := local.Client{
+		Socket:        meshd.SocketPath,
+		UseSocketOnly: true,
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Get initial status from the daemon
+	status, err := lc.StatusWithoutPeers(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get daemon status: %w", err)
+	}
+
+	fmt.Printf("  State:     %s\n", status.BackendState)
+
+	if len(status.TailscaleIPs) > 0 {
+		fmt.Printf("  Mesh IP:   %s\n", status.TailscaleIPs[0])
+	}
+	if status.Self != nil && status.Self.DNSName != "" {
+		fmt.Printf("  DNS Name:  %s\n", status.Self.DNSName)
+	}
+
+	// If not running yet, wait for it to come up
+	if status.BackendState != "Running" {
+		fmt.Printf("\n  Waiting for daemon to connect...\n")
+		for i := 0; i < 60; i++ {
+			time.Sleep(time.Second)
+			status, err = lc.StatusWithoutPeers(ctx)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "  Warning: lost connection to daemon: %v\n", err)
+				break
+			}
+			if status.BackendState == "Running" {
+				if len(status.TailscaleIPs) > 0 {
+					fmt.Printf("  Mesh IP:   %s\n", status.TailscaleIPs[0])
+				}
+				break
+			}
+		}
+	}
+
+	fmt.Println()
+	fmt.Println("Mesh daemon is handling connectivity. Browsers and apps can reach mesh nodes.")
+	fmt.Println("Press Ctrl+C to exit (daemon continues running).")
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+
+	fmt.Println()
+	fmt.Println("Client detached. Mesh daemon continues running in the background.")
+	fmt.Println("To stop the daemon: sudo dex meshd uninstall")
 	return nil
 }
