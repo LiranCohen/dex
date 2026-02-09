@@ -101,7 +101,13 @@ func runClientEnroll(args []string) error {
 	}
 
 	// 4. Create data directory and mesh state directory
+	// Clean any stale mesh state from a previous enrollment so tsnet starts fresh.
+	// This is important because tsnet caches node keys and profile data that become
+	// invalid after a re-enrollment (e.g., after a server-side DB reset).
 	meshStateDir := filepath.Join(dataDir, "mesh")
+	if err := os.RemoveAll(meshStateDir); err != nil {
+		return fmt.Errorf("failed to clean mesh state directory: %w", err)
+	}
 	if err := os.MkdirAll(meshStateDir, 0755); err != nil {
 		return fmt.Errorf("failed to create mesh state directory: %w", err)
 	}
