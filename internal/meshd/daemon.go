@@ -18,6 +18,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/WebP2P/dexnet/control/controlclient"
 	"github.com/WebP2P/dexnet/ipn"
 	"github.com/WebP2P/dexnet/ipn/ipnlocal"
 	"github.com/WebP2P/dexnet/ipn/ipnserver"
@@ -61,6 +62,13 @@ type Config struct {
 
 	// TunName is the TUN device name ("utun" on macOS for auto-assignment).
 	TunName string
+
+	// ControlURL is the mesh control server URL (e.g., "https://central.enbox.id").
+	// Required — the daemon needs this to connect to the correct control server.
+	ControlURL string
+
+	// Hostname is this node's hostname on the mesh network.
+	Hostname string
 
 	// Verbose sets the log verbosity level.
 	Verbose int
@@ -167,14 +175,23 @@ func Run(ctx context.Context, cfg Config) error {
 		}
 		logf("dex-meshd: backend ready")
 
-		if lb.Prefs().Valid() {
-			if err := lb.Start(ipn.Options{}); err != nil {
-				logf("dex-meshd: LocalBackend.Start: %v", err)
-				lb.Shutdown()
-				cancel()
-				return
-			}
+		// Set up prefs like tsnet does — explicitly pass ControlURL,
+		// Hostname, and WantRunning so the backend connects to the
+		// correct control server using the existing enrollment state.
+		prefs := ipn.NewPrefs()
+		prefs.WantRunning = true
+		prefs.ControlURL = cfg.ControlURL
+		prefs.Hostname = cfg.Hostname
+
+		if err := lb.Start(ipn.Options{
+			UpdatePrefs: prefs,
+		}); err != nil {
+			logf("dex-meshd: LocalBackend.Start: %v", err)
+			lb.Shutdown()
+			cancel()
+			return
 		}
+
 		srv.SetLocalBackend(lb)
 		close(wgEngineCreated)
 	}()
@@ -289,8 +306,9 @@ func createBackend(ctx context.Context, logf logger.Logf, logID logid.PublicID, 
 		ns.ProcessSubnets = netstackSubnetRouter
 	}
 
-	// Create LocalBackend
-	lb, err := ipnlocal.NewLocalBackend(logf, logID, sys, 0)
+	// Create LocalBackend with OS-neutral flag (same as tsnet) so the
+	// profile manager reads _current-profile correctly on all platforms.
+	lb, err := ipnlocal.NewLocalBackend(logf, logID, sys, controlclient.LocalBackendStartKeyOSNeutral)
 	if err != nil {
 		return nil, fmt.Errorf("ipnlocal.NewLocalBackend: %w", err)
 	}

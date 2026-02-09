@@ -72,26 +72,33 @@ func runMeshdRun(args []string) error {
 	}
 	cfg.Verbose = *verbose
 
-	// Auto-detect state paths from enrollment config.
-	// HQ mode: /opt/dex/mesh/
-	// Client mode: ~/.dex/mesh/
+	// Auto-detect state paths and control URL from enrollment config.
+	// HQ mode: /opt/dex/config.json -> /opt/dex/mesh/
+	// Client mode: ~/.dex/config.json -> ~/.dex/mesh/
 	if *stateDir == "" && *statePath == "" {
 		// Try HQ config first
-		hqConfig := "/opt/dex/config.json"
-		if _, err := os.Stat(hqConfig); err == nil {
+		hqConfigPath := "/opt/dex/config.json"
+		if hqCfg, err := LoadConfig(hqConfigPath); err == nil {
 			cfg.StateDir = "/opt/dex/mesh"
 			cfg.StatePath = filepath.Join(cfg.StateDir, "tailscaled.state")
-			fmt.Fprintf(os.Stderr, "dex-meshd: using HQ state: %s\n", cfg.StateDir)
+			cfg.ControlURL = hqCfg.Mesh.ControlURL
+			cfg.Hostname = hqCfg.Hostname
+			if cfg.Hostname == "" {
+				cfg.Hostname = "hq"
+			}
+			fmt.Fprintf(os.Stderr, "dex-meshd: using HQ enrollment (control=%s, hostname=%s)\n", cfg.ControlURL, cfg.Hostname)
 		} else {
 			// Try client config
 			clientDataDir := DefaultClientDataDir()
-			clientConfig := filepath.Join(clientDataDir, "config.json")
-			if _, err := os.Stat(clientConfig); err == nil {
+			clientConfigPath := filepath.Join(clientDataDir, "config.json")
+			if clientCfg, err := LoadClientConfig(clientConfigPath); err == nil {
 				cfg.StateDir = filepath.Join(clientDataDir, "mesh")
 				cfg.StatePath = filepath.Join(cfg.StateDir, "tailscaled.state")
-				fmt.Fprintf(os.Stderr, "dex-meshd: using client state: %s\n", cfg.StateDir)
+				cfg.ControlURL = clientCfg.Mesh.ControlURL
+				cfg.Hostname = clientCfg.Hostname
+				fmt.Fprintf(os.Stderr, "dex-meshd: using client enrollment (control=%s, hostname=%s)\n", cfg.ControlURL, cfg.Hostname)
 			} else {
-				return fmt.Errorf("no enrollment found. Run 'dex enroll' or 'dex client enroll' first.\nLooked in: %s, %s", hqConfig, clientConfig)
+				return fmt.Errorf("no enrollment found. Run 'dex enroll' or 'dex client enroll' first.\nLooked in: %s, %s", hqConfigPath, clientConfigPath)
 			}
 		}
 	} else {
@@ -103,6 +110,11 @@ func runMeshdRun(args []string) error {
 		} else {
 			cfg.StatePath = filepath.Join(cfg.StateDir, "tailscaled.state")
 		}
+	}
+
+	// Validate that we have a control URL
+	if cfg.ControlURL == "" {
+		return fmt.Errorf("no control URL found in enrollment config; re-enroll with 'dex enroll' or 'dex client enroll'")
 	}
 
 	fmt.Fprintf(os.Stderr, "dex-meshd: starting (socket=%s, state=%s, tun=%s)\n",
