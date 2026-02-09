@@ -1,0 +1,180 @@
+/*
+ * Dex (Poindexter) — Forgejo Theme
+ *
+ * A dark theme matching the Dex HQ dashboard aesthetic:
+ * retro-futuristic with teal accents, warm orange highlights,
+ * and a sophisticated dark palette.
+ */
+
+gitea-theme-meta-info {
+  --theme-display-name: "Dex";
+}
+
+:root {
+  --is-dark-theme: true;
+
+  /* Fonts — match Dex dashboard */
+  --fonts-proportional: "Inter", "SF Pro Display", system-ui, -apple-system, sans-serif;
+  --fonts-monospace: "JetBrains Mono", "SF Mono", "Menlo", "Consolas", monospace;
+  --fonts-emoji: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji";
+
+  /* ===== Color System ===== */
+
+  /* Primary — Retro Teal */
+  --color-primary: #3F8A8C;
+  --color-primary-dark-1: #358284;
+  --color-primary-dark-2: #2b7a7c;
+  --color-primary-dark-3: #216e70;
+  --color-primary-dark-4: #1a6264;
+  --color-primary-dark-5: #145658;
+  --color-primary-dark-6: #0e4a4c;
+  --color-primary-dark-7: #083e40;
+  --color-primary-light-1: #4a9fa1;
+  --color-primary-light-2: #5ab0b2;
+  --color-primary-light-3: #6fc1c3;
+  --color-primary-light-4: #89d0d2;
+  --color-primary-light-5: #a5dee0;
+  --color-primary-light-6: #c3ecee;
+  --color-primary-light-7: #e1f6f7;
+  --color-primary-alpha-10: rgba(63, 138, 140, 0.10);
+  --color-primary-alpha-20: rgba(63, 138, 140, 0.20);
+  --color-primary-alpha-30: rgba(63, 138, 140, 0.30);
+  --color-primary-alpha-40: rgba(63, 138, 140, 0.40);
+  --color-primary-alpha-50: rgba(63, 138, 140, 0.50);
+  --color-primary-alpha-60: rgba(63, 138, 140, 0.60);
+  --color-primary-alpha-70: rgba(63, 138, 140, 0.70);
+  --color-primary-alpha-80: rgba(63, 138, 140, 0.80);
+  --color-primary-alpha-90: rgba(63, 138, 140, 0.90);
+
+  /* Backgrounds — Dex dark palette */
+  --color-body: #1a1a1a;
+  --color-box-body: #242424;
+  --color-box-body-highlight: #2e2e2e;
+
+  /* Input/Form backgrounds */
+  --color-input-background: #1a1a1a;
+  --color-input-text: #e8e4df;
+  --color-input-border: #444444;
+  --color-input-border-hover: #3F8A8C;
+
+  /* Text colors */
+  --color-text: #e8e4df;
+  --color-text-light: #9a9590;
+  --color-text-light-1: #9a9590;
+  --color-text-light-2: #7a7570;
+  --color-text-light-3: #5a5550;
+
+  /* Navbar */
+  --color-nav-bg: #1a1a1a;
+  --color-nav-text: #e8e4df;
+  --color-nav-hover-bg: #2e2e2e;
+
+  /* Secondary colors */
+  --color-secondary: #2e2e2e;
+  --color-secondary-dark-1: #282828;
+  --color-secondary-dark-2: #222222;
+  --color-secondary-dark-3: #1c1c1c;
+  --color-secondary-dark-4: #161616;
+  --color-secondary-dark-5: #111111;
+  --color-secondary-dark-6: #0c0c0c;
+  --color-secondary-dark-7: #080808;
+  --color-secondary-light-1: #383838;
+  --color-secondary-light-2: #424242;
+  --color-secondary-light-3: #4c4c4c;
+  --color-secondary-light-4: #565656;
+  --color-secondary-light-5: #606060;
+  --color-secondary-light-6: #6a6a6a;
+  --color-secondary-light-7: #747474;
+  --color-secondary-alpha-10: rgba(46, 46, 46, 0.10);
+  --color-secondary-alpha-20: rgba(46, 46, 46, 0.20);
+  --color-secondary-alpha-30: rgba(46, 46, 46, 0.30);
+  --color-secondary-alpha-40: rgba(46, 46, 46, 0.40);
+  --color-secondary-alpha-50: rgba(46, 46, 46, 0.50);
+  --color-secondary-alpha-60: rgba(46, 46, 46, 0.60);
+  --color-secondary-alpha-70: rgba(46, 46, 46, 0.70);
+  --color-secondary-alpha-80: rgba(46, 46, 46, 0.80);
+  --color-secondary-alpha-90: rgba(46, 46, 46, 0.90);
+
+  /* Borders */
+  --color-border: #333333;
+  --color-light-border: #2e2e2e;
+
+  /* Shadows — subtle for dark theme */
+  --color-shadow: rgba(0, 0, 0, 0.4);
+
+  /* Labels */
+  --color-label-text: #e8e4df;
+  --color-label-bg: #2e2e2e;
+  --color-label-hover-bg: #383838;
+
+  /* Buttons */
+  --color-button: #2e2e2e;
+  --color-button-border: #444444;
+  --color-button-hover: #383838;
+
+  /* Code */
+  --color-code-bg: #1a1a1a;
+  --color-code-border: #333333;
+
+  /* Header bar override */
+  --color-header: #1a1a1a;
+
+  /* Accent color — used for links, active indicators */
+  --color-accent: #3F8A8C;
+
+  /* ===== Status / Semantic Colors ===== */
+
+  /* Success — Dex sage green */
+  --color-success: #6b8f71;
+  --color-success-text: #6b8f71;
+  --color-success-bg: rgba(107, 143, 113, 0.15);
+  --color-success-border: rgba(107, 143, 113, 0.3);
+  --color-success-dark-1: #5c8062;
+  --color-success-dark-2: #4d7153;
+  --color-success-light-1: #7a9e80;
+  --color-success-light-2: #89ad8f;
+
+  /* Warning — Dex rich orange */
+  --color-warning: #F28A0F;
+  --color-warning-text: #F28A0F;
+  --color-warning-bg: rgba(242, 138, 15, 0.15);
+  --color-warning-border: rgba(242, 138, 15, 0.3);
+  --color-warning-dark-1: #d97e0e;
+  --color-warning-dark-2: #c0700d;
+  --color-warning-light-1: #f49a2f;
+  --color-warning-light-2: #f6aa4f;
+
+  /* Error — Dex cashew apple */
+  --color-error: #E5340B;
+  --color-error-text: #E5340B;
+  --color-error-bg: rgba(229, 52, 11, 0.15);
+  --color-error-border: rgba(229, 52, 11, 0.3);
+  --color-error-dark-1: #cc2e0a;
+  --color-error-dark-2: #b32809;
+  --color-error-light-1: #e8502a;
+  --color-error-light-2: #eb6c49;
+
+  /* Info — Dex petrol blue */
+  --color-info: #0C5679;
+  --color-info-text: #0e6a94;
+  --color-info-bg: rgba(12, 86, 121, 0.15);
+  --color-info-border: rgba(12, 86, 121, 0.3);
+
+  /* ===== Diff Colors ===== */
+  --color-diff-removed-word-bg: rgba(229, 52, 11, 0.30);
+  --color-diff-added-word-bg: rgba(107, 143, 113, 0.30);
+  --color-diff-removed-row-bg: rgba(229, 52, 11, 0.10);
+  --color-diff-added-row-bg: rgba(107, 143, 113, 0.10);
+  --color-diff-removed-row-border: rgba(229, 52, 11, 0.20);
+  --color-diff-added-row-border: rgba(107, 143, 113, 0.20);
+  --color-diff-inactive: #2e2e2e;
+
+  /* ===== Hover / Focus ===== */
+  --color-hover: rgba(63, 138, 140, 0.08);
+  --color-active: rgba(63, 138, 140, 0.15);
+
+  /* ===== Reaction Emoji ===== */
+  --color-reaction-bg: #2e2e2e;
+  --color-reaction-hover-bg: rgba(63, 138, 140, 0.15);
+  --color-reaction-active-bg: rgba(63, 138, 140, 0.25);
+}

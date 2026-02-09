@@ -64,9 +64,12 @@ func (m *Manager) Start(ctx context.Context) error {
 		}
 	}
 
-	// Ensure directories and config
+	// Ensure directories, theme, and config
 	if err := m.config.EnsureDirectories(); err != nil {
 		return fmt.Errorf("failed to create directories: %w", err)
+	}
+	if err := m.config.InstallTheme(); err != nil {
+		return fmt.Errorf("failed to install theme: %w", err)
 	}
 	if err := m.config.WriteAppIni(); err != nil {
 		return fmt.Errorf("failed to write app.ini: %w", err)
