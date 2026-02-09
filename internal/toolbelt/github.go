@@ -4,7 +4,6 @@ package toolbelt
 import (
 	"context"
 	"fmt"
-	"net/http"
 
 	"github.com/google/go-github/v68/github"
 )
@@ -38,32 +37,9 @@ func (c *GitHubClient) GetToken() string {
 	return c.token
 }
 
-// NewGitHubClientFromToken creates a new GitHubClient from a token string.
-// This is useful for GitHub App installation tokens.
-// accountType should be "User" or "Organization" to determine how repos are created.
-func NewGitHubClientFromToken(token string, defaultOrg string, accountType string) *GitHubClient {
-	if token == "" {
-		return nil
-	}
-
-	client := github.NewClient(nil).WithAuthToken(token)
-
-	return &GitHubClient{
-		client:      client,
-		token:       token,
-		defaultOrg:  defaultOrg,
-		accountType: accountType,
-	}
-}
-
 // Token returns the auth token for git operations
 func (g *GitHubClient) Token() string {
 	return g.token
-}
-
-// Client returns the underlying go-github client for direct API access
-func (g *GitHubClient) Client() *github.Client {
-	return g.client
 }
 
 // AuthURL returns the authenticated URL for a git remote.
@@ -137,134 +113,6 @@ func (g *GitHubClient) CreateRepo(ctx context.Context, opts CreateRepoOptions) (
 	return created, nil
 }
 
-// ListReposOptions specifies options for listing repositories
-type ListReposOptions struct {
-	Org     string // If empty, uses defaultOrg; if still empty, lists user's repos
-	PerPage int
-	Page    int
-}
-
-// ListRepos lists repositories for the configured org or authenticated user
-func (g *GitHubClient) ListRepos(ctx context.Context, opts ListReposOptions) ([]*github.Repository, error) {
-	org := opts.Org
-	if org == "" {
-		org = g.defaultOrg
-	}
-
-	listOpts := &github.RepositoryListOptions{
-		ListOptions: github.ListOptions{
-			PerPage: opts.PerPage,
-			Page:    opts.Page,
-		},
-	}
-
-	if listOpts.PerPage == 0 {
-		listOpts.PerPage = 30
-	}
-
-	var repos []*github.Repository
-	var err error
-
-	if org != "" {
-		orgListOpts := &github.RepositoryListByOrgOptions{
-			ListOptions: listOpts.ListOptions,
-		}
-		repos, _, err = g.client.Repositories.ListByOrg(ctx, org, orgListOpts)
-	} else {
-		authListOpts := &github.RepositoryListByAuthenticatedUserOptions{
-			ListOptions: listOpts.ListOptions,
-		}
-		repos, _, err = g.client.Repositories.ListByAuthenticatedUser(ctx, authListOpts)
-	}
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to list repos: %w", err)
-	}
-	return repos, nil
-}
-
-// CreateIssueOptions specifies options for creating an issue
-type CreateIssueOptions struct {
-	Owner    string
-	Repo     string
-	Title    string
-	Body     string
-	Labels   []string
-	Assignee string
-}
-
-// CreateIssue creates a new issue in the specified repository
-func (g *GitHubClient) CreateIssue(ctx context.Context, opts CreateIssueOptions) (*github.Issue, error) {
-	owner := opts.Owner
-	if owner == "" {
-		owner = g.defaultOrg
-	}
-
-	issueReq := &github.IssueRequest{
-		Title: github.Ptr(opts.Title),
-		Body:  github.Ptr(opts.Body),
-	}
-
-	if len(opts.Labels) > 0 {
-		issueReq.Labels = &opts.Labels
-	}
-
-	if opts.Assignee != "" {
-		issueReq.Assignee = github.Ptr(opts.Assignee)
-	}
-
-	issue, _, err := g.client.Issues.Create(ctx, owner, opts.Repo, issueReq)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create issue: %w", err)
-	}
-	return issue, nil
-}
-
-// UpdateIssueOptions specifies options for updating an issue
-type UpdateIssueOptions struct {
-	Owner       string
-	Repo        string
-	IssueNumber int
-	Title       *string
-	Body        *string
-	State       *string // "open" or "closed"
-	Labels      *[]string
-	Assignee    *string
-}
-
-// UpdateIssue updates an existing issue
-func (g *GitHubClient) UpdateIssue(ctx context.Context, opts UpdateIssueOptions) (*github.Issue, error) {
-	owner := opts.Owner
-	if owner == "" {
-		owner = g.defaultOrg
-	}
-
-	issueReq := &github.IssueRequest{
-		Title:    opts.Title,
-		Body:     opts.Body,
-		State:    opts.State,
-		Labels:   opts.Labels,
-		Assignee: opts.Assignee,
-	}
-
-	issue, _, err := g.client.Issues.Edit(ctx, owner, opts.Repo, opts.IssueNumber, issueReq)
-	if err != nil {
-		return nil, fmt.Errorf("failed to update issue: %w", err)
-	}
-	return issue, nil
-}
-
-// CloseIssue closes an issue by number
-func (g *GitHubClient) CloseIssue(ctx context.Context, owner, repo string, issueNumber int) (*github.Issue, error) {
-	closed := "closed"
-	return g.UpdateIssue(ctx, UpdateIssueOptions{
-		Owner:       owner,
-		Repo:        repo,
-		IssueNumber: issueNumber,
-		State:       &closed,
-	})
-}
-
 // CreatePROptions specifies options for creating a pull request
 type CreatePROptions struct {
 	Owner string
@@ -298,178 +146,11 @@ func (g *GitHubClient) CreatePR(ctx context.Context, opts CreatePROptions) (*git
 	return pr, nil
 }
 
-// MergePROptions specifies options for merging a pull request
-type MergePROptions struct {
-	Owner       string
-	Repo        string
-	PRNumber    int
-	MergeMethod string // "merge", "squash", or "rebase"
-	CommitTitle string
-}
-
-// MergePR merges a pull request
-func (g *GitHubClient) MergePR(ctx context.Context, opts MergePROptions) (*github.PullRequestMergeResult, error) {
-	owner := opts.Owner
-	if owner == "" {
-		owner = g.defaultOrg
-	}
-
-	mergeMethod := opts.MergeMethod
-	if mergeMethod == "" {
-		mergeMethod = "squash"
-	}
-
-	mergeOpts := &github.PullRequestOptions{
-		MergeMethod: mergeMethod,
-	}
-
-	result, _, err := g.client.PullRequests.Merge(ctx, owner, opts.Repo, opts.PRNumber, opts.CommitTitle, mergeOpts)
-	if err != nil {
-		return nil, fmt.Errorf("failed to merge PR: %w", err)
-	}
-	return result, nil
-}
-
-// SetupActionsOptions specifies options for setting up GitHub Actions
-type SetupActionsOptions struct {
-	Owner        string
-	Repo         string
-	WorkflowName string // e.g., "ci.yml"
-	WorkflowYAML string // The workflow file content
-	Branch       string // Branch to commit to (default: main)
-	CommitMsg    string
-}
-
-// SetupActions creates or updates a GitHub Actions workflow file
-func (g *GitHubClient) SetupActions(ctx context.Context, opts SetupActionsOptions) error {
-	owner := opts.Owner
-	if owner == "" {
-		owner = g.defaultOrg
-	}
-
-	branch := opts.Branch
-	if branch == "" {
-		branch = "main"
-	}
-
-	path := fmt.Sprintf(".github/workflows/%s", opts.WorkflowName)
-
-	commitMsg := opts.CommitMsg
-	if commitMsg == "" {
-		commitMsg = fmt.Sprintf("Add %s workflow", opts.WorkflowName)
-	}
-
-	// Check if file already exists
-	fileContent, _, _, err := g.client.Repositories.GetContents(ctx, owner, opts.Repo, path, &github.RepositoryContentGetOptions{
-		Ref: branch,
-	})
-
-	if err != nil {
-		// File doesn't exist, create it
-		_, _, err = g.client.Repositories.CreateFile(ctx, owner, opts.Repo, path, &github.RepositoryContentFileOptions{
-			Message: github.Ptr(commitMsg),
-			Content: []byte(opts.WorkflowYAML),
-			Branch:  github.Ptr(branch),
-		})
-		if err != nil {
-			return fmt.Errorf("failed to create workflow file: %w", err)
-		}
-	} else {
-		// File exists, update it
-		_, _, err = g.client.Repositories.UpdateFile(ctx, owner, opts.Repo, path, &github.RepositoryContentFileOptions{
-			Message: github.Ptr(commitMsg),
-			Content: []byte(opts.WorkflowYAML),
-			SHA:     fileContent.SHA,
-			Branch:  github.Ptr(branch),
-		})
-		if err != nil {
-			return fmt.Errorf("failed to update workflow file: %w", err)
-		}
-	}
-
-	return nil
-}
-
-// GetRepo retrieves repository information
-// Returns nil, nil if the repository doesn't exist (404)
-func (g *GitHubClient) GetRepo(ctx context.Context, owner, repo string) (*github.Repository, error) {
-	if owner == "" {
-		owner = g.defaultOrg
-	}
-
-	// If still no owner, get the authenticated user
-	if owner == "" {
-		user, err := g.GetAuthenticatedUser(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get authenticated user: %w", err)
-		}
-		owner = user.GetLogin()
-	}
-
-	repository, resp, err := g.client.Repositories.Get(ctx, owner, repo)
-	if err != nil {
-		// Check if it's a 404 (repo not found)
-		if resp != nil && resp.StatusCode == http.StatusNotFound {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("failed to get repo: %w", err)
-	}
-
-	return repository, nil
-}
-
-// EnsureRepo creates a repo if it doesn't exist, or returns the existing repo
-func (g *GitHubClient) EnsureRepo(ctx context.Context, opts CreateRepoOptions) (*github.Repository, error) {
-	owner := opts.Org
-	if owner == "" {
-		owner = g.defaultOrg
-	}
-
-	// If still no owner, get the authenticated user
-	if owner == "" {
-		user, err := g.GetAuthenticatedUser(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get authenticated user: %w", err)
-		}
-		owner = user.GetLogin()
-	}
-
-	// Check if repo already exists
-	existing, err := g.GetRepo(ctx, owner, opts.Name)
-	if err != nil {
-		return nil, fmt.Errorf("failed to check for existing repo: %w", err)
-	}
-
-	if existing != nil {
-		return existing, nil
-	}
-
-	// Repo doesn't exist, create it
-	return g.CreateRepo(ctx, opts)
-}
-
 // GetAuthenticatedUser returns the authenticated user's information.
-// Note: This doesn't work for GitHub App installation tokens - use GetOwner() instead.
 func (g *GitHubClient) GetAuthenticatedUser(ctx context.Context) (*github.User, error) {
 	user, _, err := g.client.Users.Get(ctx, "")
 	if err != nil {
 		return nil, fmt.Errorf("failed to get authenticated user: %w", err)
 	}
 	return user, nil
-}
-
-// GetOwner returns the owner/org to use for operations.
-// For GitHub App clients, this returns the defaultOrg (installation login) without an API call.
-// For PAT clients without a defaultOrg, this falls back to GetAuthenticatedUser.
-func (g *GitHubClient) GetOwner(ctx context.Context) (string, error) {
-	if g.defaultOrg != "" {
-		return g.defaultOrg, nil
-	}
-
-	// Fall back to authenticated user for PAT tokens
-	user, err := g.GetAuthenticatedUser(ctx)
-	if err != nil {
-		return "", err
-	}
-	return user.GetLogin(), nil
 }

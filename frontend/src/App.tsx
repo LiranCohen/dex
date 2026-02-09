@@ -8,14 +8,10 @@ import { DexApp } from './app/App';
 // Setup status type
 interface SetupStatus {
   passkey_registered: boolean;
-  github_token_set: boolean;
-  github_app_set: boolean;
   anthropic_key_set: boolean;
   setup_complete: boolean;
   workspace_ready: boolean;
   workspace_path?: string;
-  workspace_github_ready: boolean;
-  workspace_github_url?: string;
   workspace_error?: string;
 }
 
@@ -369,9 +365,7 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
       const status = await api.get<SetupStatus>('/setup/status');
 
       // Show onboarding if setup is not complete
-      // Check for either GitHub auth method (app or token)
-      const hasGitHubAuth = status.github_token_set || status.github_app_set;
-      if (!status.setup_complete && (!hasGitHubAuth || !status.anthropic_key_set)) {
+      if (!status.setup_complete && !status.anthropic_key_set) {
         setShowOnboarding(true);
       }
     } catch (err) {

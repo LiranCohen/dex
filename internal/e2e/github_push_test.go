@@ -226,11 +226,5 @@ func TestGitHubConnectionOnly(t *testing.T) {
 		t.Fatalf("GitHub ping failed: %v", err)
 	}
 
-	// List repos to verify token has proper scopes
-	repos, err := ghClient.ListRepos(ctx, toolbelt.ListReposOptions{PerPage: 5})
-	if err != nil {
-		t.Fatalf("Failed to list repos: %v", err)
-	}
-
-	t.Logf("✓ GitHub connection successful, found %d repos", len(repos))
+	t.Logf("✓ GitHub connection successful")
 }

@@ -26,9 +26,6 @@ type Handler struct {
 	getDataDir           func() string
 	getToolbelt          func() *toolbelt.Toolbelt
 	reloadToolbelt       func() error
-	getGitHubClient      func(ctx context.Context, login string) (*toolbelt.GitHubClient, error)
-	hasGitHubApp         func() bool
-	initGitHubApp        func() error
 	getGitService        func() GitService
 	updateDefaultProject func(workspacePath string) error
 	forgejoService       ForgejoService
@@ -46,9 +43,6 @@ type HandlerConfig struct {
 	GetDataDir           func() string
 	GetToolbelt          func() *toolbelt.Toolbelt
 	ReloadToolbelt       func() error
-	GetGitHubClient      func(ctx context.Context, login string) (*toolbelt.GitHubClient, error)
-	HasGitHubApp         func() bool
-	InitGitHubApp        func() error
 	GetGitService        func() GitService
 	UpdateDefaultProject func(workspacePath string) error
 	ForgejoService       ForgejoService
@@ -62,9 +56,6 @@ func NewHandler(cfg HandlerConfig) *Handler {
 		getDataDir:           cfg.GetDataDir,
 		getToolbelt:          cfg.GetToolbelt,
 		reloadToolbelt:       cfg.ReloadToolbelt,
-		getGitHubClient:      cfg.GetGitHubClient,
-		hasGitHubApp:         cfg.HasGitHubApp,
-		initGitHubApp:        cfg.InitGitHubApp,
 		getGitService:        cfg.GetGitService,
 		updateDefaultProject: cfg.UpdateDefaultProject,
 		forgejoService:       cfg.ForgejoService,
@@ -167,110 +158,6 @@ func (h *Handler) HandleCompletePasskey(c echo.Context) error {
 	}
 
 	if err := h.db.CompletePasskeyStep(); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("failed to complete step: %v", err))
-	}
-
-	return c.JSON(http.StatusOK, map[string]any{
-		"success":   true,
-		"next_step": db.OnboardingStepAnthropic,
-	})
-}
-
-// HandleSetGitHubOrg sets the GitHub organization name
-func (h *Handler) HandleSetGitHubOrg(c echo.Context) error {
-	var req struct {
-		OrgName string `json:"org_name"`
-	}
-	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
-	}
-
-	if req.OrgName == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "org_name is required")
-	}
-
-	// Validate the organization exists
-	ctx, cancel := context.WithTimeout(c.Request().Context(), 15*time.Second)
-	defer cancel()
-
-	orgInfo, err := ValidateGitHubOrg(ctx, req.OrgName)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	}
-
-	// Must be an organization, not a user account
-	if orgInfo.Type != "Organization" {
-		return echo.NewHTTPError(http.StatusBadRequest,
-			fmt.Sprintf("'%s' is a personal account, not an organization. GitHub Apps can only create repositories in organizations. Please create or use a GitHub organization.", req.OrgName))
-	}
-
-	// Save the org name and ID
-	if err := h.db.SetGitHubOrg(orgInfo.Login, orgInfo.ID); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("failed to save org: %v", err))
-	}
-
-	return c.JSON(http.StatusOK, map[string]any{
-		"success":   true,
-		"org_id":    orgInfo.ID,
-		"org_login": orgInfo.Login,
-		"next_step": db.OnboardingStepGitHubApp,
-	})
-}
-
-// HandleValidateGitHubOrg validates a GitHub organization without saving
-func (h *Handler) HandleValidateGitHubOrg(c echo.Context) error {
-	var req struct {
-		OrgName string `json:"org_name"`
-	}
-	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
-	}
-
-	ctx, cancel := context.WithTimeout(c.Request().Context(), 15*time.Second)
-	defer cancel()
-
-	orgInfo, err := ValidateGitHubOrg(ctx, req.OrgName)
-	if err != nil {
-		return c.JSON(http.StatusOK, map[string]any{
-			"valid": false,
-			"error": err.Error(),
-		})
-	}
-
-	return c.JSON(http.StatusOK, map[string]any{
-		"valid":     true,
-		"org_id":    orgInfo.ID,
-		"org_login": orgInfo.Login,
-		"org_name":  orgInfo.Name,
-		"org_type":  orgInfo.Type,
-	})
-}
-
-// HandleCompleteGitHubApp marks the GitHub App creation as complete
-func (h *Handler) HandleCompleteGitHubApp(c echo.Context) error {
-	// Verify GitHub App is configured
-	if !h.hasGitHubApp() {
-		return echo.NewHTTPError(http.StatusBadRequest, "GitHub App not configured")
-	}
-
-	if err := h.db.CompleteGitHubAppStep(); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("failed to complete step: %v", err))
-	}
-
-	return c.JSON(http.StatusOK, map[string]any{
-		"success":   true,
-		"next_step": db.OnboardingStepGitHubInstall,
-	})
-}
-
-// HandleCompleteGitHubInstall marks the GitHub App installation as complete
-func (h *Handler) HandleCompleteGitHubInstall(c echo.Context) error {
-	// Verify we have at least one installation
-	if !h.db.HasGitHubInstallation() {
-		return echo.NewHTTPError(http.StatusBadRequest, "no GitHub App installation found")
-	}
-
-	if err := h.db.CompleteGitHubInstallStep(); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("failed to complete step: %v", err))
 	}
 
@@ -440,39 +327,6 @@ func (h *Handler) HandleWorkspaceSetup(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]any{
 		"workspace_path":  workspacePath,
 		"workspace_ready": true,
-	})
-}
-
-// Legacy handlers for backward compatibility
-
-// HandleSetGitHubToken validates and saves a GitHub token (legacy)
-func (h *Handler) HandleSetGitHubToken(c echo.Context) error {
-	var req struct {
-		Token string `json:"token"`
-	}
-	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
-	}
-
-	if err := ValidateGitHubTokenFormat(req.Token); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	}
-
-	ctx, cancel := context.WithTimeout(c.Request().Context(), 15*time.Second)
-	defer cancel()
-
-	if err := ValidateGitHubToken(ctx, req.Token); err != nil {
-		return echo.NewHTTPError(http.StatusUnauthorized, fmt.Sprintf("token validation failed: %v", err))
-	}
-
-	// Save to database
-	if err := h.db.SetSecret(db.SecretKeyGitHubToken, req.Token); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to save token")
-	}
-
-	return c.JSON(http.StatusOK, map[string]any{
-		"success": true,
-		"message": "GitHub token saved successfully",
 	})
 }
 

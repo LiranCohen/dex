@@ -233,21 +233,6 @@ func NewServer(database *db.DB, cfg Config) *Server {
 			return s.toolbelt
 		},
 		ReloadToolbelt: s.ReloadToolbelt,
-		HasGitHubApp:   database.HasGitHubApp,
-		InitGitHubApp: func() error {
-			// Reload toolbelt to pick up any new GitHub App config
-			return s.ReloadToolbelt()
-		},
-		GetGitHubClient: func(ctx context.Context, login string) (*toolbelt.GitHubClient, error) {
-			// Try to get GitHub client from toolbelt
-			s.toolbeltMu.RLock()
-			tb := s.toolbelt
-			s.toolbeltMu.RUnlock()
-			if tb != nil && tb.GitHub != nil {
-				return tb.GitHub, nil
-			}
-			return nil, fmt.Errorf("GitHub client not configured")
-		},
 		GetGitService: func() setup.GitService {
 			return s.gitService
 		},

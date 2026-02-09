@@ -188,11 +188,6 @@ func main() {
 			fmt.Printf("  - Encrypted %d plaintext secrets\n", encrypted)
 		}
 
-		// Encrypt GitHub App config if present
-		githubStore := db.NewEncryptedGitHubStore(database, encConfig.MasterKey)
-		if err := githubStore.MigrateToEncrypted(); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: Failed to encrypt GitHub App config: %v\n", err)
-		}
 	}
 
 	// Load toolbelt configuration (optional)
