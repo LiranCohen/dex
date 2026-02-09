@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/user"
 	"path/filepath"
 
 	"github.com/lirancohen/dex/internal/meshd"
@@ -88,8 +89,10 @@ func runMeshdRun(args []string) error {
 			}
 			fmt.Fprintf(os.Stderr, "dex-meshd: using HQ enrollment (control=%s, hostname=%s)\n", cfg.ControlURL, cfg.Hostname)
 		} else {
-			// Try client config
-			clientDataDir := DefaultClientDataDir()
+			// Try client config. When running as root (via sudo), resolve
+			// the original user's home directory since enrollment state lives
+			// in the user's ~/.dex/, not root's.
+			clientDataDir := sudoAwareClientDataDir()
 			clientConfigPath := filepath.Join(clientDataDir, "config.json")
 			if clientCfg, err := LoadClientConfig(clientConfigPath); err == nil {
 				cfg.StateDir = filepath.Join(clientDataDir, "mesh")
@@ -131,4 +134,40 @@ func runMeshdStatus(_ []string) error {
 	}
 	fmt.Println("dex-meshd is not running")
 	return nil
+}
+
+// sudoAwareClientDataDir returns the client data directory, resolving
+// the original user's home when running as root via sudo. This is needed
+// because the daemon requires root for TUN device creation, but the
+// enrollment state lives in the original user's ~/.dex/ directory.
+func sudoAwareClientDataDir() string {
+	// If not root, use the normal default
+	if os.Getuid() != 0 {
+		return DefaultClientDataDir()
+	}
+
+	// Check SUDO_USER to find the original user
+	sudoUser := os.Getenv("SUDO_USER")
+	if sudoUser != "" {
+		if u, err := user.Lookup(sudoUser); err == nil {
+			return filepath.Join(u.HomeDir, ".dex")
+		}
+	}
+
+	// Fallback: scan /Users/ on macOS for a .dex/config.json
+	entries, err := os.ReadDir("/Users")
+	if err == nil {
+		for _, e := range entries {
+			if !e.IsDir() || e.Name() == "Shared" {
+				continue
+			}
+			candidate := filepath.Join("/Users", e.Name(), ".dex")
+			if _, err := os.Stat(filepath.Join(candidate, "config.json")); err == nil {
+				return candidate
+			}
+		}
+	}
+
+	// Last resort: root's own home
+	return DefaultClientDataDir()
 }
