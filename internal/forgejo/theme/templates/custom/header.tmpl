@@ -1,0 +1,182 @@
+{{/* Dex — Forgejo header injection
+     Loaded into <head> to apply Dex branding overrides. */}}
+<style>
+  /* Import Inter + JetBrains Mono via system fallbacks
+     (no external CDN calls — these are common system/bundled fonts) */
+
+  /* ===== Global Overrides ===== */
+
+  /* Navbar: match Dex HQ deep dark header */
+  .ui.secondary.pointing.menu,
+  #navbar,
+  .header-wrapper {
+    background: #1a1a1a !important;
+    border-bottom: 1px solid #333333 !important;
+  }
+
+  /* Footer: subtle, blends with page */
+  .page-footer,
+  footer {
+    background: #1a1a1a !important;
+    border-top: 1px solid #333333 !important;
+    color: #7a7570 !important;
+  }
+
+  /* Hide the default Forgejo "Powered by" branding — we inject our own */
+  .page-footer .left-links .powered-by-forgejo {
+    display: none;
+  }
+
+  /* Repo header tabs — teal active indicator */
+  .repo-header .overflow-menu-items .active.item {
+    border-bottom-color: #3F8A8C !important;
+  }
+
+  /* Button overrides — make primary buttons use Dex teal */
+  .ui.primary.button,
+  .ui.primary.buttons .button {
+    background-color: #3F8A8C !important;
+    border-color: #358284 !important;
+  }
+  .ui.primary.button:hover,
+  .ui.primary.buttons .button:hover {
+    background-color: #4a9fa1 !important;
+    border-color: #3F8A8C !important;
+  }
+
+  /* Green buttons → Dex teal (new repo, new file, etc.) */
+  .ui.green.button,
+  .ui.positive.button {
+    background-color: #3F8A8C !important;
+    border-color: #358284 !important;
+  }
+  .ui.green.button:hover,
+  .ui.positive.button:hover {
+    background-color: #4a9fa1 !important;
+  }
+
+  /* Links — retro teal */
+  a {
+    color: #3F8A8C;
+  }
+  a:hover {
+    color: #4a9fa1;
+  }
+
+  /* Code blocks — deeper background */
+  .code-view,
+  .highlight pre,
+  .CodeMirror,
+  code {
+    background: #1a1a1a !important;
+  }
+
+  /* Cards, segments, and panels — Dex secondary bg */
+  .ui.segment,
+  .ui.segments .segment {
+    background: #242424 !important;
+    border-color: #333333 !important;
+  }
+
+  /* Dropdown menus */
+  .ui.dropdown .menu,
+  .tippy-box {
+    background: #242424 !important;
+    border-color: #333333 !important;
+  }
+  .ui.dropdown .menu > .item {
+    color: #e8e4df !important;
+  }
+  .ui.dropdown .menu > .item:hover {
+    background: #2e2e2e !important;
+  }
+
+  /* Labels — warm orange for issue/PR labels */
+  .ui.label.orange,
+  .ui.labels .label.orange {
+    background-color: rgba(242, 138, 15, 0.2) !important;
+    color: #F28A0F !important;
+    border-color: rgba(242, 138, 15, 0.3) !important;
+  }
+
+  /* Selection highlight */
+  ::selection {
+    background: rgba(12, 86, 121, 0.4);
+    color: #e8e4df;
+  }
+
+  /* Scrollbar styling */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-track {
+    background: #1a1a1a;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #444444;
+    border-radius: 4px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #3F8A8C;
+  }
+
+  /* Dashboard — recent activity, feed */
+  .dashboard .news .news-item .commit-id {
+    color: #3F8A8C !important;
+  }
+
+  /* Form inputs — subtle dark */
+  .ui.input input,
+  .ui.form textarea,
+  .ui.form input:not([type]),
+  .ui.form input[type="text"],
+  .ui.form input[type="url"],
+  .ui.form input[type="email"],
+  .ui.form input[type="password"] {
+    background: #1a1a1a !important;
+    border-color: #444444 !important;
+    color: #e8e4df !important;
+  }
+  .ui.input input:focus,
+  .ui.form textarea:focus,
+  .ui.form input:focus {
+    border-color: #3F8A8C !important;
+    box-shadow: 0 0 0 1px rgba(63, 138, 140, 0.3) !important;
+  }
+
+  /* Repo file list — row hover */
+  #repo-files-table tr:hover {
+    background: rgba(63, 138, 140, 0.05) !important;
+  }
+
+  /* Tab/menu active states */
+  .ui.tabular.menu .active.item {
+    background: #242424 !important;
+    border-color: #333333 !important;
+    border-bottom-color: transparent !important;
+    color: #e8e4df !important;
+  }
+
+  /* Notification dot — warm orange */
+  .notification_count {
+    background: #F28A0F !important;
+  }
+
+  /* Toast / flash messages */
+  .ui.positive.message {
+    background: rgba(107, 143, 113, 0.15) !important;
+    border-color: rgba(107, 143, 113, 0.3) !important;
+    color: #6b8f71 !important;
+  }
+  .ui.negative.message {
+    background: rgba(229, 52, 11, 0.15) !important;
+    border-color: rgba(229, 52, 11, 0.3) !important;
+    color: #E5340B !important;
+  }
+  .ui.warning.message {
+    background: rgba(242, 138, 15, 0.15) !important;
+    border-color: rgba(242, 138, 15, 0.3) !important;
+    color: #F28A0F !important;
+  }
+</style>

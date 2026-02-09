@@ -1,0 +1,12 @@
+{{/* Dex — Forgejo footer injection
+     Loaded before </body> for runtime behavior tweaks. */}}
+<script>
+(function() {
+  'use strict';
+
+  // Replace default page title prefix with Dex branding
+  if (document.title && !document.title.startsWith('Poindexter')) {
+    document.title = document.title.replace(/^Forgejo:\s*/, '').replace(/^Gitea:\s*/, '');
+  }
+})();
+</script>

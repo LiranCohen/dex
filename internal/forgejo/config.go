@@ -171,6 +171,7 @@ USERNAME                 = email
 ; Do not edit manually; regenerated on startup.
 
 [server]
+APP_NAME           = Poindexter
 HTTP_ADDR          = %s
 HTTP_PORT          = %d
 ROOT_URL           = %s
@@ -195,6 +196,10 @@ ROOT            = %s
 [log]
 MODE  = console
 LEVEL = warn
+
+[ui]
+THEMES        = dex
+DEFAULT_THEME = dex
 
 [actions]
 ENABLED = false
