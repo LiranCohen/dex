@@ -1,3 +1,5 @@
+//go:build unix
+
 // Package daemon provides utilities for running as a background daemon.
 package daemon
 
@@ -8,6 +10,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"syscall"
+
+	"golang.org/x/sys/unix"
 )
 
 // PIDFile manages a PID file for daemon processes.
@@ -116,7 +120,7 @@ func Daemonize(args []string) (bool, error) {
 // This is detected by checking if we're a session leader.
 func IsDaemonized() bool {
 	// If we're the session leader, we're daemonized
-	sid, err := syscall.Getsid(0)
+	sid, err := unix.Getsid(0)
 	if err != nil {
 		return false
 	}
