@@ -8,7 +8,7 @@ require filippo.io/age v1.2.1
 
 require (
 	fyne.io/systray v1.12.0
-	github.com/WebP2P/dexnet v0.0.0-20260209053137-e5629e67fff2
+	github.com/WebP2P/dexnet v0.0.0-20260209152051-1b709f296218
 	github.com/bmatcuk/doublestar/v4 v4.10.0
 	github.com/centrifugal/centrifuge v0.38.0
 	github.com/go-acme/lego/v4 v4.31.0
