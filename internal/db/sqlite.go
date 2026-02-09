@@ -91,8 +91,7 @@ func (db *DB) Migrate() error {
 		"ALTER TABLE quest_messages ADD COLUMN tool_calls TEXT",
 		// Activity hat tracking
 		"ALTER TABLE session_activity ADD COLUMN hat TEXT",
-		// GitHub org ID for targeting installation
-		"ALTER TABLE onboarding_progress ADD COLUMN github_org_id INTEGER",
+
 		// Project remote tracking for fork workflows
 		"ALTER TABLE projects ADD COLUMN remote_origin TEXT",
 		"ALTER TABLE projects ADD COLUMN remote_upstream TEXT",
@@ -439,10 +438,6 @@ CREATE TABLE IF NOT EXISTS onboarding_progress (
 	id INTEGER PRIMARY KEY CHECK (id = 1),
 	current_step TEXT NOT NULL DEFAULT 'welcome',
 	passkey_completed_at DATETIME,
-	github_org_name TEXT,
-	github_org_id INTEGER,
-	github_app_completed_at DATETIME,
-	github_install_completed_at DATETIME,
 	anthropic_completed_at DATETIME,
 	completed_at DATETIME,
 	created_at DATETIME DEFAULT CURRENT_TIMESTAMP,

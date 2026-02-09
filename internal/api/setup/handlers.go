@@ -26,9 +26,6 @@ type Handler struct {
 	getDataDir           func() string
 	getToolbelt          func() *toolbelt.Toolbelt
 	reloadToolbelt       func() error
-	getGitHubClient      func(ctx context.Context, login string) (*toolbelt.GitHubClient, error)
-	hasGitHubApp         func() bool
-	initGitHubApp        func() error
 	getGitService        func() GitService
 	updateDefaultProject func(workspacePath string) error
 	forgejoService       ForgejoService
@@ -46,9 +43,6 @@ type HandlerConfig struct {
 	GetDataDir           func() string
 	GetToolbelt          func() *toolbelt.Toolbelt
 	ReloadToolbelt       func() error
-	GetGitHubClient      func(ctx context.Context, login string) (*toolbelt.GitHubClient, error)
-	HasGitHubApp         func() bool
-	InitGitHubApp        func() error
 	GetGitService        func() GitService
 	UpdateDefaultProject func(workspacePath string) error
 	ForgejoService       ForgejoService
@@ -62,9 +56,6 @@ func NewHandler(cfg HandlerConfig) *Handler {
 		getDataDir:           cfg.GetDataDir,
 		getToolbelt:          cfg.GetToolbelt,
 		reloadToolbelt:       cfg.ReloadToolbelt,
-		getGitHubClient:      cfg.GetGitHubClient,
-		hasGitHubApp:         cfg.HasGitHubApp,
-		initGitHubApp:        cfg.InitGitHubApp,
 		getGitService:        cfg.GetGitService,
 		updateDefaultProject: cfg.UpdateDefaultProject,
 		forgejoService:       cfg.ForgejoService,
@@ -336,39 +327,6 @@ func (h *Handler) HandleWorkspaceSetup(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]any{
 		"workspace_path":  workspacePath,
 		"workspace_ready": true,
-	})
-}
-
-// Legacy handlers for backward compatibility
-
-// HandleSetGitHubToken validates and saves a GitHub token (legacy)
-func (h *Handler) HandleSetGitHubToken(c echo.Context) error {
-	var req struct {
-		Token string `json:"token"`
-	}
-	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
-	}
-
-	if err := ValidateGitHubTokenFormat(req.Token); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	}
-
-	ctx, cancel := context.WithTimeout(c.Request().Context(), 15*time.Second)
-	defer cancel()
-
-	if err := ValidateGitHubToken(ctx, req.Token); err != nil {
-		return echo.NewHTTPError(http.StatusUnauthorized, fmt.Sprintf("token validation failed: %v", err))
-	}
-
-	// Save to database
-	if err := h.db.SetSecret(db.SecretKeyGitHubToken, req.Token); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to save token")
-	}
-
-	return c.JSON(http.StatusOK, map[string]any{
-		"success": true,
-		"message": "GitHub token saved successfully",
 	})
 }
 

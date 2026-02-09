@@ -16,16 +16,12 @@ const (
 
 // OnboardingProgress represents the current state of onboarding
 type OnboardingProgress struct {
-	CurrentStep              string
-	PasskeyCompletedAt       sql.NullTime
-	GitHubOrgName            sql.NullString
-	GitHubOrgID              sql.NullInt64
-	GitHubAppCompletedAt     sql.NullTime
-	GitHubInstallCompletedAt sql.NullTime
-	AnthropicCompletedAt     sql.NullTime
-	CompletedAt              sql.NullTime
-	CreatedAt                time.Time
-	UpdatedAt                time.Time
+	CurrentStep          string
+	PasskeyCompletedAt   sql.NullTime
+	AnthropicCompletedAt sql.NullTime
+	CompletedAt          sql.NullTime
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
 }
 
 // IsComplete returns true if onboarding is fully completed
@@ -33,34 +29,16 @@ func (p *OnboardingProgress) IsComplete() bool {
 	return p.CompletedAt.Valid
 }
 
-// GetGitHubOrgName returns the org name or empty string
-func (p *OnboardingProgress) GetGitHubOrgName() string {
-	if p.GitHubOrgName.Valid {
-		return p.GitHubOrgName.String
-	}
-	return ""
-}
-
-// GetGitHubOrgID returns the org ID or 0
-func (p *OnboardingProgress) GetGitHubOrgID() int64 {
-	if p.GitHubOrgID.Valid {
-		return p.GitHubOrgID.Int64
-	}
-	return 0
-}
-
 // GetOnboardingProgress retrieves the current onboarding progress
 // Creates a new record if none exists
 func (db *DB) GetOnboardingProgress() (*OnboardingProgress, error) {
 	var progress OnboardingProgress
 	err := db.QueryRow(`
-		SELECT current_step, passkey_completed_at, github_org_name, github_org_id,
-		       github_app_completed_at, github_install_completed_at,
+		SELECT current_step, passkey_completed_at,
 		       anthropic_completed_at, completed_at, created_at, updated_at
 		FROM onboarding_progress WHERE id = 1
 	`).Scan(
-		&progress.CurrentStep, &progress.PasskeyCompletedAt, &progress.GitHubOrgName, &progress.GitHubOrgID,
-		&progress.GitHubAppCompletedAt, &progress.GitHubInstallCompletedAt,
+		&progress.CurrentStep, &progress.PasskeyCompletedAt,
 		&progress.AnthropicCompletedAt, &progress.CompletedAt,
 		&progress.CreatedAt, &progress.UpdatedAt,
 	)

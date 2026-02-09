@@ -129,8 +129,3 @@ func saveMasterKeyToFile(mk *MasterKey, path string) error {
 type SecretsMigrator interface {
 	MigrateToEncrypted() (int, error)
 }
-
-// GitHubMigrator migrates GitHub App config to encrypted format.
-type GitHubMigrator interface {
-	MigrateToEncrypted() error
-}

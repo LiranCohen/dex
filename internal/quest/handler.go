@@ -58,22 +58,16 @@ type PreflightCheck struct {
 	Warnings []string `json:"warnings,omitempty"`
 }
 
-// GitHubClientFetcher is a function that returns a GitHub client for a given login/org
-type GitHubClientFetcher func(ctx context.Context, login string) (*toolbelt.GitHubClient, error)
-
 // Handler manages Quest conversations with Dex
 type Handler struct {
-	db             *db.DB
-	client         *toolbelt.AnthropicClient
-	github         *toolbelt.GitHubClient // Static client (PAT-based)
-	githubFetcher  GitHubClientFetcher    // Dynamic client fetcher (GitHub App)
-	broadcaster    *realtime.Broadcaster  // Realtime event broadcaster
-	promptLoader   *session.PromptLoader
-	githubUsername string     // cached GitHub username
-	toolSet        *tools.Set // Read-only tools for Quest exploration
-	readOnlyTools  []toolbelt.AnthropicTool
-	baseDir        string                // Base Dex directory (e.g., /opt/dex) for computing repo paths
-	sessions       *QuestSessionRegistry // Quest session registry for blocking tools
+	db            *db.DB
+	client        *toolbelt.AnthropicClient
+	broadcaster   *realtime.Broadcaster // Realtime event broadcaster
+	promptLoader  *session.PromptLoader
+	toolSet       *tools.Set // Read-only tools for Quest exploration
+	readOnlyTools []toolbelt.AnthropicTool
+	baseDir       string                // Base Dex directory (e.g., /opt/dex) for computing repo paths
+	sessions      *QuestSessionRegistry // Quest session registry for blocking tools
 }
 
 // NewHandler creates a new Quest handler
@@ -101,16 +95,6 @@ func NewHandler(database *db.DB, client *toolbelt.AnthropicClient, broadcaster *
 	}
 }
 
-// SetGitHubClient sets the static GitHub client for the handler (PAT-based)
-func (h *Handler) SetGitHubClient(client *toolbelt.GitHubClient) {
-	h.github = client
-}
-
-// SetGitHubClientFetcher sets the dynamic GitHub client fetcher (GitHub App)
-func (h *Handler) SetGitHubClientFetcher(fetcher GitHubClientFetcher) {
-	h.githubFetcher = fetcher
-}
-
 // SetPromptLoader sets the prompt loader for the handler
 func (h *Handler) SetPromptLoader(loader *session.PromptLoader) {
 	h.promptLoader = loader
@@ -121,41 +105,9 @@ func (h *Handler) SetBaseDir(baseDir string) {
 	h.baseDir = baseDir
 }
 
-// getGitHubUsername returns the cached GitHub username/org, fetching it if needed
-// Tries: 1) cached value, 2) onboarding progress (org name), 3) GitHub client (static or fetched)
-func (h *Handler) getGitHubUsername(ctx context.Context) string {
-	if h.githubUsername != "" {
-		return h.githubUsername
-	}
-
-	// Try to get org name from onboarding progress (works with GitHub App auth)
-	progress, err := h.db.GetOnboardingProgress()
-	if err == nil && progress != nil {
-		orgName := progress.GetGitHubOrgName()
-		if orgName != "" {
-			h.githubUsername = orgName
-			return orgName
-		}
-	}
-
-	// Get GitHub client - try static client first, then fetcher
-	githubClient := h.github
-	if githubClient == nil && h.githubFetcher != nil {
-		fetchedClient, err := h.githubFetcher(ctx, "")
-		if err == nil {
-			githubClient = fetchedClient
-		}
-	}
-
-	// Try to get username from GitHub client
-	if githubClient != nil {
-		username, err := githubClient.GetUsername(ctx)
-		if err == nil && username != "" {
-			h.githubUsername = username
-			return username
-		}
-	}
-
+// getGitHubUsername returns the GitHub username/org if configured.
+// This is a legacy helper — GitHub integration is optional and may not be configured.
+func (h *Handler) getGitHubUsername(_ context.Context) string {
 	return ""
 }
 
