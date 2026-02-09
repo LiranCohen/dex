@@ -8,7 +8,7 @@ require filippo.io/age v1.2.1
 
 require (
 	fyne.io/systray v1.12.0
-	github.com/WebP2P/dexnet v0.0.0-20260206143204-9653b71a537f
+	github.com/WebP2P/dexnet v0.0.0-20260209053137-e5629e67fff2
 	github.com/bmatcuk/doublestar/v4 v4.10.0
 	github.com/centrifugal/centrifuge v0.38.0
 	github.com/go-acme/lego/v4 v4.31.0
@@ -20,9 +20,9 @@ require (
 	github.com/labstack/echo/v4 v4.13.4
 	github.com/lirancohen/promptloom v0.0.0-20260127214346-bf4f3fe1562c
 	github.com/stretchr/testify v1.11.1
+	golang.org/x/sys v0.40.0
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.44.3
-	tailscale.com v1.81.0-pre.0.20250303195457-5449aba94c51
 )
 
 require (
@@ -116,7 +116,6 @@ require (
 	golang.org/x/net v0.48.0 // indirect
 	golang.org/x/oauth2 v0.34.0 // indirect
 	golang.org/x/sync v0.19.0 // indirect
-	golang.org/x/sys v0.40.0 // indirect
 	golang.org/x/term v0.39.0 // indirect
 	golang.org/x/text v0.33.0 // indirect
 	golang.org/x/time v0.14.0 // indirect

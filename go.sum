@@ -16,8 +16,8 @@ github.com/BurntSushi/toml v1.6.0 h1:dRaEfpa2VI55EwlIW72hMRHdWouJeRF7TPYhI+AUQjk
 github.com/BurntSushi/toml v1.6.0/go.mod h1:ukJfTF/6rtPPRCnwkur4qwRxa8vTRFBF0uk2lLoLwho=
 github.com/FZambia/eagle v0.2.0 h1:1kQaZpJvbkvAXFRE/9K2ucBMuVqo+E29EMLYB74hIis=
 github.com/FZambia/eagle v0.2.0/go.mod h1:LKMYBwGYhao5sJI0TppvQ4SvvldFj9gITxrl8NvGwG0=
-github.com/WebP2P/dexnet v0.0.0-20260206143204-9653b71a537f h1:tdNuQsIXwOnPzgO0qRmtGWxPTuyZTWG5tCsrhOdzZHY=
-github.com/WebP2P/dexnet v0.0.0-20260206143204-9653b71a537f/go.mod h1:yal+i4MJRHsvCOW6Iw9oPUQrBp8bSo6zgr6Sa1jnaWs=
+github.com/WebP2P/dexnet v0.0.0-20260209053137-e5629e67fff2 h1:6vZL9vDf1gxPpX5c2H8w0+GWMrNdKiIDr/H/F3bjYTE=
+github.com/WebP2P/dexnet v0.0.0-20260209053137-e5629e67fff2/go.mod h1:yal+i4MJRHsvCOW6Iw9oPUQrBp8bSo6zgr6Sa1jnaWs=
 github.com/akutz/memconn v0.1.0 h1:NawI0TORU4hcOMsMr11g7vwlCdkYeLKXBcxWu2W/P8A=
 github.com/akutz/memconn v0.1.0/go.mod h1:Jo8rI7m0NieZyLI5e2CDlRdRqRRB4S7Xp77ukDjH+Fw=
 github.com/alexbrainman/sspi v0.0.0-20231016080023-1a75b4708caa h1:LHTHcTQiSGT7VVbI0o4wBRNQIgn917usHWOd6VAffYI=
