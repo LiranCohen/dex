@@ -160,8 +160,9 @@ func runClientEnroll(args []string) error {
 	}
 
 	config := &ClientConfig{
-		Namespace: resp.Namespace,
-		Hostname:  resp.Hostname,
+		Namespace:  resp.Namespace,
+		Hostname:   resp.Hostname,
+		CentralURL: *centralURLFlag,
 		Domains: ClientDomainConfig{
 			Public: publicDomain,
 			Mesh:   meshDomain,

@@ -51,16 +51,21 @@ type clientTray struct {
 
 	// Callback server for app-first auth flow
 	callbackSrv *callbackServer
+	// Cancel function for the auth flow context (used by Cancel menu item)
+	authCancel context.CancelFunc
 
 	// Menu items
 	mStatus     *systray.MenuItem
 	mSignUp     *systray.MenuItem
 	mSignIn     *systray.MenuItem
+	mCancel     *systray.MenuItem
 	mConnect    *systray.MenuItem
 	mDisconnect *systray.MenuItem
-	mAddHQ      *systray.MenuItem
 	mOpenHQ     *systray.MenuItem
 	mDashboard  *systray.MenuItem
+	mAddOutpost *systray.MenuItem
+	mAddClient  *systray.MenuItem
+	mSignOut    *systray.MenuItem
 	mQuit       *systray.MenuItem
 }
 
@@ -123,17 +128,23 @@ func (t *clientTray) onReady() {
 
 	t.mSignUp = systray.AddMenuItem("Sign Up", "Create a new Dex account")
 	t.mSignIn = systray.AddMenuItem("Sign In", "Sign in to an existing account")
+	t.mCancel = systray.AddMenuItem("Cancel", "Cancel authentication")
 	t.mConnect = systray.AddMenuItem("Connect", "Connect to mesh network")
 	t.mDisconnect = systray.AddMenuItem("Disconnect", "Disconnect from mesh network")
 
 	systray.AddSeparator()
 
-	t.mAddHQ = systray.AddMenuItem("Add HQ...", "Set up your HQ server")
-	t.mOpenHQ = systray.AddMenuItem("Open HQ", "Open HQ in browser")
-	t.mDashboard = systray.AddMenuItem("Open Dashboard", "Open Dex dashboard in browser")
+	t.mOpenHQ = systray.AddMenuItem("Poindexter HQ", "Open HQ in browser")
+	t.mDashboard = systray.AddMenuItem("Central Account Dashboard", "Open account dashboard in browser")
 
 	systray.AddSeparator()
 
+	t.mAddOutpost = systray.AddMenuItem("Add Outpost...", "Add an outpost server to your network")
+	t.mAddClient = systray.AddMenuItem("Add Client...", "Add a client device to your network")
+
+	systray.AddSeparator()
+
+	t.mSignOut = systray.AddMenuItem("Sign Out", "Remove this device from the mesh")
 	t.mQuit = systray.AddMenuItem("Quit", "Quit Dex Client")
 
 	// Apply initial state to UI
@@ -162,16 +173,22 @@ func (t *clientTray) handleClicks() {
 			go t.startBrowserAuth("signup")
 		case <-t.mSignIn.ClickedCh:
 			go t.startBrowserAuth("login")
+		case <-t.mCancel.ClickedCh:
+			t.cancelAuth()
 		case <-t.mConnect.ClickedCh:
 			go t.connect()
 		case <-t.mDisconnect.ClickedCh:
 			go t.disconnect()
-		case <-t.mAddHQ.ClickedCh:
-			t.openAddHQ()
 		case <-t.mOpenHQ.ClickedCh:
 			t.openHQ()
 		case <-t.mDashboard.ClickedCh:
 			t.openDashboard()
+		case <-t.mAddOutpost.ClickedCh:
+			t.openDashboard()
+		case <-t.mAddClient.ClickedCh:
+			t.openDashboard()
+		case <-t.mSignOut.ClickedCh:
+			go t.signOut()
 		case <-t.mQuit.ClickedCh:
 			t.quit()
 			return
@@ -201,14 +218,30 @@ func (t *clientTray) startBrowserAuth(mode string) {
 	t.callbackSrv = srv
 	t.mu.Unlock()
 
-	// Open browser to Central login/signup page with callback params
-	loginURL := fmt.Sprintf("%s/login?callback_port=%d&state=%s",
-		t.centralURL, srv.port, srv.state)
-	openBrowser(loginURL)
+	// Open browser to Central login/signup page with callback params and mode
+	loginURL := fmt.Sprintf("%s/login?callback_port=%d&state=%s&mode=%s",
+		t.centralURL, srv.port, srv.state, mode)
+	if err := openBrowser(loginURL); err != nil {
+		log.Printf("Failed to open browser: %v", err)
+		t.setError(fmt.Sprintf("Could not open browser. Visit: %s", loginURL))
+		srv.close()
+		t.mu.Lock()
+		t.callbackSrv = nil
+		t.mu.Unlock()
+		return
+	}
 
 	// Wait for callback (timeout after 10 minutes)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
-	defer cancel()
+	t.mu.Lock()
+	t.authCancel = cancel
+	t.mu.Unlock()
+	defer func() {
+		cancel()
+		t.mu.Lock()
+		t.authCancel = nil
+		t.mu.Unlock()
+	}()
 
 	callback, err := srv.waitForCallback(ctx)
 	srv.close()
@@ -217,7 +250,15 @@ func (t *clientTray) startBrowserAuth(mode string) {
 	t.mu.Unlock()
 
 	if err != nil {
-		t.setError("Authentication timed out or was cancelled")
+		if ctx.Err() == context.Canceled {
+			// User clicked Cancel — silently return to unauthenticated
+			t.mu.Lock()
+			t.state = trayStateUnauthenticated
+			t.mu.Unlock()
+			t.updateUI()
+			return
+		}
+		t.setError("Authentication timed out")
 		return
 	}
 
@@ -446,8 +487,8 @@ func (t *clientTray) disconnect() {
 func (t *clientTray) quit() {
 	t.disconnect()
 
-	// On macOS, stop the mesh daemon if it's installed.
-	if runtime.GOOS == "darwin" && meshd.IsInstalled() {
+	// On macOS, stop the mesh daemon if it's actually running.
+	if runtime.GOOS == "darwin" && meshd.IsRunning() {
 		log.Printf("Stopping mesh daemon via privilege prompt...")
 		cmd := exec.Command("osascript", "-e",
 			`do shell script "launchctl unload /Library/LaunchDaemons/com.dex.meshd.plist" with administrator privileges`)
@@ -457,6 +498,41 @@ func (t *clientTray) quit() {
 	}
 
 	systray.Quit()
+}
+
+// cancelAuth cancels an in-progress browser auth flow.
+func (t *clientTray) cancelAuth() {
+	t.mu.Lock()
+	if t.authCancel != nil {
+		t.authCancel()
+	}
+	t.mu.Unlock()
+	// The startBrowserAuth goroutine will detect context.Canceled and
+	// return to trayStateUnauthenticated.
+}
+
+// signOut removes local credentials and returns to the unauthenticated state.
+// This does NOT deregister the device from Central.
+func (t *clientTray) signOut() {
+	t.disconnect()
+
+	// Remove config and mesh state
+	configPath := filepath.Join(t.dataDir, "config.json")
+	_ = os.Remove(configPath)
+
+	meshDir := filepath.Join(t.dataDir, "mesh")
+	_ = os.RemoveAll(meshDir)
+
+	t.mu.Lock()
+	t.state = trayStateUnauthenticated
+	t.meshIP = ""
+	t.hqURL = ""
+	t.errorMsg = ""
+	t.centralURL = DefaultCentralURL
+	t.authToken = ""
+	t.mu.Unlock()
+
+	t.updateUI()
 }
 
 // setError transitions the tray to error state with a visible message.
@@ -481,11 +557,14 @@ func (t *clientTray) updateUI() {
 	// Hide all optional items first, then show what's needed
 	t.mSignUp.Hide()
 	t.mSignIn.Hide()
+	t.mCancel.Hide()
 	t.mConnect.Hide()
 	t.mDisconnect.Hide()
-	t.mAddHQ.Hide()
 	t.mOpenHQ.Hide()
 	t.mDashboard.Hide()
+	t.mAddOutpost.Hide()
+	t.mAddClient.Hide()
+	t.mSignOut.Hide()
 
 	switch state {
 	case trayStateUnauthenticated:
@@ -497,10 +576,12 @@ func (t *clientTray) updateUI() {
 	case trayStateAuthenticating:
 		systray.SetTooltip("Dex Client - Waiting for browser...")
 		t.mStatus.SetTitle("Waiting for browser sign-in...")
+		t.mCancel.Show()
 
 	case trayStateEnrolling:
 		systray.SetTooltip("Dex Client - Setting up...")
 		t.mStatus.SetTitle("Setting up your device...")
+		t.mCancel.Show()
 
 	case trayStateDisconnected:
 		systray.SetTooltip("Dex Client - Disconnected")
@@ -508,6 +589,7 @@ func (t *clientTray) updateUI() {
 		t.mConnect.Show()
 		t.mConnect.Enable()
 		t.mDashboard.Show()
+		t.mSignOut.Show()
 
 	case trayStateConnecting:
 		systray.SetTooltip("Dex Client - Connecting...")
@@ -524,12 +606,14 @@ func (t *clientTray) updateUI() {
 		}
 		systray.SetTooltip(tooltip)
 		t.mStatus.SetTitle(statusText)
-		t.mDisconnect.Show()
-		t.mDisconnect.Enable()
-		t.mAddHQ.Show()
 		t.mOpenHQ.Show()
 		t.mOpenHQ.Enable()
 		t.mDashboard.Show()
+		t.mAddOutpost.Show()
+		t.mAddClient.Show()
+		t.mDisconnect.Show()
+		t.mDisconnect.Enable()
+		t.mSignOut.Show()
 
 	case trayStateError:
 		statusText := "Error"
@@ -541,9 +625,10 @@ func (t *clientTray) updateUI() {
 		// Show appropriate retry options based on whether we have config
 		configPath := filepath.Join(t.dataDir, "config.json")
 		if _, err := os.Stat(configPath); err == nil {
-			// Have config — show connect
+			// Have config — show connect and sign out
 			t.mConnect.Show()
 			t.mConnect.Enable()
+			t.mSignOut.Show()
 		} else {
 			// No config — show sign up/in
 			t.mSignUp.Show()
@@ -560,18 +645,18 @@ func (t *clientTray) openHQ() {
 	if url == "" {
 		return
 	}
-	openBrowser(url)
+	if err := openBrowser(url); err != nil {
+		log.Printf("Failed to open HQ in browser: %v", err)
+	}
 }
 
 func (t *clientTray) openDashboard() {
-	openBrowser(t.centralURL + "/dashboard")
+	if err := openBrowser(t.centralURL + "/dashboard"); err != nil {
+		log.Printf("Failed to open dashboard in browser: %v", err)
+	}
 }
 
-func (t *clientTray) openAddHQ() {
-	openBrowser(t.centralURL + "/onboarding")
-}
-
-func openBrowser(url string) {
+func openBrowser(url string) error {
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "darwin":
@@ -581,31 +666,28 @@ func openBrowser(url string) {
 	case "windows":
 		cmd = exec.Command("cmd", "/c", "start", url)
 	default:
-		log.Printf("Cannot open browser on %s", runtime.GOOS)
-		return
+		return fmt.Errorf("unsupported platform: %s", runtime.GOOS)
 	}
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		log.Printf("Failed to open browser: %v", err)
-	}
+	return cmd.Run()
 }
 
 func (t *clientTray) setIcon(state trayState) {
 	var icon []byte
 	switch state {
 	case trayStateUnauthenticated:
-		icon = generateIcon(color.RGBA{R: 150, G: 150, B: 150, A: 255}) // Gray
+		icon = generateIcon(color.RGBA{R: 150, G: 150, B: 150, A: 255}) // Gray — not set up
 	case trayStateAuthenticating, trayStateEnrolling:
-		icon = generateIcon(color.RGBA{R: 100, G: 150, B: 230, A: 255}) // Blue
+		icon = generateIcon(color.RGBA{R: 100, G: 150, B: 230, A: 255}) // Blue — in progress
 	case trayStateDisconnected:
-		icon = generateIcon(color.RGBA{R: 180, G: 50, B: 50, A: 255}) // Red
+		icon = generateIcon(color.RGBA{R: 200, G: 150, B: 50, A: 255}) // Orange — enrolled but offline
 	case trayStateConnecting:
-		icon = generateIcon(color.RGBA{R: 150, G: 150, B: 150, A: 255}) // Gray
+		icon = generateIcon(color.RGBA{R: 100, G: 150, B: 230, A: 255}) // Blue — in progress
 	case trayStateConnected:
-		icon = generateIcon(color.RGBA{R: 50, G: 180, B: 50, A: 255}) // Green
+		icon = generateIcon(color.RGBA{R: 50, G: 180, B: 50, A: 255}) // Green — on the mesh
 	case trayStateError:
-		icon = generateIcon(color.RGBA{R: 230, G: 160, B: 30, A: 255}) // Orange/Amber
+		icon = generateIcon(color.RGBA{R: 200, G: 60, B: 60, A: 255}) // Red — something broke
 	}
 	systray.SetIcon(icon)
 }

@@ -119,12 +119,16 @@ func (cs *callbackServer) handleCallback(w http.ResponseWriter, r *http.Request)
 	state := r.URL.Query().Get("state")
 
 	if code == "" || state == "" {
-		http.Error(w, "missing code or state", http.StatusBadRequest)
+		writeCallbackErrorHTML(w, "Invalid Request",
+			"The authentication callback is missing required parameters. Please try signing in again from the Dex Client app.",
+			http.StatusBadRequest)
 		return
 	}
 
 	if state != cs.state {
-		http.Error(w, "invalid state", http.StatusForbidden)
+		writeCallbackErrorHTML(w, "Invalid Session",
+			"The authentication session has expired or is invalid. Please try signing in again from the Dex Client app.",
+			http.StatusForbidden)
 		return
 	}
 
@@ -149,6 +153,10 @@ func (cs *callbackServer) handleCallback(w http.ResponseWriter, r *http.Request)
     h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
     p { color: #a3a3a3; }
     .check { font-size: 3rem; margin-bottom: 1rem; }
+    .close-btn { margin-top: 1rem; padding: 0.5rem 1rem; background: #262626;
+                 color: #e5e5e5; border: 1px solid #404040; border-radius: 6px;
+                 cursor: pointer; font-size: 14px; }
+    .close-btn:hover { background: #333; }
   </style>
 </head>
 <body>
@@ -156,9 +164,40 @@ func (cs *callbackServer) handleCallback(w http.ResponseWriter, r *http.Request)
     <div class="check">&#10003;</div>
     <h1>Authentication Successful</h1>
     <p>You can close this tab and return to the Dex Client app.</p>
+    <button onclick="window.close()" class="close-btn">Close This Tab</button>
   </div>
+  <script>setTimeout(function(){ window.close(); }, 2000);</script>
 </body>
 </html>`)
+}
+
+// writeCallbackErrorHTML writes a styled HTML error response for the auth callback.
+func writeCallbackErrorHTML(w http.ResponseWriter, title, message string, statusCode int) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(statusCode)
+	fmt.Fprintf(w, `<!DOCTYPE html>
+<html>
+<head>
+  <title>Dex - Error</title>
+  <style>
+    body { font-family: -apple-system, system-ui, sans-serif; display: flex; 
+           justify-content: center; align-items: center; min-height: 100vh; 
+           margin: 0; background: #0a0a0a; color: #e5e5e5; }
+    .card { text-align: center; padding: 2rem; border-radius: 12px; 
+            background: #171717; border: 1px solid #262626; max-width: 400px; }
+    h1 { font-size: 1.5rem; margin-bottom: 0.5rem; color: #ef4444; }
+    p { color: #a3a3a3; }
+    .icon { font-size: 3rem; margin-bottom: 1rem; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon">&#10007;</div>
+    <h1>%s</h1>
+    <p>%s</p>
+  </div>
+</body>
+</html>`, title, message)
 }
 
 func (cs *callbackServer) handleHealth(w http.ResponseWriter, _ *http.Request) {
@@ -356,8 +395,10 @@ func installMeshdWithPrivileges() error {
 	}
 
 	log.Printf("Installing mesh daemon (requires administrator privileges)...")
+	escapedExe := strings.ReplaceAll(exe, `\`, `\\`)
+	escapedExe = strings.ReplaceAll(escapedExe, `"`, `\"`)
 	cmd := exec.Command("osascript", "-e",
-		fmt.Sprintf(`do shell script "%s meshd install" with administrator privileges`, exe))
+		fmt.Sprintf(`do shell script "%s meshd install" with administrator privileges`, escapedExe))
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("meshd install failed: %w\n%s", err, string(output))
