@@ -200,6 +200,14 @@ func (r *RalphLoop) SetEventRouter(router *EventRouter) {
 	r.eventRouter = router
 }
 
+// SetMailExecutor sets the mail/calendar tool executor on the underlying ToolExecutor.
+// When set, mail_* and calendar_* tool calls are dispatched to this executor.
+func (r *RalphLoop) SetMailExecutor(me mailToolHandler) {
+	if r.executor != nil {
+		r.executor.SetMailExecutor(me)
+	}
+}
+
 // SetOnRepoCreated sets the callback for when a repo is created
 // This allows updating the project's git info in the database
 func (r *RalphLoop) SetOnRepoCreated(callback func(owner, repo string)) {
@@ -1323,20 +1331,20 @@ func getEnvFloat(key string, defaultVal float64) float64 {
 // RestoreFromCheckpoint restores session state from a checkpoint
 func (r *RalphLoop) RestoreFromCheckpoint(checkpoint *db.SessionCheckpoint) error {
 	var state struct {
-		Iteration    int                         `json:"iteration"`
-		InputTokens  int64                       `json:"input_tokens"`
-		OutputTokens int64                       `json:"output_tokens"`
+		Iteration    int   `json:"iteration"`
+		InputTokens  int64 `json:"input_tokens"`
+		OutputTokens int64 `json:"output_tokens"`
 		// Legacy fields for backwards compatibility
-		TokensUsed   int64                       `json:"tokens_used"`
-		DollarsUsed  float64                     `json:"dollars_used"`
-		Hat          string                      `json:"hat"`
-		Messages     []toolbelt.AnthropicMessage `json:"messages"`
-		Scratchpad   string                      `json:"scratchpad,omitempty"`
-		Handoff      map[string]any              `json:"handoff,omitempty"`
+		TokensUsed  int64                       `json:"tokens_used"`
+		DollarsUsed float64                     `json:"dollars_used"`
+		Hat         string                      `json:"hat"`
+		Messages    []toolbelt.AnthropicMessage `json:"messages"`
+		Scratchpad  string                      `json:"scratchpad,omitempty"`
+		Handoff     map[string]any              `json:"handoff,omitempty"`
 		// Failure context for recovery
-		LastError    string                      `json:"last_error,omitempty"`
-		FailedAt     string                      `json:"failed_at,omitempty"`
-		RecoveryHint string                      `json:"recovery_hint,omitempty"`
+		LastError    string `json:"last_error,omitempty"`
+		FailedAt     string `json:"failed_at,omitempty"`
+		RecoveryHint string `json:"recovery_hint,omitempty"`
 	}
 
 	if err := json.Unmarshal(checkpoint.State, &state); err != nil {

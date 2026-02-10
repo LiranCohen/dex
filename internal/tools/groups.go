@@ -15,6 +15,8 @@ const (
 	GroupRuntime  ToolGroup = "runtime"   // Command execution
 	GroupQuality  ToolGroup = "quality"   // Tests, lint, build
 	GroupComplete ToolGroup = "complete"  // Task completion signals
+	GroupMail     ToolGroup = "mail"      // Email operations
+	GroupCalendar ToolGroup = "calendar"  // Calendar operations
 )
 
 // ToolGroups maps semantic groups to tool names
@@ -59,6 +61,22 @@ var ToolGroups = map[ToolGroup][]string{
 	GroupComplete: {
 		"task_complete",
 	},
+	GroupMail: {
+		"mail_list_folders",
+		"mail_list_messages",
+		"mail_search",
+		"mail_read",
+		"mail_send",
+		"mail_reply",
+		"mail_delete",
+	},
+	GroupCalendar: {
+		"calendar_list",
+		"calendar_list_events",
+		"calendar_create_event",
+		"calendar_update_event",
+		"calendar_delete_event",
+	},
 }
 
 // ToolProfile defines a named set of tool capabilities
@@ -74,34 +92,34 @@ const (
 
 // ProfilePolicy defines which tool groups are allowed/denied for a profile
 type ProfilePolicy struct {
-	Allow          []ToolGroup // Groups to include
-	Deny           []string    // Specific tools to exclude (overrides Allow)
-	RequireReadOnly bool       // Only include tools with ReadOnly=true
+	Allow           []ToolGroup // Groups to include
+	Deny            []string    // Specific tools to exclude (overrides Allow)
+	RequireReadOnly bool        // Only include tools with ReadOnly=true
 }
 
 // ToolProfiles maps profiles to their policies
 var ToolProfiles = map[ToolProfile]ProfilePolicy{
 	ProfileExplorer: {
-		Allow:          []ToolGroup{GroupFSRead, GroupGitRead, GroupWeb, GroupRuntime},
-		Deny:           []string{"bash"}, // Read-only - no bash
+		Allow:           []ToolGroup{GroupFSRead, GroupGitRead, GroupWeb, GroupRuntime, GroupMail, GroupCalendar},
+		Deny:            []string{"bash", "mail_send", "mail_reply", "mail_delete", "calendar_create_event", "calendar_update_event", "calendar_delete_event"}, // Read-only - no bash or write mail/calendar
 		RequireReadOnly: true,
 	},
 	ProfilePlanner: {
-		Allow:          []ToolGroup{GroupFSRead, GroupGitRead, GroupWeb, GroupRuntime},
-		Deny:           []string{"bash"}, // Can read, not execute
+		Allow:           []ToolGroup{GroupFSRead, GroupGitRead, GroupWeb, GroupRuntime, GroupMail, GroupCalendar},
+		Deny:            []string{"bash", "mail_send", "mail_reply", "mail_delete", "calendar_create_event", "calendar_update_event", "calendar_delete_event"}, // Can read, not execute
 		RequireReadOnly: true,
 	},
 	ProfileCreator: {
-		Allow: []ToolGroup{GroupFSRead, GroupFSWrite, GroupGitRead, GroupGitWrite, GroupGitHub, GroupWeb, GroupRuntime, GroupQuality},
+		Allow: []ToolGroup{GroupFSRead, GroupFSWrite, GroupGitRead, GroupGitWrite, GroupGitHub, GroupWeb, GroupRuntime, GroupQuality, GroupMail, GroupCalendar},
 		// Full implementation access - no restrictions
 	},
 	ProfileCritic: {
-		Allow:          []ToolGroup{GroupFSRead, GroupGitRead, GroupWeb, GroupQuality, GroupRuntime},
-		Deny:           []string{"bash"}, // Review only - can run quality tools but no bash
+		Allow:           []ToolGroup{GroupFSRead, GroupGitRead, GroupWeb, GroupQuality, GroupRuntime, GroupMail, GroupCalendar},
+		Deny:            []string{"bash", "mail_send", "mail_reply", "mail_delete", "calendar_create_event", "calendar_update_event", "calendar_delete_event"}, // Review only
 		RequireReadOnly: true,
 	},
 	ProfileEditor: {
-		Allow: []ToolGroup{GroupFSRead, GroupFSWrite, GroupGitRead, GroupGitWrite, GroupGitHub, GroupWeb, GroupRuntime, GroupQuality, GroupComplete},
+		Allow: []ToolGroup{GroupFSRead, GroupFSWrite, GroupGitRead, GroupGitWrite, GroupGitHub, GroupWeb, GroupRuntime, GroupQuality, GroupComplete, GroupMail, GroupCalendar},
 		// Full access including completion
 	},
 }
@@ -200,6 +218,8 @@ func GetAllToolGroups() []ToolGroup {
 		GroupRuntime,
 		GroupQuality,
 		GroupComplete,
+		GroupMail,
+		GroupCalendar,
 	}
 }
 

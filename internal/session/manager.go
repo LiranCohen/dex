@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/lirancohen/dex/internal/centralmail"
 	"github.com/lirancohen/dex/internal/db"
 	"github.com/lirancohen/dex/internal/git"
 	"github.com/lirancohen/dex/internal/gitprovider"
@@ -15,6 +16,7 @@ import (
 	"github.com/lirancohen/dex/internal/orchestrator"
 	"github.com/lirancohen/dex/internal/realtime"
 	"github.com/lirancohen/dex/internal/toolbelt"
+	"github.com/lirancohen/dex/internal/tools"
 )
 
 // SessionState represents the current state of a session
@@ -110,7 +112,11 @@ type Manager struct {
 
 	// External dependencies for Ralph loop
 	anthropicClient *toolbelt.AnthropicClient
-	broadcaster     *realtime.Broadcaster   // Publishes to both legacy and new systems
+	broadcaster     *realtime.Broadcaster // Publishes to both legacy and new systems
+
+	// Central mail/calendar proxy (for MailExecutor in AI sessions)
+	centralURL  string
+	tunnelToken string
 
 	// Git and Forgejo for PR creation on completion
 	gitOps          *git.Operations
@@ -196,7 +202,6 @@ func (m *Manager) SetBroadcaster(broadcaster *realtime.Broadcaster) {
 	m.broadcaster = broadcaster
 }
 
-
 // SetGitOperations sets the git operations for pushing branches
 func (m *Manager) SetGitOperations(ops *git.Operations) {
 	m.mu.Lock()
@@ -269,6 +274,15 @@ func (m *Manager) SetForgejoCredentials(baseURL, botToken string) {
 	defer m.mu.Unlock()
 	m.forgejoBaseURL = baseURL
 	m.forgejoBotToken = botToken
+}
+
+// SetMailConfig sets the Central URL and tunnel token for mail/calendar tool access.
+// When set, AI sessions can use mail_* and calendar_* tools via Central's Zoho proxy.
+func (m *Manager) SetMailConfig(centralURL, tunnelToken string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.centralURL = centralURL
+	m.tunnelToken = tunnelToken
 }
 
 // notifyTaskStatus notifies listeners of a task status change
@@ -596,6 +610,21 @@ func (m *Manager) runSession(ctx context.Context, session *ActiveSession) {
 				// Initialize executor (no GitHub client - using Forgejo)
 				loop.InitExecutor(session.WorktreePath, m.gitOps, nil, owner, repo)
 				fmt.Printf("runSession: initialized tool executor (owner=%s, repo=%s)\n", owner, repo)
+
+				// Wire up mail/calendar executor if Central is configured
+				m.mu.RLock()
+				centralURL := m.centralURL
+				tunnelToken := m.tunnelToken
+				m.mu.RUnlock()
+
+				if centralURL != "" && tunnelToken != "" {
+					mailClient := centralmail.NewClient(centralURL, tunnelToken)
+					mailExec := tools.NewMailExecutor(mailClient)
+					if mailExec != nil {
+						loop.SetMailExecutor(mailExec)
+						fmt.Printf("runSession: initialized mail/calendar executor\n")
+					}
+				}
 
 				// Set Forgejo provider for issue commenting if credentials are available
 				m.mu.RLock()

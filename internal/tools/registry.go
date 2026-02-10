@@ -43,6 +43,22 @@ var toolRegistry = map[string]func() Tool{
 
 	// Completion
 	"task_complete": TaskCompleteTool,
+
+	// Mail
+	"mail_list_folders":  MailListFoldersTool,
+	"mail_list_messages": MailListMessagesTool,
+	"mail_search":        MailSearchTool,
+	"mail_read":          MailReadTool,
+	"mail_send":          MailSendTool,
+	"mail_reply":         MailReplyTool,
+	"mail_delete":        MailDeleteTool,
+
+	// Calendar
+	"calendar_list":         CalendarListTool,
+	"calendar_list_events":  CalendarListEventsTool,
+	"calendar_create_event": CalendarCreateEventTool,
+	"calendar_update_event": CalendarUpdateEventTool,
+	"calendar_delete_event": CalendarDeleteEventTool,
 }
 
 var registryMu sync.RWMutex

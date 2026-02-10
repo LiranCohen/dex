@@ -32,8 +32,8 @@ func TestToolSet(t *testing.T) {
 
 	// Test All
 	all := set.All()
-	if len(all) != 10 { // 10 read-only tools (including list_runtimes)
-		t.Errorf("Expected 10 tools, got %d", len(all))
+	if len(all) != 16 { // 10 read-only tools + 6 read-only mail/calendar tools
+		t.Errorf("Expected 16 tools, got %d", len(all))
 	}
 }
 
@@ -53,8 +53,8 @@ func TestReadWriteToolSet(t *testing.T) {
 
 	// Count total tools
 	all := set.All()
-	if len(all) != 22 { // 10 read-only + 8 write + 4 quality gate tools
-		t.Errorf("Expected 22 tools, got %d", len(all))
+	if len(all) != 34 { // 10 read-only + 8 write + 4 quality gate + 12 mail/calendar tools
+		t.Errorf("Expected 34 tools, got %d", len(all))
 	}
 }
 

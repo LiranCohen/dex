@@ -12,6 +12,13 @@ import (
 	"github.com/lirancohen/dex/internal/tools"
 )
 
+// mailToolHandler defines the interface for executing mail/calendar tools.
+// This avoids a direct dependency on *tools.MailExecutor in the session package.
+type mailToolHandler interface {
+	CanHandle(toolName string) bool
+	Execute(toolName string, input map[string]any) tools.Result
+}
+
 // ToolResult represents the result of executing a tool
 // Wraps tools.Result for backwards compatibility
 type ToolResult struct {
@@ -35,6 +42,8 @@ type ToolExecutor struct {
 	qualityGate *QualityGate
 	// Activity recorder for logging quality gate attempts
 	activity *ActivityRecorder
+	// Mail/calendar tool executor (optional - for Zoho Mail integration via Central)
+	mailExecutor mailToolHandler
 }
 
 // NewToolExecutor creates a new ToolExecutor
@@ -69,6 +78,12 @@ func (e *ToolExecutor) SetOnQualityGateResult(callback func(result *GateResult))
 	e.onQualityGateResult = callback
 }
 
+// SetMailExecutor sets the mail/calendar tool executor.
+// When set, mail_* and calendar_* tool calls are dispatched to this executor.
+func (e *ToolExecutor) SetMailExecutor(me mailToolHandler) {
+	e.mailExecutor = me
+}
+
 // Execute runs a tool with the given input and returns the result
 // Overrides base executor for tools that need git.Operations or GitHub client
 func (e *ToolExecutor) Execute(ctx context.Context, toolName string, input map[string]any) ToolResult {
@@ -99,6 +114,17 @@ func (e *ToolExecutor) Execute(ctx context.Context, toolName string, input map[s
 	case "task_complete":
 		result = e.executeTaskComplete(ctx, input)
 	default:
+		// Check if mail/calendar executor can handle this tool
+		if e.mailExecutor != nil && e.mailExecutor.CanHandle(toolName) {
+			mailResult := e.mailExecutor.Execute(toolName, input)
+			result = ToolResult{
+				Output:  mailResult.Output,
+				IsError: mailResult.IsError,
+			}
+			// Fall through to large response processing below
+			break
+		}
+
 		// Use base executor for all other tools (already applies large response processing)
 		baseResult := e.Executor.Execute(ctx, toolName, input)
 		return ToolResult{

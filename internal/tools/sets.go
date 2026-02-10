@@ -14,6 +14,13 @@ func ReadOnlyTools() *Set {
 		WebSearchTool(),
 		WebFetchTool(),
 		ListRuntimesTool(),
+		// Mail & Calendar (read-only)
+		MailListFoldersTool(),
+		MailListMessagesTool(),
+		MailSearchTool(),
+		MailReadTool(),
+		CalendarListTool(),
+		CalendarListEventsTool(),
 	})
 }
 
@@ -32,6 +39,13 @@ func QuestTools() *Set {
 		WebSearchTool(),
 		WebFetchTool(),
 		ListRuntimesTool(),
+		// Mail & Calendar (read-only)
+		MailListFoldersTool(),
+		MailListMessagesTool(),
+		MailSearchTool(),
+		MailReadTool(),
+		CalendarListTool(),
+		CalendarListEventsTool(),
 		// Quest-specific tools
 		AskQuestionTool(),
 		ProposeObjectiveTool(),
@@ -87,6 +101,19 @@ func ReadWriteTools() *Set {
 		RunLintTool(),
 		RunBuildTool(),
 		TaskCompleteTool(),
+		// Mail & Calendar (full access)
+		MailListFoldersTool(),
+		MailListMessagesTool(),
+		MailSearchTool(),
+		MailReadTool(),
+		MailSendTool(),
+		MailReplyTool(),
+		MailDeleteTool(),
+		CalendarListTool(),
+		CalendarListEventsTool(),
+		CalendarCreateEventTool(),
+		CalendarUpdateEventTool(),
+		CalendarDeleteEventTool(),
 	})
 }
 
@@ -124,6 +151,19 @@ func TaskExecutionTools() *Set {
 		SignalEventTool(),
 		UpdateScratchpadTool(),
 		StoreMemoryTool(),
+		// Mail & Calendar (full access)
+		MailListFoldersTool(),
+		MailListMessagesTool(),
+		MailSearchTool(),
+		MailReadTool(),
+		MailSendTool(),
+		MailReplyTool(),
+		MailDeleteTool(),
+		CalendarListTool(),
+		CalendarListEventsTool(),
+		CalendarCreateEventTool(),
+		CalendarUpdateEventTool(),
+		CalendarDeleteEventTool(),
 	})
 }
 
@@ -167,5 +207,19 @@ func AllTools() []Tool {
 		// Planning tools
 		ConfirmPlanTool(),
 		ProposeChecklistTool(),
+		// Mail tools
+		MailListFoldersTool(),
+		MailListMessagesTool(),
+		MailSearchTool(),
+		MailReadTool(),
+		MailSendTool(),
+		MailReplyTool(),
+		MailDeleteTool(),
+		// Calendar tools
+		CalendarListTool(),
+		CalendarListEventsTool(),
+		CalendarCreateEventTool(),
+		CalendarUpdateEventTool(),
+		CalendarDeleteEventTool(),
 	}
 }

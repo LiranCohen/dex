@@ -19,6 +19,7 @@ import (
 	deviceshandlers "github.com/lirancohen/dex/internal/api/handlers/devices"
 	forgejohandlers "github.com/lirancohen/dex/internal/api/handlers/forgejo"
 	"github.com/lirancohen/dex/internal/api/handlers/issuesync"
+	mailhandlers "github.com/lirancohen/dex/internal/api/handlers/mail"
 	"github.com/lirancohen/dex/internal/api/handlers/memory"
 	meshhandlers "github.com/lirancohen/dex/internal/api/handlers/mesh"
 	planninghandlers "github.com/lirancohen/dex/internal/api/handlers/planning"
@@ -210,6 +211,11 @@ func NewServer(database *db.DB, cfg Config) *Server {
 	// Wire up Anthropic client for Ralph loop execution
 	if cfg.Toolbelt != nil && cfg.Toolbelt.Anthropic != nil {
 		sessionMgr.SetAnthropicClient(cfg.Toolbelt.Anthropic)
+	}
+
+	// Wire up Central mail/calendar config for AI sessions
+	if cfg.CentralURL != "" && cfg.TunnelToken != "" {
+		sessionMgr.SetMailConfig(cfg.CentralURL, cfg.TunnelToken)
 	}
 
 	s.sessionManager = sessionMgr
@@ -446,6 +452,10 @@ func (s *Server) registerRoutes() {
 		TunnelToken: s.tunnelToken,
 		CentralURL:  s.centralURL,
 	})
+	mailHandler := mailhandlers.New(s.deps, mailhandlers.Config{
+		CentralURL:  s.centralURL,
+		TunnelToken: s.tunnelToken,
+	})
 	meshOnboardHandler := authhandlers.NewMeshOnboardHandler(s.deps, s.namespace)
 
 	// Wire up callbacks for issue sync (Forgejo)
@@ -500,6 +510,7 @@ func (s *Server) registerRoutes() {
 	workersHandler.RegisterRoutes(protected)
 	forgejoHandler.RegisterRoutes(protected)
 	devicesHandler.RegisterRoutes(protected)
+	mailHandler.RegisterRoutes(protected)
 	meshOnboardHandler.RegisterRoutes(protected)
 
 	// Centrifuge WebSocket endpoint for real-time updates
