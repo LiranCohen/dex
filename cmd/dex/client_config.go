@@ -9,10 +9,12 @@ import (
 // ClientConfig represents the client configuration saved by 'dex client enroll'.
 // This is a simplified version of Config - clients don't need tunnel/ACME/owner info.
 type ClientConfig struct {
-	Namespace string             `json:"namespace"`
-	Hostname  string             `json:"hostname"`
-	Domains   ClientDomainConfig `json:"domains"` // Domain configuration from Central
-	Mesh      ClientMeshConfig   `json:"mesh"`
+	Namespace  string             `json:"namespace"`
+	Hostname   string             `json:"hostname"`
+	Domains    ClientDomainConfig `json:"domains"` // Domain configuration from Central
+	Mesh       ClientMeshConfig   `json:"mesh"`
+	CentralURL string             `json:"central_url,omitempty"` // Central server URL for API calls
+	AuthToken  string             `json:"auth_token,omitempty"`  // Central session JWT for dashboard API calls
 }
 
 // ClientDomainConfig contains domain configuration from Central.

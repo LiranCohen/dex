@@ -2,25 +2,23 @@
 #
 # Dex Client Installer
 #
-# Downloads pre-built binaries and runs client enrollment for local mesh access.
-# Installs to user-local directories (no root/sudo required).
+# One-shot installer: downloads binary, enrolls device, installs mesh daemon,
+# and launches the tray app. Everything you need in a single command.
 #
 # Usage:
-#   curl -fsSL https://get.enbox.id/client | sh
-#   curl -fsSL https://get.enbox.id/client | sh -s -- --key dexkey-xxx
-#   curl -fsSL https://get.enbox.id/client | sh -s -- dexkey-xxx
+#   curl -fsSL https://get.enbox.id/client | bash -s -- dexkey-xxx
+#   curl -fsSL https://get.enbox.id/client | bash -s -- --key dexkey-xxx
 #
 # Environment variables:
 #   DEX_VERSION           - Version to install (default: latest)
-#   DEX_CLIENT_INSTALL_DIR - Binary install location (default: ~/.local/bin)
 #   DEX_CLIENT_DATA_DIR   - Data directory (default: ~/.dex)
 #   DEX_CENTRAL_URL       - Central server URL (default: https://central.enbox.id)
-#   DEX_ENROLL_KEY        - Enrollment key (for non-interactive install)
+#   DEX_ENROLL_KEY        - Enrollment key (alternative to passing as argument)
 #
 set -e
 
 # Installer version
-INSTALLER_VERSION="0.1.0"
+INSTALLER_VERSION="0.2.0"
 
 # =============================================================================
 # Configuration
@@ -52,7 +50,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 VERSION="${DEX_VERSION:-latest}"
-INSTALL_DIR="${DEX_CLIENT_INSTALL_DIR:-$HOME/.local/bin}"
+INSTALL_DIR="/usr/local/bin"
 DATA_DIR="${DEX_CLIENT_DATA_DIR:-$HOME/.dex}"
 CENTRAL_URL="${DEX_CENTRAL_URL:-https://central.enbox.id}"
 ENROLL_KEY="${DEX_ENROLL_KEY:-}"
@@ -63,17 +61,13 @@ HOSTNAME_ARG="${DEX_HOSTNAME:-}"
 # =============================================================================
 
 # Colors
-BLACK='\033[0;30m'
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-MAGENTA='\033[0;35m'
 CYAN='\033[0;36m'
-WHITE='\033[1;37m'
-GRAY='\033[0;90m'
 BOLD='\033[1m'
 DIM='\033[2m'
+GRAY='\033[0;90m'
 NC='\033[0m'
 
 # Symbols
@@ -83,22 +77,40 @@ SYM_SUCCESS="✔"
 SYM_FAILED="✖"
 SYM_SKIP="◌"
 
-# Steps definition
-STEPS=(
-    "Detecting platform"
-    "Checking directories"
-    "Downloading Dex"
-    "Installing binary"
-    "Enrolling device"
-    "Creating user service"
-)
-STEP_COUNT=${#STEPS[@]}
-
-# Step statuses: pending, running, success, failed, skip
+# Platform-specific steps are set after detection
+declare -a STEPS
 declare -a STEP_STATUS
-for ((i=0; i<STEP_COUNT; i++)); do
-    STEP_STATUS[$i]="pending"
-done
+
+init_steps_darwin() {
+    STEPS=(
+        "Detecting platform"
+        "Acquiring privileges"
+        "Downloading Dex"
+        "Installing binary"
+        "Enrolling device"
+        "Installing mesh daemon"
+        "Installing tray app"
+    )
+}
+
+init_steps_linux() {
+    STEPS=(
+        "Detecting platform"
+        "Acquiring privileges"
+        "Downloading Dex"
+        "Installing binary"
+        "Enrolling device"
+        "Creating system service"
+    )
+}
+
+init_step_status() {
+    STEP_COUNT=${#STEPS[@]}
+    STEP_STATUS=()
+    for ((i=0; i<STEP_COUNT; i++)); do
+        STEP_STATUS[$i]="pending"
+    done
+}
 
 # Activity log
 declare -a ACTIVITY_LOG
@@ -217,6 +229,11 @@ run_step() {
     fi
 }
 
+skip_step() {
+    local step_index=$1
+    update_step "$step_index" "skip"
+}
+
 # =============================================================================
 # Installation Steps
 # =============================================================================
@@ -245,33 +262,43 @@ do_detect_platform() {
             ;;
     esac
 
+    # Initialize platform-specific steps now that we know the OS
+    if [ "$OS" = "darwin" ]; then
+        init_steps_darwin
+    else
+        init_steps_linux
+    fi
+    init_step_status
+    # Mark step 0 as running again since init_step_status reset it
+    STEP_STATUS[0]="success"
+
     log_activity "Platform: ${OS}/${ARCH}"
     return 0
 }
 
-# Step 1: Check directories
-do_check_directories() {
-    # Create install directory if needed
-    if [ ! -d "$INSTALL_DIR" ]; then
-        mkdir -p "$INSTALL_DIR"
-        log_activity "Created: $INSTALL_DIR"
+# Step 1: Acquire sudo
+do_acquire_sudo() {
+    log_activity "Requesting administrator privileges..."
+    log_activity "  (install binary, mesh daemon, tray app)"
+
+    # Check if already root
+    if [ "$(id -u)" -eq 0 ]; then
+        log_activity "Running as root"
+        return 0
     fi
 
-    # Create data directory if needed
-    if [ ! -d "$DATA_DIR" ]; then
-        mkdir -p "$DATA_DIR"
-        log_activity "Created: $DATA_DIR"
+    # Validate sudo credentials (will prompt the user)
+    if ! sudo -v 2>/dev/null; then
+        log_activity "Error: Failed to acquire sudo privileges"
+        return 1
     fi
 
-    # Ensure install dir is in PATH
-    case ":$PATH:" in
-        *":$INSTALL_DIR:"*) ;;
-        *)
-            log_activity "Note: Add $INSTALL_DIR to your PATH"
-            ;;
-    esac
+    # Keep sudo alive in the background during install
+    (while true; do sudo -n true 2>/dev/null; sleep 50; done) &
+    SUDO_KEEPALIVE_PID=$!
+    trap "kill $SUDO_KEEPALIVE_PID 2>/dev/null; rm -rf ${TMP_DIR:-/dev/null}" EXIT
 
-    log_activity "Directories ready"
+    log_activity "Privileges acquired"
     return 0
 }
 
@@ -286,23 +313,43 @@ do_download_binary() {
     fi
 
     TMP_DIR=$(mktemp -d)
-    trap "rm -rf $TMP_DIR" EXIT
 
     log_activity "Downloading from GitHub releases..."
 
     if command -v curl &> /dev/null; then
         if ! curl -fsSL "$DOWNLOAD_URL" -o "$TMP_DIR/dex.tar.gz" 2>/dev/null; then
-            log_activity "Error: Download failed"
+            log_activity "Error: Download failed: $DOWNLOAD_URL"
             return 1
         fi
     elif command -v wget &> /dev/null; then
         if ! wget -q "$DOWNLOAD_URL" -O "$TMP_DIR/dex.tar.gz" 2>/dev/null; then
-            log_activity "Error: Download failed"
+            log_activity "Error: Download failed: $DOWNLOAD_URL"
             return 1
         fi
     else
         log_activity "Error: Neither curl nor wget found"
         return 1
+    fi
+
+    # Also download the macOS app bundle if on darwin
+    if [ "$OS" = "darwin" ]; then
+        if [ "$VERSION" = "latest" ]; then
+            APP_DOWNLOAD_URL="${base_url}/latest/download/DexClient-${ARCH}.app.zip"
+        else
+            APP_DOWNLOAD_URL="${base_url}/download/${VERSION}/DexClient-${ARCH}.app.zip"
+        fi
+
+        if command -v curl &> /dev/null; then
+            if ! curl -fsSL "$APP_DOWNLOAD_URL" -o "$TMP_DIR/DexClient.app.zip" 2>/dev/null; then
+                log_activity "Warning: Failed to download DexClient.app"
+                APP_DOWNLOAD_FAILED=1
+            fi
+        elif command -v wget &> /dev/null; then
+            if ! wget -q "$APP_DOWNLOAD_URL" -O "$TMP_DIR/DexClient.app.zip" 2>/dev/null; then
+                log_activity "Warning: Failed to download DexClient.app"
+                APP_DOWNLOAD_FAILED=1
+            fi
+        fi
     fi
 
     log_activity "Download complete"
@@ -314,10 +361,15 @@ do_install_binary() {
     log_activity "Extracting archive..."
     tar -xzf "$TMP_DIR/dex.tar.gz" -C "$TMP_DIR"
 
-    mv "$TMP_DIR/dex" "$INSTALL_DIR/dex"
-    chmod +x "$INSTALL_DIR/dex"
+    log_activity "Installing to ${INSTALL_DIR}/dex..."
+    sudo install -m 755 "$TMP_DIR/dex" "$INSTALL_DIR/dex"
 
-    log_activity "Installed: $INSTALL_DIR/dex"
+    # Create data directory (as current user, not root)
+    if [ ! -d "$DATA_DIR" ]; then
+        mkdir -p "$DATA_DIR"
+    fi
+
+    log_activity "Installed: ${INSTALL_DIR}/dex"
     return 0
 }
 
@@ -339,15 +391,16 @@ do_enroll() {
             echo -e "  ${BOLD}Enrollment Required${NC}"
             echo -e "  ${DIM}Get your key from HQ Settings → Devices${NC}"
             echo ""
-            read -p "  Enter enrollment key (or press Enter to skip): " key
+            read -p "  Enter enrollment key: " key
 
             if [ -z "$key" ]; then
-                log_activity "Enrollment skipped (no key provided)"
-                return 0
+                log_activity "Error: Enrollment key is required"
+                return 1
             fi
         else
-            log_activity "No enrollment key provided (non-interactive)"
-            return 0
+            log_activity "Error: No enrollment key provided"
+            log_activity "Pass key: curl ... | bash -s -- dexkey-xxx"
+            return 1
         fi
     fi
 
@@ -358,28 +411,61 @@ do_enroll() {
         hostname_arg="--hostname $HOSTNAME_ARG"
     fi
 
-    if "$INSTALL_DIR/dex" client enroll --key "$key" --data-dir "$DATA_DIR" --central-url "$CENTRAL_URL" $hostname_arg >/dev/null 2>&1; then
+    local enroll_output
+    if enroll_output=$("$INSTALL_DIR/dex" client enroll --key "$key" --data-dir "$DATA_DIR" --central-url "$CENTRAL_URL" $hostname_arg 2>&1); then
         log_activity "Enrollment successful!"
         return 0
     else
-        log_activity "Enrollment failed - run 'dex client enroll' manually"
+        log_activity "Error: Enrollment failed"
+        log_activity "$enroll_output"
         return 1
     fi
 }
 
-# Step 5: Create user service
-do_create_service() {
-    if [ "$OS" = "linux" ]; then
-        do_create_systemd_user_service
-    elif [ "$OS" = "darwin" ]; then
-        do_create_launchd_user_service
+# Step 5 (darwin): Install mesh daemon
+do_install_meshd() {
+    log_activity "Installing mesh daemon (LaunchDaemon)..."
+
+    local meshd_output
+    if meshd_output=$(sudo "$INSTALL_DIR/dex" meshd install 2>&1); then
+        log_activity "Mesh daemon installed and started"
+        return 0
     else
-        log_activity "No service manager for this OS"
+        log_activity "Error: Failed to install mesh daemon"
+        log_activity "$meshd_output"
+        return 1
     fi
+}
+
+# Step 6 (darwin): Install and launch tray app
+do_install_tray_app() {
+    if [ "${APP_DOWNLOAD_FAILED:-0}" = "1" ]; then
+        log_activity "Skipped: DexClient.app download failed earlier"
+        return 1
+    fi
+
+    # Remove existing app if present
+    if [ -d "/Applications/DexClient.app" ]; then
+        sudo rm -rf "/Applications/DexClient.app"
+    fi
+
+    log_activity "Installing DexClient.app..."
+    if ! unzip -q "$TMP_DIR/DexClient.app.zip" -d "$TMP_DIR/app" 2>/dev/null; then
+        log_activity "Error: Failed to extract DexClient.app"
+        return 1
+    fi
+
+    sudo cp -R "$TMP_DIR/app/DexClient.app" "/Applications/DexClient.app"
+
+    log_activity "Launching DexClient..."
+    open "/Applications/DexClient.app"
+
+    log_activity "DexClient.app installed and launched"
     return 0
 }
 
-do_create_systemd_user_service() {
+# Step 5 (linux): Create systemd user service
+do_create_linux_service() {
     local service_dir="$HOME/.config/systemd/user"
     local service_file="$service_dir/dex-client.service"
 
@@ -409,49 +495,7 @@ EOF
     systemctl --user enable dex-client 2>/dev/null || true
 
     log_activity "Created systemd user service"
-}
-
-do_create_launchd_user_service() {
-    local plist_dir="$HOME/Library/LaunchAgents"
-    local plist_file="$plist_dir/id.enbox.dex-client.plist"
-
-    mkdir -p "$plist_dir"
-
-    cat > "$plist_file" << EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>id.enbox.dex-client</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>$INSTALL_DIR/dex</string>
-        <string>client</string>
-        <string>start</string>
-        <string>--data-dir</string>
-        <string>$DATA_DIR</string>
-    </array>
-    <key>RunAtLoad</key>
-    <true/>
-    <key>KeepAlive</key>
-    <true/>
-    <key>WorkingDirectory</key>
-    <string>$DATA_DIR</string>
-    <key>EnvironmentVariables</key>
-    <dict>
-        <key>DEX_CLIENT_DATA_DIR</key>
-        <string>$DATA_DIR</string>
-    </dict>
-    <key>StandardOutPath</key>
-    <string>$DATA_DIR/dex-client.log</string>
-    <key>StandardErrorPath</key>
-    <string>$DATA_DIR/dex-client.error.log</string>
-</dict>
-</plist>
-EOF
-
-    log_activity "Created launchd user service"
+    return 0
 }
 
 # =============================================================================
@@ -481,50 +525,41 @@ show_completion() {
 BANNER
     echo -e "${NC}"
 
-    echo -e "  ${BOLD}Next Steps${NC}"
+    echo -e "  ${BOLD}What's Running${NC}"
     echo -e "  ${DIM}─────────────────────────────────────────────────${NC}"
     echo ""
-
-    # Check if ~/.local/bin is in PATH
-    case ":$PATH:" in
-        *":$INSTALL_DIR:"*) ;;
-        *)
-            echo -e "    ${BOLD}Add to your PATH:${NC}"
-            echo -e "      ${CYAN}export PATH=\"\$HOME/.local/bin:\$PATH\"${NC}"
-            echo ""
-            ;;
-    esac
 
     if [ -f "$DATA_DIR/config.json" ]; then
         local namespace
         namespace=$(grep -o '"namespace"[[:space:]]*:[[:space:]]*"[^"]*"' "$DATA_DIR/config.json" 2>/dev/null | cut -d'"' -f4 || true)
 
-        echo -e "    ${BOLD}Start the mesh client:${NC}"
-        echo -e "      ${CYAN}dex client start${NC}"
-        echo ""
-
-        if [ "$OS" = "linux" ]; then
-            echo -e "    ${BOLD}Or enable auto-start on login:${NC}"
-            echo -e "      ${CYAN}systemctl --user start dex-client${NC}"
-        elif [ "$OS" = "darwin" ]; then
-            echo -e "    ${BOLD}Or enable auto-start on login:${NC}"
-            echo -e "      ${CYAN}launchctl load ~/Library/LaunchAgents/id.enbox.dex-client.plist${NC}"
-        fi
-        echo ""
-
         if [ -n "$namespace" ]; then
-            echo -e "    ${BOLD}Connected to namespace:${NC} ${CYAN}${namespace}${NC}"
+            echo -e "    ${BOLD}Namespace:${NC}  ${CYAN}${namespace}${NC}"
+        fi
+
+        if [ "$OS" = "darwin" ]; then
+            echo -e "    ${BOLD}Daemon:${NC}     ${GREEN}✔${NC}  Mesh daemon running (com.dex.meshd)"
+            echo -e "    ${BOLD}Tray:${NC}       ${GREEN}✔${NC}  DexClient.app in menu bar"
             echo ""
+            echo -e "    ${BOLD}Open HQ:${NC}"
+            if [ -n "$namespace" ]; then
+                echo -e "      ${CYAN}https://hq.${namespace}.enbox.id${NC}"
+            else
+                echo -e "      Click ${BOLD}Open HQ${NC} in the menu bar tray"
+            fi
+        elif [ "$OS" = "linux" ]; then
+            echo -e "    ${BOLD}Service:${NC}    systemd user service created"
+            echo ""
+            echo -e "    ${BOLD}Start the client:${NC}"
+            echo -e "      ${CYAN}systemctl --user start dex-client${NC}"
         fi
     else
-        echo -e "    ${BOLD}Complete enrollment:${NC}"
+        echo -e "    ${BOLD}Binary installed at:${NC} ${CYAN}${INSTALL_DIR}/dex${NC}"
+        echo -e "    ${YELLOW}Enrollment was skipped — run manually:${NC}"
         echo -e "      ${CYAN}dex client enroll --key YOUR_KEY${NC}"
-        echo ""
-        echo -e "    ${BOLD}Then start the client:${NC}"
-        echo -e "      ${CYAN}dex client start${NC}"
-        echo ""
     fi
 
+    echo ""
     echo -e "  ${DIM}─────────────────────────────────────────────────${NC}"
     echo ""
 }
@@ -572,16 +607,52 @@ BANNER
 # =============================================================================
 
 main() {
+    # Minimal init for step 0 (will be re-initialized after platform detection)
+    STEPS=("Detecting platform")
+    STEP_COUNT=1
+    STEP_STATUS=("pending")
+
     draw_ui
 
     local failed=0
 
+    # Step 0: Detect platform (also initializes platform-specific steps)
     run_step 0 do_detect_platform || failed=1
-    [ $failed -eq 0 ] && run_step 1 do_check_directories || failed=1
-    [ $failed -eq 0 ] && run_step 2 do_download_binary || failed=1
-    [ $failed -eq 0 ] && run_step 3 do_install_binary || failed=1
-    [ $failed -eq 0 ] && run_step 4 do_enroll || true  # Don't fail on enrollment skip
-    [ $failed -eq 0 ] && run_step 5 do_create_service || true  # Don't fail on service creation
+
+    if [ $failed -eq 0 ]; then
+        # Step 1: Acquire sudo
+        run_step 1 do_acquire_sudo || failed=1
+    fi
+
+    if [ $failed -eq 0 ]; then
+        # Step 2: Download binary (and app bundle on macOS)
+        run_step 2 do_download_binary || failed=1
+    fi
+
+    if [ $failed -eq 0 ]; then
+        # Step 3: Install binary to /usr/local/bin
+        run_step 3 do_install_binary || failed=1
+    fi
+
+    if [ $failed -eq 0 ]; then
+        # Step 4: Enroll device
+        run_step 4 do_enroll || failed=1
+    fi
+
+    if [ $failed -eq 0 ]; then
+        if [ "$OS" = "darwin" ]; then
+            # Step 5: Install mesh daemon
+            run_step 5 do_install_meshd || failed=1
+
+            # Step 6: Install and launch tray app (don't fail on this)
+            if [ $failed -eq 0 ]; then
+                run_step 6 do_install_tray_app || true
+            fi
+        elif [ "$OS" = "linux" ]; then
+            # Step 5: Create systemd user service
+            run_step 5 do_create_linux_service || true
+        fi
+    fi
 
     sleep 0.5
 

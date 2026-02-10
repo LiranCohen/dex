@@ -27,9 +27,13 @@ import (
 type trayState int
 
 const (
-	trayStateDisconnected trayState = iota
-	trayStateConnecting
-	trayStateConnected
+	trayStateUnauthenticated trayState = iota // No config — show Sign Up / Sign In
+	trayStateAuthenticating                   // Browser auth in progress
+	trayStateEnrolling                        // Auto-enrolling with Central
+	trayStateDisconnected                     // Enrolled but not connected
+	trayStateConnecting                       // Mesh connection in progress
+	trayStateConnected                        // On the mesh
+	trayStateError                            // Something went wrong
 )
 
 type clientTray struct {
@@ -37,39 +41,65 @@ type clientTray struct {
 	state      trayState
 	meshIP     string
 	hqURL      string
+	errorMsg   string
 	meshClient *mesh.Client
 	cancel     context.CancelFunc
 	stopping   bool
 	dataDir    string
+	centralURL string
+	authToken  string
+
+	// Callback server for app-first auth flow
+	callbackSrv *callbackServer
 
 	// Menu items
 	mStatus     *systray.MenuItem
+	mSignUp     *systray.MenuItem
+	mSignIn     *systray.MenuItem
 	mConnect    *systray.MenuItem
 	mDisconnect *systray.MenuItem
+	mAddHQ      *systray.MenuItem
 	mOpenHQ     *systray.MenuItem
+	mDashboard  *systray.MenuItem
 	mQuit       *systray.MenuItem
 }
 
 // runClientTray runs the client with a system tray icon
 func runClientTray(args []string) error {
 	dataDir := DefaultClientDataDir()
-	configPath := filepath.Join(dataDir, "config.json")
 
-	config, err := LoadClientConfig(configPath)
-	if err != nil {
-		return fmt.Errorf("no client configuration found. Run 'dex client enroll' first: %w", err)
-	}
-
-	// Use domain from config, with fallback for backwards compatibility
-	publicDomain := config.Domains.Public
-	if publicDomain == "" {
-		publicDomain = "enbox.id"
+	// Ensure data directory exists
+	if err := os.MkdirAll(dataDir, 0755); err != nil {
+		return fmt.Errorf("creating data dir: %w", err)
 	}
 
 	tray := &clientTray{
-		state:   trayStateDisconnected,
-		hqURL:   fmt.Sprintf("https://hq.%s.%s", config.Namespace, publicDomain),
-		dataDir: dataDir,
+		dataDir:    dataDir,
+		centralURL: DefaultCentralURL,
+	}
+
+	configPath := filepath.Join(dataDir, "config.json")
+	config, err := LoadClientConfig(configPath)
+	if err != nil {
+		// No config — start in unauthenticated state
+		tray.state = trayStateUnauthenticated
+		log.Printf("No client config: %v", err)
+	} else {
+		tray.state = trayStateDisconnected
+
+		// Use domain from config, with fallback for backwards compatibility
+		publicDomain := config.Domains.Public
+		if publicDomain == "" {
+			publicDomain = "enbox.id"
+		}
+		tray.hqURL = fmt.Sprintf("https://hq.%s.%s", config.Namespace, publicDomain)
+
+		if config.CentralURL != "" {
+			tray.centralURL = config.CentralURL
+		}
+		if config.AuthToken != "" {
+			tray.authToken = config.AuthToken
+		}
 	}
 
 	systray.Run(tray.onReady, tray.onExit)
@@ -77,65 +107,167 @@ func runClientTray(args []string) error {
 }
 
 func (t *clientTray) onReady() {
-	// Set initial icon
-	t.setIcon(trayStateDisconnected)
-	systray.SetTitle("Dex")
-	systray.SetTooltip("Dex Client - Disconnected")
+	t.mu.Lock()
+	initialState := t.state
+	t.mu.Unlock()
 
-	// Create menu items
-	t.mStatus = systray.AddMenuItem("Status: Disconnected", "Current connection status")
+	// Set initial icon
+	t.setIcon(initialState)
+	systray.SetTitle("Dex")
+
+	// Create menu items — all of them, then show/hide based on state
+	t.mStatus = systray.AddMenuItem("Status: Initializing", "Current status")
 	t.mStatus.Disable()
 
 	systray.AddSeparator()
 
+	t.mSignUp = systray.AddMenuItem("Sign Up", "Create a new Dex account")
+	t.mSignIn = systray.AddMenuItem("Sign In", "Sign in to an existing account")
 	t.mConnect = systray.AddMenuItem("Connect", "Connect to mesh network")
 	t.mDisconnect = systray.AddMenuItem("Disconnect", "Disconnect from mesh network")
-	t.mDisconnect.Hide()
 
 	systray.AddSeparator()
 
+	t.mAddHQ = systray.AddMenuItem("Add HQ...", "Set up your HQ server")
 	t.mOpenHQ = systray.AddMenuItem("Open HQ", "Open HQ in browser")
-	t.mOpenHQ.Disable()
+	t.mDashboard = systray.AddMenuItem("Open Dashboard", "Open Dex dashboard in browser")
 
 	systray.AddSeparator()
 
 	t.mQuit = systray.AddMenuItem("Quit", "Quit Dex Client")
 
+	// Apply initial state to UI
+	t.updateUI()
+
 	// Handle menu clicks
 	go t.handleClicks()
 
-	// Auto-connect on start
-	go t.connect()
+	// Auto-connect if already enrolled
+	if initialState == trayStateDisconnected {
+		go t.connect()
+	}
 }
 
 func (t *clientTray) onExit() {
 	t.disconnect()
+	if t.callbackSrv != nil {
+		t.callbackSrv.close()
+	}
 }
 
 func (t *clientTray) handleClicks() {
 	for {
 		select {
+		case <-t.mSignUp.ClickedCh:
+			go t.startBrowserAuth("signup")
+		case <-t.mSignIn.ClickedCh:
+			go t.startBrowserAuth("login")
 		case <-t.mConnect.ClickedCh:
 			go t.connect()
 		case <-t.mDisconnect.ClickedCh:
 			go t.disconnect()
+		case <-t.mAddHQ.ClickedCh:
+			t.openAddHQ()
 		case <-t.mOpenHQ.ClickedCh:
 			t.openHQ()
+		case <-t.mDashboard.ClickedCh:
+			t.openDashboard()
 		case <-t.mQuit.ClickedCh:
-			t.disconnect()
-			systray.Quit()
+			t.quit()
 			return
 		}
 	}
 }
 
+// startBrowserAuth launches the browser auth flow.
+func (t *clientTray) startBrowserAuth(mode string) {
+	t.mu.Lock()
+	if t.state != trayStateUnauthenticated && t.state != trayStateError {
+		t.mu.Unlock()
+		return
+	}
+	t.state = trayStateAuthenticating
+	t.errorMsg = ""
+	t.mu.Unlock()
+	t.updateUI()
+
+	// Start callback server
+	srv, err := newCallbackServer()
+	if err != nil {
+		t.setError(fmt.Sprintf("Failed to start auth server: %v", err))
+		return
+	}
+	t.mu.Lock()
+	t.callbackSrv = srv
+	t.mu.Unlock()
+
+	// Open browser to Central login/signup page with callback params
+	loginURL := fmt.Sprintf("%s/login?callback_port=%d&state=%s",
+		t.centralURL, srv.port, srv.state)
+	openBrowser(loginURL)
+
+	// Wait for callback (timeout after 10 minutes)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+
+	callback, err := srv.waitForCallback(ctx)
+	srv.close()
+	t.mu.Lock()
+	t.callbackSrv = nil
+	t.mu.Unlock()
+
+	if err != nil {
+		t.setError("Authentication timed out or was cancelled")
+		return
+	}
+
+	// Exchange auth code for JWT
+	t.mu.Lock()
+	t.state = trayStateEnrolling
+	t.mu.Unlock()
+	t.updateUI()
+
+	exchangeResp, err := exchangeAuthCode(t.centralURL, callback.Code)
+	if err != nil {
+		t.setError(fmt.Sprintf("Auth exchange failed: %v", err))
+		return
+	}
+
+	// Auto-enroll
+	config, err := autoEnroll(t.centralURL, exchangeResp.Token, exchangeResp.Namespace, t.dataDir)
+	if err != nil {
+		t.setError(fmt.Sprintf("Enrollment failed: %v", err))
+		return
+	}
+
+	// Update tray state with new config
+	publicDomain := config.Domains.Public
+	if publicDomain == "" {
+		publicDomain = "enbox.id"
+	}
+	t.mu.Lock()
+	t.hqURL = fmt.Sprintf("https://hq.%s.%s", config.Namespace, publicDomain)
+	t.authToken = exchangeResp.Token
+	t.mu.Unlock()
+
+	// Install meshd (will prompt for sudo via osascript on macOS)
+	installMeshdIfNeeded()
+
+	// Connect to mesh
+	t.mu.Lock()
+	t.state = trayStateDisconnected
+	t.mu.Unlock()
+	t.connect()
+}
+
 func (t *clientTray) connect() {
 	t.mu.Lock()
-	if t.state != trayStateDisconnected {
+	if t.state == trayStateConnecting || t.state == trayStateConnected {
 		t.mu.Unlock()
 		return
 	}
 	t.state = trayStateConnecting
+	t.errorMsg = ""
 	t.mu.Unlock()
 
 	t.updateUI()
@@ -147,15 +279,11 @@ func (t *clientTray) connect() {
 	}
 
 	// If the daemon is installed but not yet running, wait for it
-	// instead of falling through to tsnet (which will fail on root-owned state files).
 	if meshd.IsInstalled() {
 		log.Printf("Mesh daemon is installed but not yet running, waiting for socket...")
 		if err := meshd.WaitForSocket(meshd.SocketPath, 30*time.Second); err != nil {
 			log.Printf("Timed out waiting for mesh daemon: %v", err)
-			t.mu.Lock()
-			t.state = trayStateDisconnected
-			t.mu.Unlock()
-			t.updateUI()
+			t.setError("Mesh daemon not responding — check /var/log/dex-meshd.log")
 			return
 		}
 		t.connectViaDaemon()
@@ -197,6 +325,12 @@ func (t *clientTray) connectViaDaemon() {
 		}
 	}
 
+	if meshIP == "" {
+		t.setError("Daemon connected but no mesh IP assigned")
+		cancel()
+		return
+	}
+
 	t.mu.Lock()
 	t.state = trayStateConnected
 	t.meshIP = meshIP
@@ -214,10 +348,7 @@ func (t *clientTray) connectViaTsnet() {
 	config, err := LoadClientConfig(configPath)
 	if err != nil {
 		log.Printf("Failed to load config: %v", err)
-		t.mu.Lock()
-		t.state = trayStateDisconnected
-		t.mu.Unlock()
-		t.updateUI()
+		t.setError("Not enrolled — run 'dex client enroll'")
 		return
 	}
 
@@ -246,11 +377,10 @@ func (t *clientTray) connectViaTsnet() {
 		log.Printf("Failed to start mesh client: %v", err)
 		cancel()
 		t.mu.Lock()
-		t.state = trayStateDisconnected
 		t.meshClient = nil
 		t.cancel = nil
 		t.mu.Unlock()
-		t.updateUI()
+		t.setError(fmt.Sprintf("Mesh failed: %v", err))
 		return
 	}
 
@@ -266,6 +396,11 @@ func (t *clientTray) connectViaTsnet() {
 			return
 		case <-time.After(time.Second):
 		}
+	}
+
+	if meshIP == "" {
+		t.setError("Connected but no mesh IP assigned")
+		return
 	}
 
 	t.mu.Lock()
@@ -301,9 +436,36 @@ func (t *clientTray) disconnect() {
 
 	t.state = trayStateDisconnected
 	t.meshIP = ""
+	t.errorMsg = ""
 	t.stopping = false
 	t.mu.Unlock()
 
+	t.updateUI()
+}
+
+func (t *clientTray) quit() {
+	t.disconnect()
+
+	// On macOS, stop the mesh daemon if it's installed.
+	if runtime.GOOS == "darwin" && meshd.IsInstalled() {
+		log.Printf("Stopping mesh daemon via privilege prompt...")
+		cmd := exec.Command("osascript", "-e",
+			`do shell script "launchctl unload /Library/LaunchDaemons/com.dex.meshd.plist" with administrator privileges`)
+		if err := cmd.Run(); err != nil {
+			log.Printf("Failed to stop mesh daemon (user may have cancelled): %v", err)
+		}
+	}
+
+	systray.Quit()
+}
+
+// setError transitions the tray to error state with a visible message.
+func (t *clientTray) setError(msg string) {
+	log.Printf("Tray error: %s", msg)
+	t.mu.Lock()
+	t.state = trayStateError
+	t.errorMsg = msg
+	t.mu.Unlock()
 	t.updateUI()
 }
 
@@ -311,26 +473,47 @@ func (t *clientTray) updateUI() {
 	t.mu.Lock()
 	state := t.state
 	meshIP := t.meshIP
+	errorMsg := t.errorMsg
 	t.mu.Unlock()
 
 	t.setIcon(state)
 
+	// Hide all optional items first, then show what's needed
+	t.mSignUp.Hide()
+	t.mSignIn.Hide()
+	t.mConnect.Hide()
+	t.mDisconnect.Hide()
+	t.mAddHQ.Hide()
+	t.mOpenHQ.Hide()
+	t.mDashboard.Hide()
+
 	switch state {
+	case trayStateUnauthenticated:
+		systray.SetTooltip("Dex Client - Sign in to get started")
+		t.mStatus.SetTitle("Not signed in")
+		t.mSignUp.Show()
+		t.mSignIn.Show()
+
+	case trayStateAuthenticating:
+		systray.SetTooltip("Dex Client - Waiting for browser...")
+		t.mStatus.SetTitle("Waiting for browser sign-in...")
+
+	case trayStateEnrolling:
+		systray.SetTooltip("Dex Client - Setting up...")
+		t.mStatus.SetTitle("Setting up your device...")
+
 	case trayStateDisconnected:
 		systray.SetTooltip("Dex Client - Disconnected")
 		t.mStatus.SetTitle("Status: Disconnected")
 		t.mConnect.Show()
 		t.mConnect.Enable()
-		t.mDisconnect.Hide()
-		t.mOpenHQ.Disable()
+		t.mDashboard.Show()
 
 	case trayStateConnecting:
 		systray.SetTooltip("Dex Client - Connecting...")
 		t.mStatus.SetTitle("Status: Connecting...")
-		t.mConnect.Hide()
 		t.mDisconnect.Show()
 		t.mDisconnect.Enable()
-		t.mOpenHQ.Disable()
 
 	case trayStateConnected:
 		tooltip := "Dex Client - Connected"
@@ -341,10 +524,31 @@ func (t *clientTray) updateUI() {
 		}
 		systray.SetTooltip(tooltip)
 		t.mStatus.SetTitle(statusText)
-		t.mConnect.Hide()
 		t.mDisconnect.Show()
 		t.mDisconnect.Enable()
+		t.mAddHQ.Show()
+		t.mOpenHQ.Show()
 		t.mOpenHQ.Enable()
+		t.mDashboard.Show()
+
+	case trayStateError:
+		statusText := "Error"
+		if errorMsg != "" {
+			statusText = fmt.Sprintf("Error: %s", errorMsg)
+		}
+		systray.SetTooltip(fmt.Sprintf("Dex Client - %s", statusText))
+		t.mStatus.SetTitle(statusText)
+		// Show appropriate retry options based on whether we have config
+		configPath := filepath.Join(t.dataDir, "config.json")
+		if _, err := os.Stat(configPath); err == nil {
+			// Have config — show connect
+			t.mConnect.Show()
+			t.mConnect.Enable()
+		} else {
+			// No config — show sign up/in
+			t.mSignUp.Show()
+			t.mSignIn.Show()
+		}
 	}
 }
 
@@ -353,6 +557,21 @@ func (t *clientTray) openHQ() {
 	url := t.hqURL
 	t.mu.Unlock()
 
+	if url == "" {
+		return
+	}
+	openBrowser(url)
+}
+
+func (t *clientTray) openDashboard() {
+	openBrowser(t.centralURL + "/dashboard")
+}
+
+func (t *clientTray) openAddHQ() {
+	openBrowser(t.centralURL + "/onboarding")
+}
+
+func openBrowser(url string) {
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "darwin":
@@ -375,12 +594,18 @@ func (t *clientTray) openHQ() {
 func (t *clientTray) setIcon(state trayState) {
 	var icon []byte
 	switch state {
+	case trayStateUnauthenticated:
+		icon = generateIcon(color.RGBA{R: 150, G: 150, B: 150, A: 255}) // Gray
+	case trayStateAuthenticating, trayStateEnrolling:
+		icon = generateIcon(color.RGBA{R: 100, G: 150, B: 230, A: 255}) // Blue
 	case trayStateDisconnected:
 		icon = generateIcon(color.RGBA{R: 180, G: 50, B: 50, A: 255}) // Red
 	case trayStateConnecting:
 		icon = generateIcon(color.RGBA{R: 150, G: 150, B: 150, A: 255}) // Gray
 	case trayStateConnected:
 		icon = generateIcon(color.RGBA{R: 50, G: 180, B: 50, A: 255}) // Green
+	case trayStateError:
+		icon = generateIcon(color.RGBA{R: 230, G: 160, B: 30, A: 255}) // Orange/Amber
 	}
 	systray.SetIcon(icon)
 }
