@@ -88,6 +88,14 @@ jobs:
           ./scripts/build-macos-app.sh dist
           cd dist && zip -r ../DexClient-${{ matrix.arch }}.app.zip DexClient.app
 
+      - name: Build macOS installer package
+        if: matrix.os == 'darwin'
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          chmod +x scripts/build-macos-pkg.sh
+          DEX_BINARY=./dex APP_BUNDLE=./dist/DexClient.app ./scripts/build-macos-pkg.sh dist
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
@@ -100,6 +108,13 @@ jobs:
         with:
           name: DexClient-${{ matrix.arch }}-app
           path: DexClient-*.app.zip
+
+      - name: Upload macOS pkg
+        if: matrix.os == 'darwin'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Dex-${{ matrix.arch }}-pkg
+          path: dist/Dex-*.pkg
 
   release:
     needs: build
@@ -121,6 +136,7 @@ jobs:
           files: |
             artifacts/*.tar.gz
             artifacts/*.app.zip
+            artifacts/*.pkg
           generate_release_notes: true
           draft: false
           prerelease: ${{ contains(github.ref_name, '-') }}
