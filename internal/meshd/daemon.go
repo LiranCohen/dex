@@ -319,6 +319,15 @@ func createBackend(ctx context.Context, logf logger.Logf, logID logid.PublicID, 
 	}
 	lb.SetVarRoot(cfg.StateDir)
 
+	// Start netstack — this sets ns.ready=true so handleLocalPackets can
+	// intercept DNS queries to the service IP (10.200.0.1:53) via the TUN
+	// pre-filter hook. Without this, all DNS packets are silently dropped.
+	if ns != nil {
+		if err := ns.Start(lb); err != nil {
+			return nil, fmt.Errorf("netstack.Start: %w", err)
+		}
+	}
+
 	return lb, nil
 }
 
