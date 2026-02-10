@@ -711,8 +711,26 @@ func (s *Server) Start() error {
 		if s.certFile != "" {
 			dexScheme = "https"
 		}
-		if err := sp.Expose("dex-api", 8080, fmt.Sprintf("%s://%s", dexScheme, dexAddr)); err != nil {
+		dexTarget := fmt.Sprintf("%s://%s", dexScheme, dexAddr)
+		if err := sp.Expose("dex-api", 8080, dexTarget); err != nil {
 			fmt.Printf("Warning: failed to expose Dex API on mesh: %v\n", err)
+		}
+
+		// Expose Dex API on mesh port 80 (HTTP).
+		// This enables browsers to access HQ via http://{hostname}.{namespace}.{publicDomain}
+		// without needing to specify a port number.
+		if err := sp.Expose("dex-api-http", 80, dexTarget); err != nil {
+			fmt.Printf("Warning: failed to expose Dex API on mesh port 80: %v\n", err)
+		}
+
+		// Expose Dex API on mesh port 443 with TLS (ACME certificate from Let's Encrypt).
+		// This enables browsers to access HQ via https://{hostname}.{namespace}.{publicDomain}
+		// with a real TLS certificate, resolved via mesh DNS.
+		if err := sp.ExposeTLS("dex-api-tls", 443, dexTarget); err != nil {
+			fmt.Printf("Warning: failed to expose Dex API on mesh port 443 (TLS): %v\n", err)
+			// This is non-fatal — the node might not have CertDomains configured yet
+			// (e.g., Central hasn't been updated, or public domain is not set).
+			// Ports 80 and 8080 still work as fallback.
 		}
 	}
 

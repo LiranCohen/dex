@@ -357,6 +357,22 @@ func (c *Client) Listen(network, addr string) (net.Listener, error) {
 	return c.server.Listen(network, addr)
 }
 
+// ListenTLS creates a TLS listener on the mesh network.
+// It uses the built-in ACME dns-01 challenge flow to obtain real Let's Encrypt
+// certificates for the node's CertDomain (e.g., hq.ddd.enbox.id).
+// The network parameter should be "tcp".
+// The address should be in the form ":port".
+func (c *Client) ListenTLS(network, addr string) (net.Listener, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	if c.server == nil {
+		return nil, fmt.Errorf("mesh not connected")
+	}
+
+	return c.server.ListenTLS(network, addr)
+}
+
 // LocalClient returns the local client for advanced operations.
 // This provides access to the underlying tsnet client for
 // operations not exposed by the Client wrapper.

@@ -146,7 +146,23 @@ func (t *clientTray) connect() {
 		return
 	}
 
-	// Fall back to userspace tsnet
+	// If the daemon is installed but not yet running, wait for it
+	// instead of falling through to tsnet (which will fail on root-owned state files).
+	if meshd.IsInstalled() {
+		log.Printf("Mesh daemon is installed but not yet running, waiting for socket...")
+		if err := meshd.WaitForSocket(meshd.SocketPath, 30*time.Second); err != nil {
+			log.Printf("Timed out waiting for mesh daemon: %v", err)
+			t.mu.Lock()
+			t.state = trayStateDisconnected
+			t.mu.Unlock()
+			t.updateUI()
+			return
+		}
+		t.connectViaDaemon()
+		return
+	}
+
+	// No daemon installed — fall back to userspace tsnet
 	t.connectViaTsnet()
 }
 

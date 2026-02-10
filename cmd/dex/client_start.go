@@ -56,7 +56,17 @@ func runClientStart(args []string) error {
 		return runClientViaDaemon(config)
 	}
 
-	// No daemon running — fall back to userspace tsnet
+	// If the daemon is installed but not yet running, wait for it
+	// instead of falling through to tsnet (which will fail on root-owned state files).
+	if meshd.IsInstalled() {
+		fmt.Println("Mesh daemon is installed but not yet running, waiting...")
+		if err := meshd.WaitForSocket(meshd.SocketPath, 30*time.Second); err != nil {
+			return fmt.Errorf("mesh daemon is installed but not running: %w\nStart it with: sudo launchctl load /Library/LaunchDaemons/com.dex.meshd.plist", err)
+		}
+		return runClientViaDaemon(config)
+	}
+
+	// No daemon installed — fall back to userspace tsnet
 	fmt.Println("Tip: Install the mesh daemon for full OS-level connectivity:")
 	fmt.Println("  sudo dex meshd install")
 	fmt.Println()

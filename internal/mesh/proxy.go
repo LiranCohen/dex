@@ -68,6 +68,44 @@ func (sp *ServiceProxy) Expose(name string, meshPort int, targetURL string) erro
 	return nil
 }
 
+// ExposeTLS creates a TLS mesh listener on meshPort and reverse-proxies all traffic
+// to the given local target URL (e.g., "http://127.0.0.1:8080").
+// The TLS certificate is obtained automatically via ACME dns-01 challenges
+// through the control server (Central), resulting in a real Let's Encrypt certificate.
+func (sp *ServiceProxy) ExposeTLS(name string, meshPort int, targetURL string) error {
+	target, err := url.Parse(targetURL)
+	if err != nil {
+		return fmt.Errorf("parse target URL %q: %w", targetURL, err)
+	}
+
+	ln, err := sp.client.ListenTLS("tcp", fmt.Sprintf(":%d", meshPort))
+	if err != nil {
+		return fmt.Errorf("mesh listen TLS on :%d for %s: %w", meshPort, name, err)
+	}
+
+	proxy := httputil.NewSingleHostReverseProxy(target)
+	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
+		sp.logf("mesh proxy %s: %v\n", name, err)
+		w.WriteHeader(http.StatusBadGateway)
+	}
+
+	srv := &http.Server{Handler: proxy}
+
+	sp.mu.Lock()
+	sp.listeners = append(sp.listeners, ln)
+	sp.servers = append(sp.servers, srv)
+	sp.mu.Unlock()
+
+	go func() {
+		sp.logf("mesh: exposing %s on mesh port %d (TLS) → %s\n", name, meshPort, targetURL)
+		if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
+			sp.logf("mesh proxy %s stopped: %v\n", name, err)
+		}
+	}()
+
+	return nil
+}
+
 // Stop gracefully shuts down all proxy servers and closes listeners.
 func (sp *ServiceProxy) Stop() {
 	sp.mu.Lock()

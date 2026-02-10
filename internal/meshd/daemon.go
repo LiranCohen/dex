@@ -346,6 +346,12 @@ func IsRunningAt(socketPath string) bool {
 	return true
 }
 
+// IsInstalled checks if the daemon has been installed as a system service.
+// On macOS, this checks for the LaunchDaemon plist file.
+func IsInstalled() bool {
+	return isInstalled()
+}
+
 // WaitForSocket waits up to timeout for the daemon socket to become available.
 func WaitForSocket(socketPath string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
