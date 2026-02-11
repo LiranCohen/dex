@@ -69,6 +69,7 @@ func (db *DB) Migrate() error {
 		migrationWorkers,
 		migrationForgejoConfig,
 		migrationMeshOnboardingStatus,
+		migrationDexProfile,
 	}
 
 	for i, migration := range migrations {
@@ -553,4 +554,19 @@ CREATE TABLE IF NOT EXISTS mesh_onboarding_status (
 );
 
 CREATE INDEX IF NOT EXISTS idx_mesh_onboarding_user ON mesh_onboarding_status(user_id);
+`
+
+const migrationDexProfile = `
+-- Dex personality profile from Central (singleton - only one row).
+-- Populated by the tray app during bootstrap after enrollment.
+CREATE TABLE IF NOT EXISTS dex_profile (
+	id INTEGER PRIMARY KEY CHECK (id = 1),
+	traits TEXT,
+	greeting_style TEXT,
+	catchphrase TEXT,
+	avatar BLOB,
+	avatar_url TEXT,
+	onboarding_messages TEXT,
+	created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
 `

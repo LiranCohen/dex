@@ -2,7 +2,9 @@ package setup
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -328,6 +330,128 @@ func (h *Handler) HandleWorkspaceSetup(c echo.Context) error {
 		"workspace_path":  workspacePath,
 		"workspace_ready": true,
 	})
+}
+
+// BootstrapDexProfileRequest is the request body for POST /setup/dex-profile.
+type BootstrapDexProfileRequest struct {
+	Traits             []string        `json:"traits"`
+	GreetingStyle      string          `json:"greeting_style"`
+	Catchphrase        string          `json:"catchphrase"`
+	AvatarURL          string          `json:"avatar_url,omitempty"`
+	OnboardingMessages json.RawMessage `json:"onboarding_messages,omitempty"`
+}
+
+// HandleBootstrapDexProfile handles POST /setup/dex-profile.
+// This is called by the tray app after enrollment to forward the Dex personality
+// data from Central to HQ. It's a one-time operation — once stored, the profile
+// cannot be overwritten.
+// This endpoint is pre-auth (no passkey required) since the tray calls it during
+// the bootstrap window before the user has set up a passkey on HQ.
+func (h *Handler) HandleBootstrapDexProfile(c echo.Context) error {
+	// One-time use: reject if profile already exists
+	if h.db.HasDexProfile() {
+		return echo.NewHTTPError(http.StatusConflict, "dex profile already exists")
+	}
+
+	// Only allow during onboarding
+	progress, err := h.db.GetOnboardingProgress()
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to check onboarding status")
+	}
+	if progress.IsComplete() {
+		return echo.NewHTTPError(http.StatusForbidden, "onboarding already completed")
+	}
+
+	var req BootstrapDexProfileRequest
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
+	}
+
+	if req.GreetingStyle == "" || req.Catchphrase == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "greeting_style and catchphrase are required")
+	}
+
+	profile := &db.DexProfile{
+		Traits:             req.Traits,
+		GreetingStyle:      req.GreetingStyle,
+		Catchphrase:        req.Catchphrase,
+		AvatarURL:          req.AvatarURL,
+		OnboardingMessages: req.OnboardingMessages,
+	}
+
+	// Download avatar from Central if URL is provided
+	if req.AvatarURL != "" {
+		avatarBytes, err := downloadAvatar(req.AvatarURL)
+		if err != nil {
+			// Non-fatal — store the profile without the avatar
+			fmt.Printf("Warning: failed to download Dex avatar: %v\n", err)
+		} else {
+			profile.Avatar = avatarBytes
+		}
+	}
+
+	if err := h.db.SaveDexProfile(profile); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("failed to save profile: %v", err))
+	}
+
+	return c.JSON(http.StatusOK, map[string]any{
+		"success": true,
+		"message": "Dex profile stored",
+	})
+}
+
+// HandleGetDexProfile handles GET /setup/dex-profile.
+// Returns the stored Dex profile for the onboarding frontend.
+func (h *Handler) HandleGetDexProfile(c echo.Context) error {
+	profile, err := h.db.GetDexProfile()
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to get profile")
+	}
+	if profile == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "no dex profile")
+	}
+
+	return c.JSON(http.StatusOK, map[string]any{
+		"traits":              profile.Traits,
+		"greeting_style":      profile.GreetingStyle,
+		"catchphrase":         profile.Catchphrase,
+		"has_avatar":          len(profile.Avatar) > 0,
+		"onboarding_messages": profile.OnboardingMessages,
+	})
+}
+
+// HandleGetDexAvatar handles GET /setup/dex-avatar.
+// Returns the stored Dex avatar as a PNG image.
+func (h *Handler) HandleGetDexAvatar(c echo.Context) error {
+	profile, err := h.db.GetDexProfile()
+	if err != nil || profile == nil || len(profile.Avatar) == 0 {
+		return echo.NewHTTPError(http.StatusNotFound, "avatar not available")
+	}
+
+	c.Response().Header().Set("Content-Type", "image/png")
+	c.Response().Header().Set("Cache-Control", "private, max-age=3600")
+	return c.Blob(http.StatusOK, "image/png", profile.Avatar)
+}
+
+// downloadAvatar fetches the avatar image from a URL.
+func downloadAvatar(avatarURL string) ([]byte, error) {
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Get(avatarURL)
+	if err != nil {
+		return nil, fmt.Errorf("fetching avatar: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("avatar fetch returned %d", resp.StatusCode)
+	}
+
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 5*1024*1024)) // 5MB limit
+	if err != nil {
+		return nil, fmt.Errorf("reading avatar: %w", err)
+	}
+
+	return data, nil
 }
 
 // initWorkspaceRepo initializes the dex-workspace git repository

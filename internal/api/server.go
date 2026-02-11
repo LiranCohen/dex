@@ -485,6 +485,11 @@ func (s *Server) registerRoutes() {
 	// Validation endpoints
 	v1.POST("/setup/validate/anthropic-key", s.setupHandler.HandleValidateAnthropicKey)
 
+	// Dex profile bootstrap (tray → HQ, pre-auth, one-time use)
+	v1.POST("/setup/dex-profile", s.setupHandler.HandleBootstrapDexProfile)
+	v1.GET("/setup/dex-profile", s.setupHandler.HandleGetDexProfile)
+	v1.GET("/setup/dex-avatar", s.setupHandler.HandleGetDexAvatar)
+
 	// Protected endpoints (require JWT auth)
 	// Use middleware if token config is available, otherwise allow all (dev mode)
 	protected := v1.Group("")

@@ -274,8 +274,8 @@ func (t *clientTray) startBrowserAuth(mode string) {
 		return
 	}
 
-	// Auto-enroll
-	config, err := autoEnroll(t.centralURL, exchangeResp.Token, exchangeResp.Namespace, t.dataDir)
+	// Auto-enroll (include Dex profile from Central for forwarding to HQ)
+	config, err := autoEnroll(t.centralURL, exchangeResp.Token, exchangeResp.Namespace, t.dataDir, exchangeResp.DexProfile)
 	if err != nil {
 		t.setError(fmt.Sprintf("Enrollment failed: %v", err))
 		return
@@ -286,10 +286,17 @@ func (t *clientTray) startBrowserAuth(mode string) {
 	if publicDomain == "" {
 		publicDomain = "enbox.id"
 	}
+	hqURL := fmt.Sprintf("https://hq.%s.%s", config.Namespace, publicDomain)
 	t.mu.Lock()
-	t.hqURL = fmt.Sprintf("https://hq.%s.%s", config.Namespace, publicDomain)
+	t.hqURL = hqURL
 	t.authToken = exchangeResp.Token
 	t.mu.Unlock()
+
+	// Forward Dex profile to HQ in the background (best-effort, non-blocking).
+	// This sends the personality data from Central so HQ can show Dex during its onboarding.
+	if config.DexProfile != nil {
+		go forwardDexProfileToHQ(hqURL, config.DexProfile)
+	}
 
 	// Install meshd (will prompt for sudo via osascript on macOS)
 	installMeshdIfNeeded()

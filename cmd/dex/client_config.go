@@ -15,6 +15,17 @@ type ClientConfig struct {
 	Mesh       ClientMeshConfig   `json:"mesh"`
 	CentralURL string             `json:"central_url,omitempty"` // Central server URL for API calls
 	AuthToken  string             `json:"auth_token,omitempty"`  // Central session JWT for dashboard API calls
+	DexProfile *ClientDexProfile  `json:"dex_profile,omitempty"` // Dex personality from Central (for HQ bootstrap)
+}
+
+// ClientDexProfile holds the Dex personality data received from Central.
+// Stored in client config and forwarded to HQ during first connection.
+type ClientDexProfile struct {
+	Traits             []string        `json:"traits"`
+	GreetingStyle      string          `json:"greeting_style"`
+	Catchphrase        string          `json:"catchphrase"`
+	AvatarURL          string          `json:"avatar_url,omitempty"`
+	OnboardingMessages json.RawMessage `json:"onboarding_messages,omitempty"`
 }
 
 // ClientDomainConfig contains domain configuration from Central.

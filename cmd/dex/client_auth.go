@@ -39,9 +39,20 @@ type authCallback struct {
 
 // authExchangeResponse is the response from POST /api/v1/auth/exchange.
 type authExchangeResponse struct {
-	Token     string `json:"token"`
-	ExpiresAt string `json:"expires_at"`
-	Namespace string `json:"namespace"`
+	Token      string                 `json:"token"`
+	ExpiresAt  string                 `json:"expires_at"`
+	Namespace  string                 `json:"namespace"`
+	DexProfile *dexProfileFromCentral `json:"dex_profile,omitempty"`
+}
+
+// dexProfileFromCentral is the Dex personality data included in the auth exchange response
+// from Central. The tray stores this and forwards it to HQ during bootstrap.
+type dexProfileFromCentral struct {
+	Traits             []string        `json:"traits"`
+	GreetingStyle      string          `json:"greeting_style"`
+	Catchphrase        string          `json:"catchphrase"`
+	AvatarURL          string          `json:"avatar_url,omitempty"`
+	OnboardingMessages json.RawMessage `json:"onboarding_messages,omitempty"`
 }
 
 // enrollmentKeyResponse is the response from POST /api/v1/enrollment-keys.
@@ -301,7 +312,7 @@ func createClientEnrollmentKey(centralURL, authToken, hostname string) (*enrollm
 
 // autoEnroll performs the full enrollment flow: create enrollment key,
 // generate machine key, call enroll API, save config.
-func autoEnroll(centralURL, authToken, namespace, dataDir string) (*ClientConfig, error) {
+func autoEnroll(centralURL, authToken, namespace, dataDir string, dexProfile *dexProfileFromCentral) (*ClientConfig, error) {
 	log.Printf("Auto-enrolling with Central...")
 
 	// 1. Determine hostname
@@ -372,6 +383,17 @@ func autoEnroll(centralURL, authToken, namespace, dataDir string) (*ClientConfig
 		},
 	}
 
+	// Store Dex profile from Central if available (for forwarding to HQ)
+	if dexProfile != nil {
+		config.DexProfile = &ClientDexProfile{
+			Traits:             dexProfile.Traits,
+			GreetingStyle:      dexProfile.GreetingStyle,
+			Catchphrase:        dexProfile.Catchphrase,
+			AvatarURL:          dexProfile.AvatarURL,
+			OnboardingMessages: dexProfile.OnboardingMessages,
+		}
+	}
+
 	configPath := filepath.Join(dataDir, "config.json")
 	if err := config.SaveClientConfig(configPath); err != nil {
 		return nil, fmt.Errorf("saving config: %w", err)
@@ -379,6 +401,56 @@ func autoEnroll(centralURL, authToken, namespace, dataDir string) (*ClientConfig
 
 	log.Printf("Enrolled as %s.%s", enrollResp.Hostname, enrollResp.Namespace)
 	return config, nil
+}
+
+// forwardDexProfileToHQ sends the Dex personality data to HQ's bootstrap endpoint.
+// This is best-effort — if HQ isn't reachable yet or the profile was already sent,
+// the error is logged but doesn't block enrollment. HQ may not be running yet when
+// this is called, so we retry a few times with backoff.
+func forwardDexProfileToHQ(hqURL string, profile *ClientDexProfile) {
+	url := strings.TrimSuffix(hqURL, "/") + "/api/v1/setup/dex-profile"
+
+	payload := map[string]any{
+		"traits":              profile.Traits,
+		"greeting_style":      profile.GreetingStyle,
+		"catchphrase":         profile.Catchphrase,
+		"avatar_url":          profile.AvatarURL,
+		"onboarding_messages": profile.OnboardingMessages,
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		log.Printf("Failed to marshal Dex profile: %v", err)
+		return
+	}
+
+	client := &http.Client{Timeout: 60 * time.Second}
+
+	// Retry with backoff — HQ might not be up yet
+	backoffs := []time.Duration{2 * time.Second, 5 * time.Second, 10 * time.Second, 30 * time.Second, 60 * time.Second}
+	for i, wait := range backoffs {
+		time.Sleep(wait)
+
+		resp, err := client.Post(url, "application/json", bytes.NewReader(body))
+		if err != nil {
+			log.Printf("Dex profile forward attempt %d/%d failed: %v", i+1, len(backoffs), err)
+			continue
+		}
+		_ = resp.Body.Close()
+
+		if resp.StatusCode == http.StatusOK {
+			log.Printf("Dex profile forwarded to HQ successfully")
+			return
+		}
+		if resp.StatusCode == http.StatusConflict {
+			log.Printf("Dex profile already exists on HQ")
+			return
+		}
+
+		log.Printf("Dex profile forward attempt %d/%d: HTTP %d", i+1, len(backoffs), resp.StatusCode)
+	}
+
+	log.Printf("Warning: failed to forward Dex profile to HQ after %d attempts", len(backoffs))
 }
 
 // installMeshdWithPrivileges installs the mesh daemon using an OS privilege prompt.
